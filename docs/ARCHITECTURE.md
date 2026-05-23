@@ -1,0 +1,173 @@
+﻿# 架构说明
+
+适用版本：v1.4.0。
+
+DeepSeek Mobile 是一个本地优先的 Web 应用：浏览器保存对话状态，Python HTTP 后端负责模型调用、搜索、长期记忆、文件解析、OCR、鉴权和静态资源服务。
+
+## 模块划分
+
+| 模块 | 职责 |
+| --- | --- |
+| `app.py` | 兼容启动入口，保留 `python app.py` 的使用方式。 |
+| `deepseek_mobile/app.py` | 进程启动、日志、MIME 注册、缓存清理和 HTTP 服务绑定。 |
+| `deepseek_mobile/web/server.py` | HTTP 路由、本地 token 鉴权、流式 multipart 解析、JSON/NDJSON 响应和静态文件服务。 |
+| `deepseek_mobile/services/deepseek_client.py` | 请求校验、记忆/搜索编排、Prompt 组装、DeepSeek 同步和流式调用。 |
+| `deepseek_mobile/services/multi_agent.py` | Leader + 多 Agent 编排：任务拆解、worker 并行调用、搜索预算共享和最终综合。 |
+| `deepseek_mobile/services/agent_runs.py` | 持久化 Agent Run、indexed event log、派生快照、断线重连游标、后台 run registry、计划确认和重跑。 |
+| `deepseek_mobile/services/chat_payload.py` | 前端消息展开和附件计数。 |
+| `deepseek_mobile/services/context_compressor.py` | 长对话的增量上下文摘要生成。 |
+| `deepseek_mobile/services/memory.py` | 本地长期记忆 CRUD、作用域过滤、检索排序、显式“记住/忘记”命令解析、记忆建议和冲突检测。 |
+| `deepseek_mobile/services/reminders.py` | 本地提醒队列、到期查询和轻量中文提醒解析。 |
+| `deepseek_mobile/services/projects.py` | 持久项目空间、项目元数据、项目文档库写入和删除。 |
+| `deepseek_mobile/services/search.py` | 搜索触发、多轮 Tavily 查询、结果聚合、缓存和 Prompt 格式化。 |
+| `deepseek_mobile/services/tools.py` | DeepSeek function calling 本地工具：受限数学计算、缓存文件搜索、公共网页二次精读、提醒、记忆、项目文件、数据转换、图表规格、多查询搜索对比和长期记忆建议。 |
+| `deepseek_mobile/services/files.py` | 文件文本抽取、分块、缓存和附件上下文检索。 |
+| `deepseek_mobile/services/ocr.py` | 可选的本地 Tesseract OCR，支持扫描 PDF 转图识别和图片文字识别。 |
+| `deepseek_mobile/core/config.py` | 不可变设置、环境变量解析、兼容常量和 JSON 日志。 |
+| `deepseek_mobile/core/errors.py` | `AppError` 和稳定 API 错误码。 |
+| `deepseek_mobile/core/utils.py` | 模型名、评分、文件名、时间戳、token URL 和局域网 IP 工具函数。 |
+
+前端使用原生 ES modules，不引入打包工具。`static/app.js` 只负责启动 `static/modules/chat.js`；`network.js` 处理 token、认证头、API 请求和上传；`markdown.js` 处理 Markdown、代码块和公式 glue；`settings.js` 放 PWA 注册等设置侧辅助；`panels.js` 放跨面板纯工具。v0.8.2 起，图表、朗读文本、流式解析、格式化、规范化和提醒短语解析等纯函数拆到独立模块，索引见 `docs/FRONTEND_MODULES.md`。`math_core.js` 和 `seek_core.js` 仍以全局 IIFE 方式加载，避免扩大迁移面。
+
+v0.7.4 的 UI/UX 能力都保留在前端：命令面板和全局快捷键由 `chat.js` 统一处理；主题与字号通过 CSS 变量写入 `document.documentElement`；离线壳在 `/api/config` 失败时切换 `offlineMode`，只允许查看本地历史；代码块、公式复制、Mermaid 轻量 flowchart 和表格 SVG 图表由 `markdown.js` 输出结构，`chat.js` 负责点击行为。
+v0.8.2 的手机输入能力仍保持前端优先：语音输入使用浏览器 `SpeechRecognition` / `webkitSpeechRecognition`，语音语言保存在 `localStorage`；回复朗读使用 `speechSynthesis`，播放前会清理公式、引用 pin、表格分隔符和代码块，再按短句排队播放。“引用所选”监听浏览器 selection，仅在选区完全落在同一条助手回复内时启用输入区按钮；点击后把片段写入 `state.quoteDraft`，下一轮请求由 `quoteAwareContent()` 注入“关于上文中的这一段”提示。PWA Share Target 是唯一新增的入口流：`POST /share-target` 只做 Host 白名单校验并把分享内容写入内存缓存，随后通过 `303 /?share=<id>` 回到 SPA；真正读取缓存的 `GET /api/share-target` 仍走本地 token 鉴权，前端确认后才写入草稿和附件列表。v0.8.3 的图标链路保持纯静态：`static/icons/` 放 SVG、favicon PNG、Apple touch icon、PWA any/maskable PNG 和通知 badge，`manifest.webmanifest` 只引用这些本地资源，`static/sw.js` 预缓存整套图标并在 Web Notification 中使用真实 icon/badge。
+
+v0.8.4 的动效层仍由原生 CSS 和少量 DOM 状态完成：`static/styles.css` 定义统一 motion token、按下反馈、面板/遮罩过渡、消息和 Toast 入场动画，并尊重 `prefers-reduced-motion`。`chat.js` 只给新创建消息标记短暂 `data-fresh`，同时把流式输出更新放进 `requestAnimationFrame` 队列，避免每个 token 事件都立即重绘。
+
+v0.8.5 继续保持前端本地状态边界：思考摘要只根据当前消息对象的 `streaming`、`content` 和完成时间渲染，不新增协议字段；“引用所选”在按钮按下阶段缓存最近有效的助手选区，避免浏览器焦点切换清空 selection 后丢失片段。
+
+v0.8.6 为前端消息对象增加可选 `reasoningEndedAt` 字段：首个正文 `content` 流事件到达时记录，用于把“思考用时”固定在思考阶段结束时；旧消息没有该字段时回退到 `completedAt`。`state.busy` 只表示有模型请求在途，发送、重生成、分叉和编辑仍会被拦截，但输入框、附件准备、语音输入、朗读和引用所选保持可用。
+
+v0.9.0 的侧边栏重构仍保持零 JS 迁移：所有按钮 id 不变，只在 `index.html` 中移动入口位置，并通过 `styles.css` 把历史面板改为 header / list / footer 三段式 flex 布局。历史列表独立滚动，底栏固定在面板底部，历史项隐藏时间 meta 行以接近单行标题列表。
+
+v0.9.1 强化 DeepSeek function calling 链路：工具调用回合会把 assistant 的 `content` 和 `reasoning_content` 一起追加回下一轮请求，满足 V4-Pro thinking 模式对完整推理内容回传的要求。内置工具定义启用 strict schema，工具描述包含使用边界；系统提示会鼓励模型在多个独立 URL 或文件检索时并行发起工具调用。前端设置面板新增思考强度，发送请求时通过 `reasoningEffort` 传给后端。
+v0.9.2 扩展上传与前端交互层：`core.config.FileSettings` 新增 200MB 单文件上限和 220MB multipart 请求体上限，`web.server.read_multipart_form()` 在 `/api/file-text`、`/api/project-files` 和 PWA Share Target 入口统一校验，`/api/config` 下发 `uploadLimits` 供前端预检。v0.9.3 将自动联网搜索从后端关键词预判改为模型驱动的 `web_search` 工具循环：auto 模式只暴露工具，force/on 模式保留 round 1 预取，后续搜索由模型继续决定。v0.9.4 在搜索结果中分配 `[^Wn]` 引用、增加 `/api/title` 标题生成端点，并在前端以本地 timeline 保留 reasoning/search 事件顺序。v0.9.6 修复搜索 timeline 的 SVG 图标、卡住状态和引用候选去重，并扩展本地工具集；安全的相邻工具可并行执行，提醒、记忆删除和记忆建议等副作用工具保持串行。v1.0.0 将前端外观升级为 `data-theme` × `data-mode` 的主题系统，首屏 inline boot script 负责提前写入主题 dataset，`styles.css` 通过语义 token 支撑 ChatGPT、Linear、Notion 和 Arc 四种风格。前端仍不新增打包工具，`chat.js` 直接管理拖拽/粘贴附件、图片本地缩略图和 lightbox、应用内确认弹窗、toast action、快捷键速查、live region、焦点陷阱、软键盘安全区变量和选区浮动引用提问。v1.0.1 恢复 force/on 模式下最多 3 条互补预取查询，并在中断、刷新或历史恢复时把遗留的 `searching` 搜索轮收尾为错误状态。v1.1.1 仅调整 `static/styles.css` 的主题 token 和主题特定规则，强化四套视觉风格在 light / dark / system 下的一致性和辨识度。v1.1.5 在同一 `/api/chat` 流式入口上增加 `agentMode` 分支，由 `multi_agent.py` 运行 Leader/worker/Synthesizer 编排；搜索工具增加普通 turn 硬上限和多 Agent 共享预算，前端同时清理持久化的顶层 `message.search` 状态。v1.2.5 保持 Researcher 和 Critic 层间串行，只让 Coder / Reasoner 中间层并行；worker 的 `content`、`reasoning`、`search` 分别转成 `agent_delta`、`agent_reasoning`、`agent_search`，前端按 `phase` 写入对应 Activity Agent 卡片。v1.2.6 增加 Agent 展示模式、已完成卡片默认折叠、稳定 Agent step id 和 request-level cancel token；worker 工具状态改为独立 `agent_note`，详细模式显示，简洁模式隐藏。v1.2.7 把 agent timeline 的纯函数抽到 `static/modules/agent_timeline.js` 独立模块；`createAgentStepId(message, phase)` 给 Leader 两轮（拆解 + 综合）生成不同 id，`normalizeTimeline` 给旧 history 重复 id 补号去重；折叠策略改为 Leader / 错误 Agent 默认展开、其他完成 worker 默认折叠。后端 `execute_tool_calls` 在 `cancel_event` 已 set 时跳过真实工具调用、并行 middle tier 在 cancel 后通过 `emit_gate` 吞掉 worker 的 `agent_delta`，前端 timeline 不会在用户点"停止生成"之后继续冒字。v1.2.8 在多 Agent 事件协议上扩展两个字段：done / error 事件携带 `durationMs`（毫秒整数），由 `multi_agent.py` 在 Leader 拆解 / Leader 综合 / 串行 worker / 并行 worker / 超时 fallback 各分支用 `time.monotonic()` 配对计算；失败 Agent 的输出多带一个 `failed: True` 标记，让 `synthesis_messages` 在 user prompt 末尾追加"以下 Agent 本轮执行失败"提示，引导 Synthesizer 在最终回答里告知用户该角色缺席。`execute_tool_calls` 在 results 组装前再做一次 cancel 判定，把并行 batch 中途取消时未拿到 result 的 slot 统一替换为 cancelled output，cancel 语义在前后端各层保持一致。v1.2.9 不改后端多 Agent 架构，集中修复前端 timeline 持久化：`normalizeDurationMs()` 让 `durationMs: null` 保持为无耗时数据，Activity 摘要条显示 "N 个 Agent"，失败 chip 以轻量边框突出。v1.3.0 开始把多 Agent 做成工作台体验：`agentExecutionReport(message)` 从前端 timeline 生成可复制的 Agent 执行报告；后端在 `done.diagnostics.agentDurations` 中输出 worker 耗时表，便于性能诊断。
+
+v1.3.4 保持多 Agent DAG 不变，重点修 Activity 面板的前端状态边界：用户手动关闭某条流式消息的 Activity 侧栏后，`chat.js` 会把该 message id 加入 `activityAutoDismissedMessageIds`，后续 token 不再触发自动打开；用户手动点击“思考与活动”会清掉该标记。Activity 渲染现在会在 timeline 缺少 reasoning step 时把 `message.reasoning` 作为 fallback 补回，避免 Leader 思考在切到 worker Agent 后消失。Agent 模式会固化到 assistant message，用于稳定 75 分钟前端请求超时和面板打开条件。
+
+v1.3.5 保持 DAG 和事件协议不变，调整 worker 请求前缀结构：`systemPrompt` 只保留原系统提示、Agent 角色提示、安全/搜索权限约束和四段输出模板；`build_prior_context()` 生成的前序 Agent 摘要与当前子任务由 `agent_messages()` 追加到历史对话之后。这样动态内容不会插在稳定 system prompt 与长历史之间，DeepSeek prefix cache 更容易命中可复用的历史前缀。
+
+v1.3.6 进一步统一 worker `systemPrompt`：不同 Agent 的 `profile["system"]`、搜索权限说明、前序摘要和当前子任务全部由 `agent_messages()` 追加到历史之后。请求前缀因此变为“统一 system prompt → 同一份历史对话 → 动态 Agent 指令”，让同一轮多个 worker 也能尽量共享 DeepSeek prefix cache。
+
+v1.3.7 不再改 prompt 结构，只补多 Agent cache 观测链路：`_run_agent_once()` 保留每个 worker 的 `usage`，`synthesize_answer()` 捕获 Synthesizer 的 `done.usage`，最终由 `agent_cache_for_diagnostics()` 汇总为 `done.diagnostics.agentCache`。这让性能诊断能区分 prefix cache 实际未命中和 UI 未展示聚合数据。
+
+v1.3.8 继续只打磨 cache diagnostics：`cache_usage_summary()` 以 `totalTokens > 0` 判断 `hasData`，无数据时 `hitRate=null`，真实全部 miss 时保留 `0.0%`。前端诊断面板据此显示“无数据”或具体 hit/miss，避免把失败、取消或上游未返回 usage 误判成缓存完全未命中。
+
+v1.3.9 只做诊断面板显示层 polish：Agent cache label 中文化，`formatAgentCacheByAgent()` 输出多行文本，`.diagnostics-row.is-multiline` 负责排版；后端多 Agent 编排、prompt 前缀结构和 cache 统计口径均不变。
+
+v1.4.0 把多 Agent 从一次长 `/api/chat` 请求升级为可恢复 Agent Run。浏览器先 `POST /api/agent-runs` 创建 run，后端在 `.agent-runs/run_*.json` 中保存状态、计划、事件日志和派生快照，再由 `AgentRunRegistry` 启动后台线程执行。前端随后 attach `GET /api/agent-runs/{runId}/stream?after=N`；如果刷新、断网或手机息屏，重新读取 run detail/events 后从最后 `index` 继续接收。服务进程重启不会恢复旧线程，启动时会把遗留 `created` / `planning` / `running` run 标记为 `orphaned`。
+
+Agent Run 的事件日志是恢复 UI 的唯一事实源。`agent_runs.append_event()` 原子追加带 `runId`、`index`、`createdAt` 的事件，然后从事件更新 `finalAnswer`、`agentOutputs`、`diagnostics` 等快照。快照只服务快速读取；如果二者冲突，应优先按 events 重放。写入 run JSON 时使用唯一临时文件并对 Windows 短暂锁文件做替换重试，避免高频事件持久化时出现 `.json.tmp -> .json` 的拒绝访问。重跑 worker 时先发 `agent_reset` 清掉对应 Agent 卡片，再运行该 worker；需要重新综合时发 `final_reset` 清空最终答案。1.4.0 不做依赖级联重跑，重跑 Researcher 不会自动重跑 Coder / Reasoner / Critic。
+
+1.4.0 的 Agent 搜索预算仍只开放给 Researcher，但上限提高到单次 Agent Run 总计 12 次、单 Researcher 5 次，并允许 worker 工具循环最多 4 轮，方便“搜索 → 精读/比较 → 再补搜”的长资料任务；普通 `/api/chat` 搜索预算不随之放大。
+
+## 聊天流程
+
+```mermaid
+flowchart TD
+    A["浏览器 POST /api/chat"] --> B["web.server.handle_chat"]
+    B --> C["services.deepseek_client.prepare_deepseek_call"]
+    C --> D["services.memory.prepare_memory_state"]
+    C --> E["services.search.search_if_needed"]
+    C --> F["build_deepseek_request"]
+    F --> G["DeepSeek API"]
+    G --> I{"tool_calls?"}
+    I -- "是" --> J["services.tools.execute_tool_calls"]
+    J --> G
+    I -- "否" --> H["JSON 响应或 NDJSON 流"]
+```
+
+稳定 Prompt 前缀会尽量保持小而固定。`systemPrompt` 和 `contextSummary` 保留在 system message 中；每轮动态的记忆、搜索和继续生成上下文会注入最近一条 user message，以提升 DeepSeek prefix cache 命中率。
+
+## 对话与生产力
+
+v0.7.0 在前端会话层增加轻量生产力能力。对话仍以兼容旧数据的 `messages` 数组展示，但创建分支时会生成带 `branchParentId`、`branchFromMessageId` 和 `branchLabel` 的新 conversation，旧走向不会被覆盖。历史列表会展示分支来源、收藏状态和标签；标签、收藏、Seek 快照和消息内容共同参与历史全文搜索。
+
+输入框草稿每约 2 秒写入浏览器 `localStorage`，包括文本、未发送附件元数据和引用消息快照。页面恢复时会提示用户恢复或丢弃草稿。消息引用回复不会改变原消息，只是在下一条 user 消息前自动加入 Markdown 引用块。
+
+本地提醒由前端识别“提醒我”类输入并调用 `/api/reminders` 创建任务；后端把任务写入 `.reminders/reminders.json`。前端定时调用 `/api/reminders/due` 获取到期任务，再通过 Service Worker 的 `showNotification` 显示系统通知。提醒只在本地保存，不进入模型请求。
+
+## 项目空间与文档库
+
+v0.7.1 增加持久项目空间。项目元数据写入 `.projects/{projectId}/project.json`，项目文档索引写入 `.projects/{projectId}/files/{fileId}.json`。这条路径和临时附件 `.file-cache` 分离，因此不受 14 天 / 500 MB 临时缓存清理影响；用户删除项目时才会删除对应项目目录。
+
+前端通过项目侧栏创建、切换和上传文档。发送消息时，当前项目会生成 `projectId`、`projectName` 和 `projectAttachments` 快照，并与普通附件、Seek 参考文件一起合并到 user 消息的 `attachments`。后端的 `build_attachment_context()` 根据每个附件的 `projectId` 决定从项目文档库或临时缓存读取索引。
+
+文件 chunk 在写入时会保存一个轻量本地哈希向量。检索时先计算关键词分数，再叠加 query 与 chunk 向量的余弦相似度；这是无外部依赖的本地混合检索层，后续可以替换为 bge-m3 / sqlite-vec 等真正嵌入式向量库而不改变前端附件协议。
+
+模型看到的附件上下文会包含稳定引用 ID，例如 `F1-2`。前端 Markdown 渲染器会把 `[^F1-2]` 转成引用 pin，点击后调用 `/api/file-chunk` 读取对应文件片段并打开预览面板。
+
+## 联网搜索
+
+联网搜索由 `services.search` 编排。前端的搜索模式包括关闭、自动和强制；自动模式会由后端根据用户问题判断是否需要搜索。`/api/config` 中的 `hasSearch` 只表示服务端是否配置了 `TAVILY_API_KEY`，前端还会结合设置面板里填写的 Tavily Key 计算搜索按钮是否可用。多轮搜索会并行执行各个 query，聚合结果仍按 round 编号排序，进度事件按实际完成顺序更新。
+
+发起 `/api/chat` 时，前端会在本轮请求中携带可选的 `tavilyApiKey`。后端优先使用请求级 Key；如果没有提供，则回退到服务端环境变量 `TAVILY_API_KEY`。这样电脑端没有预设 Tavily 环境变量时，手机浏览器仍可在设置里临时填写 Key 后启用联网搜索。
+
+## 本地工具调用
+
+v0.7.2 在 DeepSeek 请求层接入 function calling；v0.7.3 增加 `suggest_memory`。`build_deepseek_request()` 默认把 `python_eval`、`search_files`、`fetch_url`、`web_search`、`suggest_memory` 以及 v0.9.6 的提醒、记忆、项目文件、数据转换、图表和多查询搜索对比工具定义加入请求体；如果前端传入 `toolsEnabled: false`，则不发送工具定义。
+
+同步调用由 `call_deepseek()` 驱动工具循环：当 DeepSeek 返回 `tool_calls` 时，后端调用 `services.tools.execute_tool_calls()`，把结果作为 `role=tool` 消息追加到请求，再向 DeepSeek 发起下一轮请求。流式调用会在 SSE delta 中拼接 `tool_calls` 参数，执行工具后通过 `system_note` 告知前端，然后继续下一轮流式请求。`web_search` 工具会把 Tavily 单轮搜索结果压缩后返回给模型，并把搜索 rounds 作为前端进度事件持续更新。同一回合重复 query 会复用缓存结果。v0.9.6 起，安全的相邻工具调用会并行执行并按原顺序回填结果；`create_reminder`、`forget_memory`、`suggest_memory` 和共享搜索 timeline 的工具保持串行。两种模式都最多允许 5 轮工具调用，避免模型陷入无限循环。
+
+`python_eval` 通过隔离的 Python 子进程执行表达式，只允许小型数学 AST、受控函数和 2 秒超时；`data_transform` 只支持 `extract_regex`、`json_path`、`csv_summary`、`number_summary`，不执行用户代码；`search_files` 只读取本地 `.file-cache` 与 `.projects/{id}/files` 的 JSON 索引；`list_project_files` / `read_file_chunk` 只走项目文档库和缓存 chunk；`fetch_url` 会先做 URL 和解析后 IP 校验，拒绝本地/私有/保留地址，再读取最多 2 MB 页面并写入 `.search-cache`；`suggest_memory` 只生成待确认建议，由前端弹窗让用户决定是否保存。
+
+## 长期记忆
+
+长期记忆保存在 `.memory/memories.json`，写入时使用进程内 `RLock` 和 `.memory/memories.lock` 跨进程锁保护读改写流程。每条记忆包含 `content`、`category`、`scope`、时间戳和稳定 id；`scope` 支持 `global`、`project:<id>` 和 `seek:<id>`。
+
+`prepare_memory_state()` 会根据请求的 `memoryScope`、最新 user 消息的 `projectId` 或 `seekId` 推断当前作用域。检索时只读取全局记忆和当前项目 / Seek 相关记忆，避免 A 项目里的背景被 B 项目对话误用。显式“记住：...”会写入当前作用域；“忘记 ...”只在全局和当前作用域内删除。
+
+模型可通过 `suggest_memory` 工具提出记忆建议。后端会先做敏感内容拦截和轻量冲突检测，然后通过 `memory_suggestion` 流事件或非流式响应的 `memorySuggestions` 返回给前端。只有用户确认后，前端才会调用 `/api/memory` 写入；如果存在冲突，保存接口返回 `memory_conflict`，用户确认替换后再带 `replaceIds` 重试。
+
+## Seek 助手
+
+Seek 助手是前端本地能力，推荐 Seek 和自定义 Seek 由 `static/app.js` 管理，通用的规范化、快照解析、同名检查、参考文件规范化和已知 id 判断放在 `static/seek_core.js`，便于用 Node 做纯函数测试。自定义 Seek 保存在浏览器 `localStorage`，包含名称、简介、专属指令、开场提示和参考文件元数据。
+
+发送消息时，前端会把当前 Seek 写入 user/assistant 消息快照，包括 `seekId`、`seekName`、`seekDescription`、`seekInstructions` 和 `seekReferenceAttachments`。后续继续生成、重新生成、编辑后重发、上下文压缩和 Markdown 导出都会读取消息快照，而不是读取当前全局 active Seek。这样即使用户中途切换或删除自定义 Seek，旧历史仍能显示当时的助手名称，并保持原来的系统提示词和参考文件语义。
+
+Seek 参考文件复用普通附件上传链路：编辑自定义 Seek 时，前端调用 `/api/file-text` 解析文件并保存返回的 `fileId`、文件名、分块数量和预览文本。实际请求 `/api/chat` 时，普通聊天附件仍只显示在用户消息上；Seek 参考文件会在构建 API 消息时合并到 user 消息的附件列表，交给 `services.files.build_attachment_context()` 按当前问题检索相关片段。assistant 消息只保存 Seek 快照，不把参考文件作为 assistant 附件展开。
+
+输入区会持续渲染当前激活的 Seek 助手提示条，并提供停用按钮。卡片上的“停用”按钮走同一条 `setActiveSeek("")` 路径。点开场提示会创建新对话，避免把不同 Seek 助手混在同一段历史里。
+
+自定义 Seek 支持 JSON 导入/导出。导出的结构由 `seek_core.seekExportPayload()` 生成，包含类型标记、版本号、导出时间和规范化后的自定义 Seek 列表；v2 格式会保留参考文件元数据和本地 `fileId`。导入由 `seek_core.mergeImportedSeeks()` 统一处理，负责校验字段、跳过无效项、处理重名和 id 冲突，并继续遵守最多 40 个自定义 Seek、每个 Seek 最多 6 个参考文件的本地上限。推荐 Seek 不会直接被修改，用户可以把推荐卡片复制为自定义 Seek 后再编辑。
+
+历史列表会用 `conversation.seekId` 查找当前仍存在的 Seek；如果 Seek 已删除，则回退到消息快照中的 Seek 名称。这让旧对话在数据清理后仍然可读，也方便按历史标题快速辨认当时使用的助手。
+
+## 公式渲染
+
+公式生成和展示由前端处理。`static/app.js` 会在稳定系统提示词中追加公式输出约束，引导模型把行内公式写成 `\( ... \)`，把独立公式写成 `\[ ... \]` 或 `$$...$$`。这样后端仍只接收普通 `systemPrompt`，不需要新增 API 字段。
+
+`static/math_core.js` 提供可测试的公式边界识别能力，保留 `\( ... \)`、`$...$` 的提取逻辑和货币符号误判保护；真正的 LaTeX 排版交给本地自托管的 KaTeX 0.16.45。`static/index.html` 先加载 `/vendor/katex/katex.min.css` 和 `/vendor/katex/katex.min.js`，再加载 `math_core.js` 与 `app.js`，因此公式会通过 KaTeX `renderToString()` 输出 HTML。
+
+KaTeX 的 JS、CSS、woff2 字体和许可证都放在 `static/vendor/katex/`，不依赖外部 CDN。Markdown 渲染器会先保护行内代码和代码块，再识别公式，避免把示例源码里的 `$` 或反斜杠误渲染。若 KaTeX 尚未加载，前端会先输出 `.math-pending` 占位并在 `load` 后补渲染；解析失败时使用 `.math-error` 展示原始公式文本。KaTeX 以 `trust: false`、`throwOnError: false`、`strict: "ignore"` 运行，矩阵、分段函数、对齐公式等环境由 KaTeX 负责支持。流式生成期间，如果块级公式的闭合 fence 还没到达，前端会暂时按普通文本展示原始公式，等 `$$` 或 `\]` 闭合后再交给 KaTeX，避免半截公式反复显示红色错误。
+
+## 上下文压缩
+
+当前端发现历史过长时，会先调用 `/api/compress-context` 生成或更新摘要。后端在未提供 `contextSummary` 且有效 user/assistant 消息超过 40 条时返回 `context_compression_required`，避免静默滑窗导致历史丢失和 prefix cache 失效。
+
+## 附件流程
+
+上传走 `POST /api/file-text`。后端使用 `multipart>=1.3,<2` 的流式 parser 读取表单，抽取文件文本、分块并写入 `.file-cache/{fileId}.json`。项目文档上传走 `POST /api/project-files`，复用同一解析链路，但写入 `.projects/{projectId}/files/`。如果运行环境里的 `multipart` 命名空间被不兼容包覆盖，服务端会在解析前做能力校验并返回明确错误。聊天消息只保存附件元数据；发送消息时，`services.chat_payload.expanded_message_content()` 会调用 `services.files.build_attachment_context()`，按当前问题检索最相关的文件片段。
+
+扫描版 PDF 会先尝试原生文本抽取；没有可复制文字时才进入 OCR。PNG、JPG、WebP、BMP、TIFF、GIF 等图片会被识别为 `kind=image`，并在 OCR 开启时通过 `services.ocr.extract_image_ocr()` 提取文字。OCR 仅在全局开启或上传请求携带 `ocrEnabled=1` 时运行。当前这是“图片文字识别”路线，不接入独立视觉模型，也不会把原始图片 base64 发送给 DeepSeek。
+
+## 缓存与本地状态
+
+- 文件缓存：`.file-cache`，按年龄和总大小清理。
+- 搜索缓存：`.search-cache`，按过期时间清理。
+- 长期记忆：`.memory/memories.json`，写入时使用进程内锁和 `.memory/memories.lock` 跨进程锁保护读改写流程，并按全局 / 项目 / Seek 作用域过滤检索。
+- 前端对话：浏览器 `localStorage`。
+- 自定义 Seek：浏览器 `localStorage`，最多 40 个；可导入/导出 JSON；消息中保存 Seek 快照用于历史兼容，`conversation.seekId` 只保留仍存在的 Seek id。
+- 可选保存的 DeepSeek / Tavily API Key：浏览器 `localStorage`；也可以只在本轮页面会话中临时填写。
+
+服务启动时会立即清理文件缓存和搜索缓存，并启动一个 daemon 后台循环，约每 6 小时再次清理。后台清理失败只写日志，不影响聊天请求。
+
+## HTTP 服务策略
+
+- `/api/*` 默认要求本地 token 鉴权，并返回 `Cache-Control: no-store`。
+- `/share-target` 不属于 `/api/*`，用于 PWA 系统分享 POST，只做 Host 白名单校验并把内容写入 30 分钟内存缓存；读取缓存的 `/api/share-target` 仍受 token 鉴权保护。
+- 静态资源返回 `Cache-Control: no-cache`，目录列表被禁用。
+- 访问带 `?token=...` 的根路径会设置持久认证 Cookie 并重定向到 `/`。
+- PWA 缓存版本和旧缓存淘汰只由 `static/sw.js` 的 activate 阶段维护，页面脚本不再重复删除缓存，避免版本号漂移。
+
+

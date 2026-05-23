@@ -1,0 +1,425 @@
+﻿# HTTP API
+
+适用版本：v1.4.0。
+
+默认情况下，所有 `/api/*` 路由都需要本地 token 鉴权。客户端可以发送 `Authorization: Bearer <token>`，也可以使用打开 `/?token=<token>` 后写入的 `auth_token` Cookie。未设置 `AUTH_TOKEN` 时，服务端会把自动生成的 token 保存到本地 `.auth-token`，重启后继续复用。
+
+错误响应保留旧版 `error` 字段，并增加稳定 `code` 字段：
+
+```json
+{"error": "Auth required", "code": "unauthorized"}
+```
+
+## GET `/api/config`
+
+返回前端配置和能力标记。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `version` | string | 应用版本。 |
+| `hasServerKey` | boolean | 服务端是否配置了 `DEEPSEEK_API_KEY`。 |
+| `hasSearch` | boolean | 服务端是否配置 Tavily 搜索；前端仍可通过 `tavilyApiKey` 临时启用。 |
+| `defaultModel` | string | 默认模型名。 |
+| `models` | array | 支持的模型列表。 |
+| `modelRoutes` | object | 快速/专家模式到模型名的映射。 |
+| `searchModes` | array | 搜索模式列表：`off`、`auto`、`on`。 |
+| `uploadLimits` | object | 上传限制：`fileMaxBytes` 单文件上限、`requestMaxBytes` multipart 请求体上限、`maxFiles` 单次文件数上限。 |
+| `computerUrl` / `phoneUrl` | string | 带认证 token 的启动地址；鉴权关闭时不带 token。 |
+
+## POST `/api/title`
+
+v0.9.4 新增的 best-effort 标题生成接口。前端在首轮 assistant 回复完成后异步调用，用轻量模型把首轮用户问题和助手摘要整理为短标题；失败、离线、限流或用户已手动改名时保留原本标题。
+
+请求体为 JSON：
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `apiKey` | string | 否 | 未提供时使用服务端 `DEEPSEEK_API_KEY`。 |
+| `titleModel` | string | 否 | 标题生成模型；非法值回退到轻量默认模型。 |
+| `userMessage` | string | 是 | 首轮用户问题，后端最多取前 1200 字符。 |
+| `assistantMessage` | string | 否 | 首轮助手回复摘要，后端最多取前 600 字符。 |
+
+响应：
+
+```json
+{"title": "搜索引用修复"}
+```
+
+同一 API key 哈希在 60 秒内最多 12 次；超限返回 HTTP 429，前端静默回退到本地标题。
+
+## POST `/api/chat`
+
+请求体为 JSON。
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `apiKey` | string | 否 | 未提供时使用服务端 `DEEPSEEK_API_KEY`。 |
+| `model` | string | 否 | 默认 `deepseek-v4-pro`；支持 `fast`、`expert` 等别名。 |
+| `messages` | array | 是 | user/assistant 消息对象列表。 |
+| `stream` | boolean | 否 | `true` 时返回 NDJSON 流事件。 |
+| `agentMode` | boolean | 否 | `true` 且 `stream=true` 时启用 Leader + 多 Agent 编排；非流式请求忽略该字段并保持普通回答路径。 |
+| `systemPrompt` | string | 否 | 稳定系统提示词。 |
+| `contextSummary` | string | 否 | 旧历史压缩摘要。 |
+| `searchEnabled` | boolean | 否 | 是否允许搜索。 |
+| `searchMode` | string | 否 | 搜索模式：`off`、`auto`、`on`。 |
+| `tavilyApiKey` | string | 否 | 本次请求使用的 Tavily API Key；未提供时使用服务端 `TAVILY_API_KEY`。 |
+| `memoryEnabled` | boolean | 否 | 是否启用长期记忆，默认启用。 |
+| `memoryScope` | string | 否 | 当前长期记忆作用域：`global`、`project:<id>` 或 `seek:<id>`；未提供时后端会从最新 user 消息的 `projectId` / `seekId` 推断。 |
+| `continuationContext` | string | 否 | 继续生成的本轮上下文。 |
+| `thinkingEnabled` | boolean | 否 | 控制 DeepSeek 思考相关字段。 |
+| `reasoningEffort` | string | 否 | 思考强度：`low`、`high`、`max`；后端还兼容 `minimal` / `medium`，非法值回退到 `high`。 |
+| `toolsEnabled` | boolean | 否 | 是否允许模型调用本地工具，默认允许；设为 `false` 时不发送 `tools` 字段。 |
+
+Seek 助手和公式渲染都是前端本地能力，不新增独立后端路由。前端会把当前消息对应 Seek 的名称、简介、专属指令和参考文件名称合并进 `systemPrompt`；继续生成、重新生成、编辑后重发和上下文压缩都会使用消息快照里的 Seek 指令和参考文件，避免串用当前全局选择。用户可以在输入区或 Seek 卡片中停用当前 Seek；停用后请求会回到普通角色提示词。前端还会追加公式输出约束，引导模型在数学、物理、统计和工程问题中使用 `\( ... \)`、`\[ ... \]` 或 `$$...$$` 形式的 LaTeX，并由本地 KaTeX 渲染为页面 HTML。
+
+自定义 Seek 的导入/导出也在前端完成，不新增 API。导出文件是 JSON，包含 `type=deepseek-mobile.seeks`、`version`、`exportedAt` 和 `seeks` 数组；v2 导出会在每个 Seek 中保留 `referenceAttachments`。导入时前端会重新规范化字段、处理重名和 ID 冲突，再写回浏览器 `localStorage`。
+
+Seek 参考文件使用现有附件协议。编辑 Seek 时先通过 `/api/file-text` 上传并获得 `fileId`；发送聊天请求时，前端只把参考文件合并到对应 user 消息的 `attachments` 中，让后端按用户问题检索相关片段。assistant 消息不会展开参考文件，避免把同一份资料重复注入历史。
+项目空间同样使用附件协议。当前项目的文档会随 user 消息快照写入 `projectAttachments`，发送给后端时合并到 `attachments`，并带上 `projectId`，后端会从 `.projects/{projectId}/files/` 读取持久索引。
+
+v0.7.4 的命令面板、快捷键、主题、字号、代码块折叠、公式复制、Mermaid 轻量 flowchart 渲染和表格 SVG 图表均为前端能力，不新增后端 API。PWA 离线模式只在 `/api/config` 无法读取时让页面降级为历史查看壳；离线状态下前端不会发起 `/api/chat` 发送。
+v0.8.2 的语音输入、回复朗读和“引用所选”都属于前端能力：语音输入使用浏览器 `SpeechRecognition` / `webkitSpeechRecognition` 写入输入框，回复朗读使用 `speechSynthesis` 分句播放助手消息，选取助手回复片段提问复用本地引用草稿，不新增模型请求字段。语音语言和引用草稿保存在浏览器本地状态中。v0.8.3 的 PWA 图标和 favicon、v0.8.4 的动效反馈与流式渲染节流、v0.8.5 的思考状态文案和选区引用稳定性修复、v0.8.6 的思考计时和流式期间草稿交互优化、v0.9.0 的侧边栏与历史列表重构也都是前端能力。v0.9.1 新增 `reasoningEffort` 请求字段，并强化本地工具 schema 与工具回合转发；v0.9.2 只扩展 `/api/config` 的 `uploadLimits` 字段并统一上传限制；v0.9.3 将联网搜索改为模型驱动的 `web_search` 工具循环，并把整段提问入口替换为选区浮动引用提问；v0.9.4 新增 `/api/title`，同时让网页引用使用 `[^Wn]` chip，并在本地 timeline 中交错展示 reasoning 与搜索步骤；v0.9.6 修复搜索 timeline 收尾和引用去重，并扩展本地工具集；v1.0.0 的视觉风格、明暗模式和主题 token 都是纯前端状态，不新增后端接口。v1.0.1 调整搜索编排和前端搜索状态恢复。v1.1.1 继续只调整前端主题 CSS。v1.1.5 新增流式 `agentMode` 请求字段和 `agent` 事件，同时对搜索工具循环增加硬预算。PWA Share Target 会使用下面的 `/share-target` 和 `/api/share-target` 两个入口把系统分享内容导入为草稿。
+
+非流式响应包含：
+
+- `content`：最终回答。
+- `reasoning`：模型推理内容。
+- `usage`：模型 token 使用量。
+- `diagnostics`：请求诊断信息，包括消息数、摘要长度、记忆/搜索命中、附件数量、本地工具调用次数、缓存命中 token、命中率；多 Agent 模式还会包含 `agentDurations` worker 耗时表。
+- `search`：如本轮触发搜索，则返回面向前端展示的搜索信息。
+- `memorySuggestions`：如模型调用 `suggest_memory`，返回待用户确认的记忆建议列表。
+
+流式响应使用 `application/x-ndjson`，每行是一个 JSON 事件：
+
+| `type` | 字段 |
+| --- | --- |
+| `reasoning` | `text` |
+| `system_note` | `text` |
+| `content` | `text` |
+| `search` | `search` |
+| `agent` | `phase`、`status`、`name`、`text` |
+| `agent_reasoning` | `phase`、`name`、`text` |
+| `agent_delta` | `phase`、`name`、`text` |
+| `agent_note` | `phase`、`name`、`text` |
+| `agent_search` | `phase`、`name`、`search` |
+| `memory_suggestion` | `content`、`category`、`scope`、`conflicts` |
+| `done` | `id`、`model`、`content`、`reasoning`、`usage`、`search`、`diagnostics`、`memorySuggestions` |
+| `error` | `error`、`code` |
+
+如果上游 SSE 返回 `event: error`，后端会转换为 `type=error` 的前端事件。
+
+流式请求会在发送 NDJSON 头之前完成快速 payload 校验。缺少 API Key、空消息、没有 user 消息或超过硬限制且没有压缩摘要时，接口返回普通 JSON 错误和对应 4xx 状态，而不是 200 流式错误事件。`context_compression_required` 使用 HTTP 409，表示前端需要先调用 `/api/compress-context`。
+
+v0.7.2 起 `/api/chat` 默认会把本地工具定义随请求发送给 DeepSeek；v0.7.3 增加长期记忆建议工具。v0.9.6 后当前内置工具包括：
+
+| 工具 | 说明 |
+| --- | --- |
+| `python_eval` | 执行小型、无副作用的 Python 数学表达式，例如阶乘、组合数、平方根。 |
+| `search_files` | 跨 `.file-cache` 和 `.projects` 检索已缓存附件/项目文档片段。 |
+| `fetch_url` | 读取一个公共 http(s) URL 的正文，用于搜索结果二次精读。 |
+| `web_search` | 执行单轮 Tavily 联网搜索，返回可引用的 `[^Wn]` 来源。 |
+| `suggest_memory` | 生成一条待用户确认的长期记忆建议，不会直接写入 `.memory`。 |
+| `create_reminder` / `list_reminders` | 创建本地提醒或列出 active/notified/all 提醒；`dueAt` 必须是 ISO datetime。 |
+| `recall_memory` / `forget_memory` | 检索或按非空 substring 删除允许作用域内的本地长期记忆；删除默认限制在全局和当前项目/Seek 作用域。 |
+| `list_project_files` / `read_file_chunk` | 列出项目文档库文件，或按 `fileId`、`projectId`、`chunkIndex` 读取一个缓存 chunk。 |
+| `data_transform` | 执行 `extract_regex`、`json_path`、`csv_summary`、`number_summary` 四种白名单数据处理，不执行代码。 |
+| `generate_chart` | 校验图表数据并返回 `{type,title,data,markdownTable}`；模型应把 `markdownTable` 放入最终回答以复用前端表格图表按钮。 |
+| `compare_search_results` | 最多执行 2 个相关联网搜索 query，复用同一 turn 的搜索 timeline、引用编号和去重逻辑。 |
+
+工具调用最多连续执行 3 轮；普通对话本轮搜索最多 5 次。安全的相邻工具会并行执行，但结果按原 `tool_calls` 顺序返回；`create_reminder`、`forget_memory`、`suggest_memory` 等副作用工具保持串行。流式模式下，执行工具前后会额外发送 `system_note` 事件；这些事件是后端流程提示，不属于模型 `reasoning`。多 Agent 模式下，Researcher 可联网搜索，Coder 只能使用本地代码/文件工具，Reasoner 和 Critic 默认无工具；worker content、reasoning、system note、search 会分别转成 `agent_delta`、`agent_reasoning`、`agent_note`、`agent_search`，并按 `phase` 显示在 Activity Agent 卡片内。v1.2.9 不改变流式协议，只修正前端对持久化 `durationMs: null` 的恢复语义，避免刷新后误显示 `0ms`。v1.3.0 在多 Agent `done.diagnostics` 中新增 `agentDurations`，按 worker id 记录本轮执行耗时（毫秒），方便性能分析和导出报告对照。
+
+v1.3.5 不改变 `/api/chat` 的事件协议；前端会把 `agentMode` 固化到当前 assistant message，用于稳定 75 分钟请求超时和 Activity 展示判断。后端多 Agent 层级超时仍可通过 `MULTI_AGENT_TIMEOUT_SECONDS` 配置，默认 `3900` 秒。多 Agent worker 请求的动态 prior context 和当前子任务现在追加在历史消息之后，不再进入 `systemPrompt`，以便 DeepSeek prefix cache 更容易复用稳定系统提示和长历史前缀。
+
+v1.3.6 继续不改变 `/api/chat` 事件协议；多 Agent worker 的角色职责和工具/搜索约束也从 `systemPrompt` 后移到历史消息之后。所有 worker 在同一轮请求中共享统一 system prompt，只有历史对话之后的最后一条动态 user message 会因 Researcher / Coder / Reasoner / Critic 角色不同而分叉。
+
+v1.3.7 在多 Agent 最终 `done.diagnostics` 中新增 `agentCache`，聚合 worker 和 Synthesizer 的 DeepSeek cache usage：`hitTokens`、`missTokens`、`hitRate` 和 `byAgent` 明细。顶层流式事件协议不变；普通单请求的 `usage` 和 cache diagnostics 仍按原字段返回。
+
+v1.3.8 为 `agentCache` 与每个 `byAgent` 明细补充 `totalTokens` 和 `hasData`。当没有 cache usage 数据时，`hitRate` 为 `null`、`hasData=false`；当确实全部 miss 时，`missTokens > 0` 且 `hitRate=0.0`。这只改变 diagnostics 语义，不改变顶层流式事件类型。
+
+v1.3.9 不改变 API 字段，只调整前端诊断面板显示：Agent cache 标签中文化，`byAgent` 明细改为多行展示。
+
+v1.4.0 将多 Agent Researcher 搜索预算提高到单 Agent 5 次、单次 Agent Run 总预算 12 次，worker 工具循环提高到 4 轮；普通 `/api/chat` 的搜索上限保持 5 次。
+
+## Agent Run API
+
+v1.4.0 新增可恢复 Agent Run。普通 `/api/chat` 保持兼容；新的恢复、断线续接、计划确认和重跑能力只用于 Agent Run。
+
+### POST `/api/agent-runs`
+
+创建一个持久化多 Agent run。请求体：
+
+```json
+{
+  "payload": {},
+  "confirmPlan": false,
+  "agentPreset": "full"
+}
+```
+
+`payload` 使用 `/api/chat` 的流式请求字段，服务端会强制 `agentMode=true`。`apiKey` / `tavilyApiKey` 只用于本次启动，不会写入 `.agent-runs/`。
+
+响应：
+
+```json
+{"ok": true, "runId": "run_xxx", "run": {"runId": "run_xxx", "status": "created"}}
+```
+
+状态流为 `created -> planning -> awaiting_plan/running -> done/failed/cancelled/orphaned`。手动 `full` 默认直接执行；`confirmPlan=true`、`agentPreset=auto` 或高复杂任务会在 Leader 产出计划后进入 `awaiting_plan`。
+
+### GET `/api/agent-runs/{runId}`
+
+返回 run 快照和完整事件日志。`events` 是恢复 UI 的唯一事实源；`finalAnswer`、`agentOutputs`、`diagnostics` 只是为了快速读取的派生快照。
+
+### GET `/api/agent-runs/{runId}/events?after=N`
+
+返回 `index > N` 的事件数组，用于断线后的轮询恢复。
+
+### GET `/api/agent-runs/{runId}/stream?after=N`
+
+返回 `application/x-ndjson` 事件流。连接建立后先 replay `index > N` 的历史事件，再等待后续事件；浏览器断开只关闭当前 stream，不取消后台 run。多个客户端可以同时 attach 同一个 run。
+
+### POST `/api/agent-runs/{runId}/plan`
+
+确认并可覆盖计划：
+
+```json
+{
+  "payload": {},
+  "plan": [{"id": "coder", "task": "检查实现路径"}]
+}
+```
+
+计划项 `id` 支持 `researcher`、`coder`、`reasoner`、`critic`。确认后会发 `final_reset`，状态进入 `running` 并执行计划。
+
+### POST `/api/agent-runs/{runId}/rerun`
+
+重跑单个 worker 或只重新综合：
+
+```json
+{
+  "payload": {},
+  "agentId": "coder",
+  "resynthesize": true
+}
+```
+
+`agentId` 可为 worker id，也可用 `synthesizer` 只重新综合最终回答。重跑 worker 会先发：
+
+```json
+{"type": "agent_reset", "phase": "coder", "reason": "rerun_agent"}
+```
+
+随后替换该 Agent 输出；若 `resynthesize=true`，再发：
+
+```json
+{"type": "final_reset", "scope": "final_answer", "reason": "rerun_agent"}
+```
+
+1.4.0 不做依赖级联重跑：例如重跑 Researcher 不会自动重跑 Coder / Reasoner / Critic，最终回答会基于最新 Researcher 和现有其它 Agent 输出重新综合。
+
+## POST `/share-target`
+
+PWA Share Target 接收入口。手机系统分享菜单会按 `static/manifest.webmanifest` 的 `share_target` 配置把标题、正文、URL 和文件以 `multipart/form-data` POST 到该路径。
+
+字段：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `title` | string | 分享来源标题，可选。 |
+| `text` | string | 分享正文，可选。 |
+| `url` | string | 分享链接，可选。 |
+| `files` | file[] | 分享文件，可选；复用 `/api/file-text` 的文件解析和 OCR 路径。 |
+
+manifest 当前允许图片、文本、PDF、RTF、JSON、Markdown、CSV、DOCX、XLSX、PPTX 和 EPUB 类型进入分享菜单；服务端仍以附件解析白名单为准。
+
+该入口不依赖 `Authorization` 头或 `auth_token` Cookie，因为 Android Chrome 的系统分享 POST 不会携带 `SameSite=Strict` Cookie。服务端仍会校验请求 `Host` 是否在本地白名单内。成功后后端会把分享内容写入短生命周期内存缓存，返回 `303 Location: /?share=<id>`；浏览器随后打开首页，由已鉴权的前端读取 `/api/share-target?id=<id>`，用户确认后才把内容填入草稿。缓存默认约 30 分钟过期，且被读取后立即删除。
+
+## GET `/api/share-target`
+
+读取并消费一次 PWA 分享缓存。
+
+请求：
+
+```text
+GET /api/share-target?id=<share-id>
+```
+
+响应：
+
+```json
+{"ok": true, "share": {"prompt": "...", "attachments": [], "errors": []}}
+```
+
+`prompt` 会写入输入框草稿；`attachments` 会进入当前附件列表；`errors` 用于提示某些分享文件无法识别。找不到或过期时返回 404。
+该读取端点仍属于 `/api/*`，需要本地 token 鉴权。
+
+## POST `/api/auth/logout`
+
+清除 `auth_token` Cookie 并返回：
+
+```json
+{"ok": true}
+```
+
+该端点仍需要当前请求通过本地鉴权。前端“清空本地数据”会先调用它，再删除浏览器保存的 DeepSeek Mobile localStorage / sessionStorage 数据。
+
+## POST `/api/conversations/search`
+
+对浏览器传入的本地历史会话做全文搜索。服务端不持久化会话，只返回匹配结果，方便前端在大量历史中筛选。
+
+请求体：
+
+```json
+{"query": "关键词", "conversations": []}
+```
+
+响应：
+
+```json
+{"results": [{"id": "conversation-id", "title": "标题", "tags": ["标签"], "matches": []}]}
+```
+
+前端仍会先做本地过滤；该接口用于统一搜索语义，并为后续服务端索引留出兼容入口。
+
+## POST `/api/fetch-url`
+
+读取一个公共网页并抽取可读正文，供前端或工具调用做搜索结果二次精读。请求体：
+
+```json
+{"url": "https://example.com/article"}
+```
+
+响应：
+
+```json
+{"ok": true, "page": {"url": "https://example.com/article", "contentType": "text/html", "text": "...", "charCount": 1234}}
+```
+
+该端点会拒绝非 http(s) URL、localhost、`.local` 域名、私有/回环/链路本地/保留地址和超过 2 MB 的页面。抓取结果写入 `.search-cache`，按搜索缓存过期时间复用。
+
+## POST `/api/projects`
+
+管理本地持久项目空间。项目数据保存在 `.projects/{projectId}/project.json`，项目文档索引保存在 `.projects/{projectId}/files/`，不会被临时 `.file-cache` 清理任务删除。
+
+请求体使用 `action` 字段：
+
+| Action | 说明 |
+| --- | --- |
+| `list` | 返回项目列表。 |
+| `create` | 创建项目，需要 `name`。 |
+| `delete` | 删除项目及其文档库，需要 `id`。 |
+
+响应示例：
+
+```json
+{"projects": [{"id": "proj-abc123", "name": "考研资料", "documents": []}]}
+```
+
+## POST `/api/project-files?projectId=<id>`
+
+接收 `multipart/form-data`，把文件解析并加入指定项目。支持与 `/api/file-text` 相同的文件类型和 `ocrEnabled=1` 字段；成功后返回新增文档列表：
+
+```json
+{"ok": true, "documents": [{"name": "notes.pdf", "fileId": "0123...", "projectId": "proj-abc123"}]}
+```
+
+## POST `/api/file-chunk`
+
+按 `fileId`、可选 `projectId` 和 1-based `chunkIndex` 读取附件片段，用于前端引用回链预览。普通临时附件不传 `projectId`；项目文档传项目 id。
+
+```json
+{"fileId": "0123456789abcdef0123456789abcdef", "projectId": "proj-abc123", "chunkIndex": 2}
+```
+
+响应包含文件元数据和对应 chunk：
+
+```json
+{"file": {"name": "notes.pdf", "projectId": "proj-abc123"}, "chunk": {"index": 1, "text": "..."}}
+```
+
+## POST `/api/reminders`
+
+本地提醒队列。使用 `action` 字段：
+
+| Action | 说明 |
+| --- | --- |
+| `list` | 返回本地提醒列表。 |
+| `create` | 创建提醒，需要 `title`、`content`、`dueAt`。`dueAt` 为 ISO datetime。 |
+| `delete` | 根据 `id` 删除提醒。 |
+
+提醒保存在 `.reminders/reminders.json`，不会发送给 DeepSeek。
+
+## POST `/api/reminders/due`
+
+返回已经到期且尚未通知的提醒，并把它们标记为已通知。前端定时轮询该接口，再通过 Service Worker 调用 Web Notification。
+
+## POST `/api/file-text`
+
+接收 `multipart/form-data`，支持一个或多个文件 part。可选字段 `ocrEnabled=1` 会为本次上传开启 OCR 重试。图片上传走 OCR 路线，只提取图中的文字并作为 `kind=image` 附件缓存。HTML 会清洗脚本和样式后抽取可见文本；EPUB 会读取 HTML/XHTML 章节；PPTX 会读取幻灯片文本节点。
+
+服务端依赖 `multipart>=1.3,<2` 的流式 parser。启动环境如果被不兼容的同名命名空间覆盖，接口会返回稳定 JSON 错误，而不是抛出未处理的 `AttributeError`。
+
+响应示例：
+
+```json
+{"files": [], "errors": [], "file": null}
+```
+
+成功文件会包含：
+
+- `fileId`
+- `name`
+- `kind`
+- `preview`
+- `charCount`
+- `chunkCount`
+- `size`
+
+常见 `kind` 包括 `text`、`html`、`docx`、`xlsx`、`pptx`、`epub`、`pdf`、`image`。图片支持 PNG、JPG、WebP、BMP、TIFF、GIF 等常见格式；如果 OCR 未开启，图片会返回 `ocr_required`，前端可用同一个文件重试并附带 `ocrEnabled=1`。
+
+如果所有文件都失败，首个文件错误会作为 HTTP 错误响应返回。常见错误码：
+
+- `upload_too_large`
+- `unsupported_file`
+- `file_index_expired`
+- `ocr_required`
+- `ocr_unavailable`
+- `ocr_empty`
+
+## POST `/api/compress-context`
+
+将较早的对话历史压缩成摘要。前端会传入已有摘要和新增待压缩消息，并把返回的摘要保存起来，供后续 `/api/chat` 使用。
+
+当压缩请求来自带 Seek 助手的对话时，前端会把该消息快照中的 Seek 指令和参考文件名称放进 `systemPrompt`，保证压缩摘要与原对话助手语义一致。参考文件本体仍按附件检索逻辑处理，不会作为独立后端路由传入。
+
+常见返回字段：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `summary` | string | 新摘要。 |
+| `compressedMessageCount` | number | 本次参与压缩的消息数。 |
+| `usage` | object | 压缩调用的模型 usage。 |
+
+## GET/POST `/api/memory`
+
+`GET /api/memory` 返回长期记忆列表。
+
+`POST /api/memory` 使用 `action` 字段选择操作：
+
+| Action | 说明 |
+| --- | --- |
+| `list` | 返回所有本地记忆。 |
+| `add` | 根据 `content` 添加或更新记忆，可带 `category`、`scope`、`pinned` 和 `replaceIds`。 |
+| `delete` | 删除与 `query` 匹配的记忆，可带 `scope` 限定在全局和当前作用域内删除。 |
+| `deletebyid` | 根据 `id` 删除单条记忆。 |
+| `clear` | 清空全部记忆。 |
+
+`scope` 支持 `global`、`project:<id>` 和 `seek:<id>`。新增记忆如果与同作用域内已有记忆存在轻量冲突，接口会返回 HTTP 409：
+
+```json
+{"error": "Memory conflicts with an existing item", "code": "memory_conflict", "conflicts": []}
+```
+
+用户确认替换后，前端可把冲突项 id 放入 `replaceIds` 重新提交。
+
+

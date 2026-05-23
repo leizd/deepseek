@@ -1,0 +1,32 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -r requirements.txt -r requirements-dev.txt
+      - run: ruff check .
+      - run: mypy .
+      - run: pytest --cov --cov-fail-under=60
+      - run: node --check static/vendor/katex/katex.min.js
+      - run: node --check static/math_core.js
+      - run: node --check static/seek_core.js
+      - run: node --check static/app.js
+      - run: node --check static/modules/network.js
+      - run: node --check static/modules/markdown.js
+      - run: node --check static/modules/settings.js
+      - run: node --check static/modules/panels.js
+      - run: node --check static/modules/chat.js

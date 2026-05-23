@@ -1,0 +1,47 @@
+﻿# 前端模块索引
+
+适用版本：v1.4.0；模块拆分自 v0.8.2 起。
+
+`static/modules/chat.js` 仍然是聊天主流程和渲染入口，但第一轮拆分已经把不依赖 `state`、不直接操作 DOM 的纯函数移出。后续新增工具函数时，优先放到下面对应模块，避免继续扩大 `chat.js`。
+
+v0.9.1 在设置面板新增思考强度选择，`chat.js` 负责持久化 `deepseek-mobile.reasoning-effort` 并在聊天、继续生成、重新生成和编辑后重发时把 `reasoningEffort` 传给后端。
+v0.9.2 的上传和交互升级仍集中在 `chat.js`：拖拽、粘贴、文件选择、Seek 参考文件和项目文档上传共用 `validatedUploadFiles()` 预检；图片缩略图、lightbox、toast action、确认弹窗、快捷键面板、live region、焦点陷阱和软键盘安全区也是 DOM/状态耦合逻辑，暂不拆到纯函数模块。`normalizeStoredAttachment()` 负责保留本地图片预览字段。
+v0.9.4 的网页来源引用、自动标题、conversationPeek 点击锁和 reasoning/search timeline 也保留在 `chat.js`：`openCitationForMessage()` 按当前 assistant 消息解析 `[^Wn]`，标题生成通过 `/api/title` 异步写回历史项，timeline 只影响本地展示和持久化，不改变后端聊天协议。v0.9.6 的搜索 SVG 命名空间创建、stuck searching 收尾和 `webCitationResults()` URL 去重同样保留在 `chat.js`，因为它们依赖消息状态和 DOM 渲染。
+v1.0.0 的主题系统由 `index.html` 的首屏 inline boot script、`chat.js` 的 `state.themeStyle` / `state.themeMode` 和 `styles.css` 的语义 token 共同实现。新组件样式应优先使用 `--bg-*`、`--surface-*`、`--text-*`、`--border-*`、`--accent-*` 等语义 token；`--bg`、`--surface`、`--text`、`--brand` 等旧变量仅作为兼容别名保留。`normalizeThemeStyle()` 和 `normalizeThemeMode()` 放在 `normalize.js`，避免非法本地设置污染根节点 dataset。v1.0.1 在 `markAssistantInterrupted()` 和 `normalizeTimeline()` 中补齐搜索收尾，避免中断或刷新后的历史消息继续显示“正在搜索”。v1.1.1 仅修改 `static/styles.css`，重新校准 ChatGPT、Linear、Notion、Arc 四套主题 token，并同步 system 暗色镜像和主题特定规则。v1.1.5 在 `chat.js` 中新增 `state.agentMode`、`#agentModeButton`、`agentMode` 请求字段和 `agent` timeline step；`message.search` 顶层对象会在读取和保存历史时同步收尾，流式未闭合代码围栏由 `markdown.js` 先按普通文本展示，避免中断后出现黑框。v1.2.6 在设置面板新增 `agentDisplayModeSelect`，`chat.js` 用 `deepseek-mobile.agent-display-mode` 保存简洁/详细模式；Agent timeline step 额外持久化 `id`、`notes`、`collapsed`，并用稳定 id 生成 DOM key。v1.2.7 把 agent timeline 的 12 个纯函数（`agentStepId` / `createAgentStepId` / `appendTimelineAgent*` / `normalizeTimeline` / `timelineStepKey` / `shouldCollapseAgentStep` 等）从 `chat.js` 抽到独立模块 `agent_timeline.js`：脱 DOM、无 `window` / `localStorage` 依赖，由 `tests/test_frontend_utils.py` 直接 import 测试。新增 `createAgentStepId(message, phase)` 按 `message.timeline` 里同 phase 的现有 step 数生成 `agent-{phase}-{N}`，修掉 Leader 两轮（拆解 + 综合）共享 id 的 P0；`normalizeTimeline` 加去重兜底，旧 history 里同 id 的两张 Leader 也会被补成 `agent-leader-1` / `agent-leader-2`。折叠策略改为分级：Leader 完成后保留展开、`status === "error"` 永远展开、其他 worker 完成且有内容才折叠。v1.2.8 在同一模块里加 `agentRunSummary(message)` / `agentRunSummarySignature` / `formatAgentDuration`：前两个生成 Activity 顶部"N Agents · 资料 ✓ · 代码 ✕"摘要条数据并算签名供 dataset 去重，第三个把 `durationMs` 渲染成 "850ms / 1.3s / 1m 5s"。`appendTimelineAgent` / `normalizeTimeline` 持久化 `step.durationMs`，刷新后耗时仍能恢复；非法数值（NaN / 负数 / null）一律归一为 null，调用方按"无耗时"渲染。v1.2.9 把 duration 归一化抽成 `normalizeDurationMs()`，修复持久历史里 `durationMs: null` 被 `Number(null)` 恢复成 `0ms` 的问题；摘要条计数文案改为 "N 个 Agent"，失败 chip 增加轻量边框。v1.3.0 新增 `agentExecutionReport(message)`，把 Leader 拆解、worker 摘要/风险和最终回答整理成纯文本执行报告，供 Activity 面板和助手更多菜单复制。
+
+v1.3.4 继续把 Activity 面板状态留在 `chat.js`：`activityAutoDismissedMessageIds` 只记录“用户手动关闭过的当前流式消息”，`maybeAutoOpenActivityPanel()` 会尊重该集合，`openActivityPanel(..., { auto: false })` 则清除记录。`activityTimelineSteps()` 会在 timeline 缺少 reasoning step 时用 `message.reasoning` 补一个 fallback，避免 Leader 思考在 worker 卡片出现后被清空；`messageHasActivity()` 也会把正在流式的 Agent message 视为可打开的 Activity。请求层使用 `message.agentMode || state.agentMode` 在普通 4 分钟和 Agent 75 分钟之间切换。
+
+v1.3.5 不调整前端模块边界；本次主要改后端多 Agent worker 的 prompt/message 排列，并同步 Service Worker 缓存版本到 `deepseek-mobile-v135`。
+
+v1.3.6 仍不调整前端模块边界；本次继续改后端多 Agent worker 的缓存友好排列，并同步 Service Worker 缓存版本到 `deepseek-mobile-v136`。
+
+v1.3.7 继续把诊断面板留在 `chat.js`：`renderDiagnosticsPanel()` 读取 `diagnostics.agentCache`，展示多 Agent 总 hit/miss/rate 和按 Agent 的简表；Service Worker 缓存版本同步到 `deepseek-mobile-v137`。
+
+v1.3.8 继续只调整 `chat.js` 的诊断展示：`formatAgentCacheTotal()` / `formatAgentCacheRate()` / `formatAgentCacheByAgent()` 会识别 `hasData=false` 和 `hitRate=null`，把缺失 usage 显示为“无数据”；Service Worker 缓存版本同步到 `deepseek-mobile-v138`。
+
+v1.4.0 在 `chat.js` 接入可恢复 Agent Run：前端先创建 run，再 attach `/stream?after=N`，持久化 `agentRunId` / `agentRunLastEventIndex`，并通过 `agent_reset`、`final_reset` 恢复 Activity timeline 与最终回答。计划确认模式新增 `.agent-plan-workbench`，允许用户编辑 Agent 计划后再执行；Service Worker 缓存版本同步到 `deepseek-mobile-v140`。
+
+## 已拆出的纯函数
+
+| 模块 | 函数 | 说明 |
+| --- | --- | --- |
+| `static/modules/charts.js` | `chartSvg`、`pieChartSvg`、`parseChartCell` | Markdown 表格图表的 SVG 和数值解析；`renderTableChart` 仍在 `chat.js`，因为它访问 DOM。 |
+| `static/modules/speech_text.js` | `speechTextFromMessage`、`speechChunks`、`splitLongSpeechSegment`、`preferredSpeechVoice` | 朗读前文本清理、iOS 友好的短句切片、系统 voice 选择。 |
+| `static/modules/stream.js` | `parseStreamEventLine`、`readChatStream` | NDJSON 流解析；通过 `onEvent` 和 `waitUntilResumed` 回调接回主流程。 |
+| `static/modules/format.js` | `extensionForLanguage`、`vscodeUriForPath`、`safeFilename`、`fileKindFromName`、`createId`、`quoteAwareContent`、`tailForContinuation` | 文件名、代码下载扩展名、VS Code URI、引用回复和续写尾部裁剪。 |
+| `static/modules/normalize.js` | `normalizeTheme`、`normalizeThemeStyle`、`normalizeThemeMode`、`normalizeFontSize`、`normalizeVoiceLanguage`、`normalizeModel`、`normalizeSeekId`、`normalizeStoredAttachment` | 轻量字段规范化；`normalizeModel` 由 `chat.js` 传入当前支持模型集合。 |
+| `static/modules/reminder_parse.js` | `parseReminderTime`、`detectReminderFromText` | 客户端提醒短语解析；网络请求和通知轮询仍保留在 `chat.js`。 |
+| `static/modules/agent_timeline.js` | `agentStepId`、`createAgentStepId`、`appendTimelineAgent`、`appendTimelineAgentReasoning`、`appendTimelineAgentNote`、`appendTimelineAgentDelta`、`normalizeTimeline`、`timelineStepKey`、`shouldCollapseAgentStep`、`agentStepHasDetails`、`normalizeAgentNotes`、`agentNotesSnapshot`、`agentRunSummary`、`agentRunSummarySignature`、`formatAgentDuration`、`agentExecutionReport` | 多 Agent timeline 的 id 生成、增量合并、折叠规则、刷新后还原、执行摘要条聚合 + 签名、耗时格式化和执行报告导出；脱 DOM 由 `tests/test_frontend_utils.py` 单测。 |
+
+## 保留在 chat.js 的边界
+
+- `render*` 系列继续留在 `chat.js`，因为它们和 DOM、全局 `state`、事件委托强耦合。
+- `voice`、`share target`、`draft`、`reminders` 等子系统暂时只抽纯函数，不移动内部状态。下一轮拆分如果启动，应把各子系统的状态收进模块内部，用回调和公开方法连接主流程。
+- `static/sw.js` 的 `APP_SHELL` 必须列出新增模块，否则离线/PWA 缓存会漏文件。
+- 动效状态暂时保留在 `chat.js`：新消息用 `freshMessageIds` 标记一次性入场，流式输出用 `pendingStreamingMessageIds` + `requestAnimationFrame` 合并渲染；后续如继续拆 UI 子系统，可把这些移动到独立 motion helper。
+
+## 测试约定
+
+纯函数模块由 `tests/test_frontend_utils.py` 通过 Node 动态导入测试。以后新增纯函数时，优先在这里补低成本单测，再接入 `chat.js`。
+
+

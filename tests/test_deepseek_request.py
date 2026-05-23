@@ -1,0 +1,686 @@
+from __future__ import annotations
+
+import json
+import unittest
+from unittest.mock import patch
+
+import deepseek_mobile.services.deepseek_client as deepseek_client
+from deepseek_mobile.services.deepseek_client import build_deepseek_request, call_deepseek, stream_deepseek, validate_deepseek_payload
+from deepseek_mobile.core.errors import AppError, ErrorCode
+
+
+class DeepSeekRequestTests(unittest.TestCase):
+    def test_validate_deepseek_payload_requires_api_key(self) -> None:
+        with self.assertRaises(AppError) as cm:
+            validate_deepseek_payload({"messages": [{"role": "user", "content": "hi"}]})
+        self.assertEqual(cm.exception.code, ErrorCode.MISSING_API_KEY)
+
+    def test_stream_deepseek_error_event_includes_code(self) -> None:
+        events: list[dict[str, object]] = []
+
+        stream_deepseek({"messages": [{"role": "user", "content": "hi"}]}, events.append)
+
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["type"], "error")
+        self.assertIn("Missing DeepSeek API Key", str(events[0]["error"]))
+        self.assertEqual(events[0]["code"], ErrorCode.MISSING_API_KEY.value)
+
+    def test_build_deepseek_request_clamps_flash_temperature(self) -> None:
+        prepared = build_deepseek_request(
+            {
+                "apiKey": "test",
+                "model": "flash",
+                "temperature": 4,
+                "thinkingEnabled": False,
+                "messages": [{"role": "user", "content": "Hello"}],
+            },
+            stream=False,
+        )
+
+        self.assertEqual(prepared.body["model"], "deepseek-v4-flash")
+        self.assertEqual(prepared.body["temperature"], 2)
+        self.assertEqual(prepared.body["top_p"], 1.0)
+        self.assertFalse(prepared.body["stream"])
+
+    def test_build_deepseek_request_sets_flash_sampling_defaults(self) -> None:
+        prepared = build_deepseek_request(
+            {
+                "apiKey": "test",
+                "model": "flash",
+                "thinkingEnabled": False,
+                "messages": [{"role": "user", "content": "Hello"}],
+            },
+            stream=False,
+        )
+
+        self.assertEqual(prepared.body["temperature"], 1.0)
+        self.assertEqual(prepared.body["top_p"], 1.0)
+
+    def test_build_deepseek_request_accepts_configured_reasoning_effort(self) -> None:
+        prepared = build_deepseek_request(
+            {
+                "apiKey": "test",
+                "model": "expert",
+                "reasoningEffort": "low",
+                "messages": [{"role": "user", "content": "Plan it"}],
+            },
+            stream=False,
+        )
+
+        self.assertEqual(prepared.body["reasoning_effort"], "low")
+        self.assertEqual(prepared.body["thinking"], {"type": "enabled"})
+
+    def test_build_deepseek_request_defaults_invalid_reasoning_effort_to_high(self) -> None:
+        prepared = build_deepseek_request(
+            {
+                "apiKey": "test",
+                "model": "expert",
+                "reasoningEffort": "expensive",
+                "messages": [{"role": "user", "content": "Plan it"}],
+            },
+            stream=False,
+        )
+
+        self.assertEqual(prepared.body["reasoning_effort"], "high")
+
+    def test_build_deepseek_request_includes_local_tools_by_default(self) -> None:
+        prepared = build_deepseek_request(
+            {"apiKey": "test", "model": "expert", "messages": [{"role": "user", "content": "算一下 23!"}]},
+            stream=False,
+        )
+
+        tool_names = [tool["function"]["name"] for tool in prepared.body["tools"]]
+        self.assertIn("python_eval", tool_names)
+        self.assertIn("search_files", tool_names)
+        self.assertIn("fetch_url", tool_names)
+        self.assertIn("suggest_memory", tool_names)
+        self.assertIn("create_reminder", tool_names)
+        self.assertIn("recall_memory", tool_names)
+        self.assertIn("list_project_files", tool_names)
+        self.assertIn("data_transform", tool_names)
+        self.assertIn("generate_chart", tool_names)
+        self.assertEqual(prepared.body["tool_choice"], "auto")
+        for tool in prepared.body["tools"]:
+            with self.subTest(tool=tool["function"]["name"]):
+                self.assertIs(tool["function"]["strict"], True)
+                self.assertIs(tool["function"]["parameters"]["additionalProperties"], False)
+        self.assertIn("并行发起多个工具调用", prepared.body["messages"][0]["content"])
+
+    def test_build_deepseek_request_can_disable_local_tools(self) -> None:
+        prepared = build_deepseek_request(
+            {"apiKey": "test", "model": "expert", "toolsEnabled": False, "messages": [{"role": "user", "content": "hi"}]},
+            stream=False,
+        )
+
+        self.assertNotIn("tools", prepared.body)
+
+    def test_auto_search_exposes_web_search_without_prefetching(self) -> None:
+        with patch.object(deepseek_client, "search_multiple") as mocked:
+            prepared_call = deepseek_client.prepare_deepseek_call(
+                {
+                    "apiKey": "test",
+                    "model": "expert",
+                    "searchEnabled": True,
+                    "searchMode": "auto",
+                    "messages": [{"role": "user", "content": "latest docs"}],
+                },
+                stream=False,
+            )
+
+        mocked.assert_not_called()
+        self.assertIsNone(prepared_call.search_data)
+        tool_names = [tool["function"]["name"] for tool in prepared_call.request.body["tools"]]
+        self.assertIn("web_search", tool_names)
+
+    def test_off_search_hides_web_search_tool(self) -> None:
+        prepared = build_deepseek_request(
+            {
+                "apiKey": "test",
+                "model": "expert",
+                "searchEnabled": True,
+                "searchMode": "off",
+                "messages": [{"role": "user", "content": "latest docs"}],
+            },
+            stream=False,
+        )
+
+        tool_names = [tool["function"]["name"] for tool in prepared.body["tools"]]
+        self.assertNotIn("web_search", tool_names)
+        self.assertNotIn("compare_search_results", tool_names)
+
+    def test_force_search_prefetches_once_even_for_simple_question(self) -> None:
+        search_data = {"status": "done", "query": "1+1=?", "results": [], "rounds": [{"round": 1, "query": "1+1?", "results": []}], "cached": False}
+        with patch.object(deepseek_client, "search_multiple", return_value=search_data) as mocked:
+            prepared_call = deepseek_client.prepare_deepseek_call(
+                {
+                    "apiKey": "test",
+                    "model": "expert",
+                    "searchEnabled": True,
+                    "searchMode": "force",
+                    "messages": [{"role": "user", "content": "1+1=?"}],
+                },
+                stream=False,
+            )
+
+        mocked.assert_called_once()
+        self.assertEqual(prepared_call.search_data, search_data)
+
+    def test_force_search_failure_emits_system_note(self) -> None:
+        notes: list[str] = []
+        search_data = {
+            "status": "error",
+            "query": "latest docs",
+            "results": [],
+            "rounds": [{"round": 1, "status": "error", "query": "latest docs", "error": "Remote end closed connection without response", "results": []}],
+            "cached": False,
+        }
+
+        with patch.object(deepseek_client, "search_multiple", return_value=search_data):
+            result = deepseek_client.search_if_needed(
+                {
+                    "searchEnabled": True,
+                    "searchMode": "force",
+                    "messages": [{"role": "user", "content": "latest docs"}],
+                },
+                system_note_callback=notes.append,
+            )
+
+        self.assertEqual(result, search_data)
+        self.assertGreaterEqual(len(notes), 2)
+        self.assertIn("预取搜索失败", notes[-1])
+        self.assertIn("Remote end closed connection", notes[-1])
+
+    def test_web_search_callback_deduplicates_queries_and_continues_round_index(self) -> None:
+        initial_search = {
+            "status": "done",
+            "query": "docs",
+            "results": [],
+            "rounds": [{"round": 1, "status": "done", "query": "docs", "answer": "", "results": []}],
+            "cached": False,
+        }
+        progress: list[dict[str, object]] = []
+
+        def fake_single_round(
+            query: str,
+            *,
+            intent: str,
+            round_index: int,
+            citation_offset: int,
+            tavily_api_key: str,
+            progress_callback: object,
+        ) -> dict[str, object]:
+            assert callable(progress_callback)
+            progress_callback({"round": round_index, "query": query, "status": "done", "results": []})
+            return {"query": query, "round": round_index, "intent": intent, "citation_offset": citation_offset, "results": [], "status": "done"}
+
+        with patch.object(deepseek_client, "search_single_round", side_effect=fake_single_round) as mocked:
+            callback, current_search = deepseek_client.web_search_callback_for_turn(
+                {"messages": [{"role": "user", "content": "docs"}]},
+                initial_search,
+                progress_callback=progress.append,
+            )
+            cached = callback(" docs ", "general")
+            fresh = callback("docs examples", "technical")
+
+        mocked.assert_called_once()
+        self.assertTrue(cached["cached"])
+        self.assertEqual(cached["round"], 1)
+        self.assertEqual(fresh["round"], 2)
+        self.assertEqual(fresh["citation_offset"], 0)
+        current = current_search()
+        assert current is not None
+        self.assertEqual(current["rounds"][-1]["round"], 2)
+        self.assertTrue(progress)
+
+    def test_web_search_callback_stops_at_turn_limit(self) -> None:
+        progress: list[dict[str, object]] = []
+
+        def fake_single_round(
+            query: str,
+            *,
+            intent: str,
+            round_index: int,
+            citation_offset: int,
+            tavily_api_key: str,
+            progress_callback: object,
+        ) -> dict[str, object]:
+            assert callable(progress_callback)
+            return {"query": query, "round": round_index, "intent": intent, "citation_offset": citation_offset, "results": [], "status": "done"}
+
+        with patch.object(deepseek_client, "search_single_round", side_effect=fake_single_round) as mocked:
+            callback, current_search = deepseek_client.web_search_callback_for_turn(
+                {"messages": [{"role": "user", "content": "docs"}]},
+                None,
+                progress_callback=progress.append,
+                turn_limit=1,
+            )
+            first = callback("docs one", "general")
+            second = callback("docs two", "general")
+
+        self.assertEqual(mocked.call_count, 1)
+        self.assertEqual(first["status"], "done")
+        self.assertEqual(second["status"], "error")
+        self.assertIn(deepseek_client.WEB_SEARCH_LIMIT_ERROR, second["error"])
+        current = current_search()
+        assert current is not None
+        self.assertEqual(current["rounds"][-1]["status"], "error")
+
+    def test_build_deepseek_request_keeps_system_stable_and_moves_dynamic_context_to_latest_user(self) -> None:
+        prepared = build_deepseek_request(
+            {
+                "apiKey": "test",
+                "model": "expert",
+                "systemPrompt": "System prompt",
+                "contextSummary": "Older summary",
+                "continuationContext": "Continue here",
+                "searchContext": "Search context",
+                "messages": [
+                    {"role": "user", "content": "Older question"},
+                    {"role": "assistant", "content": "Older answer"},
+                    {"role": "user", "content": "Question"},
+                ],
+            },
+            stream=True,
+            memory_state={"enabled": True, "notice": "", "context": "Memory context", "hitCount": 1},
+        )
+
+        system_message = prepared.body["messages"][0]
+        latest_user_message = prepared.body["messages"][-1]
+        self.assertEqual(prepared.body["model"], "deepseek-v4-pro")
+        self.assertTrue(prepared.body["stream"])
+        self.assertEqual(system_message["role"], "system")
+        self.assertIn("System prompt", system_message["content"])
+        self.assertIn("Older summary", system_message["content"])
+        self.assertNotIn("Memory context", system_message["content"])
+        self.assertNotIn("Search context", system_message["content"])
+        self.assertIn("Memory context", latest_user_message["content"])
+        self.assertIn("Search context", latest_user_message["content"])
+        self.assertIn("Continue here", latest_user_message["content"])
+
+    def test_dynamic_context_changes_only_latest_user_message(self) -> None:
+        payload = {
+            "apiKey": "test",
+            "model": "expert",
+            "systemPrompt": "System prompt",
+            "contextSummary": "Older summary",
+            "messages": [
+                {"role": "user", "content": "First"},
+                {"role": "assistant", "content": "Second"},
+                {"role": "user", "content": "Latest"},
+            ],
+        }
+
+        first = build_deepseek_request(payload, stream=False, memory_state={"enabled": True, "notice": "", "context": "Memory A", "hitCount": 1})
+        second = build_deepseek_request(payload, stream=False, memory_state={"enabled": True, "notice": "", "context": "Memory B", "hitCount": 1})
+
+        self.assertEqual(first.body["messages"][:-1], second.body["messages"][:-1])
+        self.assertNotEqual(first.body["messages"][-1], second.body["messages"][-1])
+
+    def test_system_prompt_stays_stable_when_history_appends(self) -> None:
+        first = build_deepseek_request(
+            {
+                "apiKey": "test",
+                "model": "expert",
+                "systemPrompt": "System prompt",
+                "contextSummary": "Older summary",
+                "messages": [
+                    {"role": "user", "content": "hi"},
+                    {"role": "assistant", "content": "hello"},
+                    {"role": "user", "content": "q1"},
+                ],
+            },
+            stream=False,
+        )
+        second = build_deepseek_request(
+            {
+                "apiKey": "test",
+                "model": "expert",
+                "systemPrompt": "System prompt",
+                "contextSummary": "Older summary",
+                "messages": [
+                    {"role": "user", "content": "hi"},
+                    {"role": "assistant", "content": "hello"},
+                    {"role": "user", "content": "q1"},
+                    {"role": "assistant", "content": "a1"},
+                    {"role": "user", "content": "q2"},
+                ],
+            },
+            stream=False,
+        )
+
+        self.assertEqual(first.body["messages"][0], second.body["messages"][0])
+
+    def test_history_prefix_stays_stable_when_appending_messages(self) -> None:
+        base_messages = [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello"}]
+        first = build_deepseek_request(
+            {"apiKey": "test", "model": "expert", "messages": [*base_messages, {"role": "user", "content": "q1"}]},
+            stream=False,
+        )
+        second = build_deepseek_request(
+            {
+                "apiKey": "test",
+                "model": "expert",
+                "messages": [
+                    *base_messages,
+                    {"role": "user", "content": "q1"},
+                    {"role": "assistant", "content": "a1"},
+                    {"role": "user", "content": "q2"},
+                ],
+            },
+            stream=False,
+        )
+
+        self.assertEqual(first.body["messages"][:-1], second.body["messages"][:-3])
+
+    def test_build_deepseek_request_requires_compression_before_over_limit_without_summary(self) -> None:
+        messages = [{"role": "user", "content": f"Message {index}"} for index in range(41)]
+
+        with self.assertRaises(AppError) as cm:
+            build_deepseek_request({"apiKey": "test", "model": "expert", "messages": messages}, stream=False)
+
+        self.assertEqual(cm.exception.code, ErrorCode.CONTEXT_COMPRESSION_REQUIRED)
+        self.assertEqual(cm.exception.status, 409)
+
+    def test_build_deepseek_request_keeps_all_messages_when_summary_exists(self) -> None:
+        messages = [{"role": "user", "content": f"Message {index}"} for index in range(41)]
+
+        prepared = build_deepseek_request(
+            {"apiKey": "test", "model": "expert", "contextSummary": "Summary", "messages": messages},
+            stream=False,
+        )
+
+        request_messages = [message for message in prepared.body["messages"] if message["role"] in {"user", "assistant"}]
+        self.assertEqual(len(request_messages), 41)
+        self.assertIn("Message 0", request_messages[0]["content"])
+        self.assertIn("Message 40", request_messages[-1]["content"])
+
+    def test_call_deepseek_adds_cache_diagnostics_from_usage(self) -> None:
+        response = {
+            "id": "response-id",
+            "model": "deepseek-v4-pro",
+            "choices": [{"message": {"content": "answer"}}],
+            "usage": {"prompt_cache_hit_tokens": 300, "prompt_cache_miss_tokens": 100},
+        }
+        with patch("urllib.request.urlopen", return_value=FakeResponse(json.dumps(response).encode("utf-8"))):
+            result = call_deepseek({"apiKey": "test", "model": "expert", "messages": [{"role": "user", "content": "Question"}]})
+
+        self.assertEqual(result["diagnostics"]["cacheHitTokens"], 300)
+        self.assertEqual(result["diagnostics"]["cacheMissTokens"], 100)
+        self.assertEqual(result["diagnostics"]["cacheHitRate"], 75.0)
+
+    def test_call_deepseek_uses_configured_timeout(self) -> None:
+        response = {
+            "id": "response-id",
+            "model": "deepseek-v4-pro",
+            "choices": [{"message": {"content": "answer"}}],
+            "usage": {},
+        }
+        with (
+            patch.object(deepseek_client, "DEEPSEEK_TIMEOUT_SECONDS", 9),
+            patch("urllib.request.urlopen", return_value=FakeResponse(json.dumps(response).encode("utf-8"))) as mocked,
+        ):
+            call_deepseek({"apiKey": "test", "model": "expert", "messages": [{"role": "user", "content": "Question"}]})
+
+        self.assertEqual(mocked.call_args.kwargs["timeout"], 9)
+
+    def test_call_deepseek_executes_tool_call_before_final_answer(self) -> None:
+        tool_response = {
+            "id": "tool-response",
+            "model": "deepseek-v4-pro",
+            "choices": [
+                {
+                    "message": {
+                        "content": "",
+                        "reasoning_content": "Need exact factorial.",
+                        "tool_calls": [
+                            {
+                                "id": "call_1",
+                                "type": "function",
+                                "function": {"name": "python_eval", "arguments": json.dumps({"expression": "factorial(5)"})},
+                            }
+                        ],
+                    }
+                }
+            ],
+            "usage": {},
+        }
+        final_response = {
+            "id": "final-response",
+            "model": "deepseek-v4-pro",
+            "choices": [{"message": {"content": "120"}}],
+            "usage": {},
+        }
+        with patch(
+            "urllib.request.urlopen",
+            side_effect=[FakeResponse(json.dumps(tool_response).encode("utf-8")), FakeResponse(json.dumps(final_response).encode("utf-8"))],
+        ) as mocked:
+            result = call_deepseek({"apiKey": "test", "model": "expert", "messages": [{"role": "user", "content": "23!"}]})
+
+        second_request = mocked.call_args_list[1].args[0]
+        second_body = json.loads(second_request.data.decode("utf-8"))
+        assistant_messages = [message for message in second_body["messages"] if message.get("role") == "assistant"]
+        tool_messages = [message for message in second_body["messages"] if message.get("role") == "tool"]
+        self.assertEqual(result["content"], "120")
+        self.assertEqual(result["diagnostics"]["toolCallCount"], 1)
+        self.assertEqual(result["diagnostics"]["toolNames"], ["python_eval"])
+        self.assertEqual(assistant_messages[-1]["reasoning_content"], "Need exact factorial.")
+        self.assertIn("120", tool_messages[0]["content"])
+
+    def test_stream_deepseek_done_event_adds_cache_diagnostics_from_usage(self) -> None:
+        chunk = {
+            "id": "response-id",
+            "model": "deepseek-v4-pro",
+            "usage": {"prompt_cache_hit_tokens": 50, "prompt_cache_miss_tokens": 50},
+            "choices": [{"delta": {"content": "answer"}}],
+        }
+        events: list[dict[str, object]] = []
+        with patch("urllib.request.urlopen", return_value=FakeStream([f"data: {json.dumps(chunk)}\n".encode("utf-8"), b"data: [DONE]\n"])):
+            stream_deepseek({"apiKey": "test", "model": "expert", "messages": [{"role": "user", "content": "Question"}]}, events.append)
+
+        done = [event for event in events if event.get("type") == "done"][0]
+        diagnostics = done["diagnostics"]
+        assert isinstance(diagnostics, dict)
+        self.assertEqual(diagnostics["cacheHitTokens"], 50)
+        self.assertEqual(diagnostics["cacheMissTokens"], 50)
+        self.assertEqual(diagnostics["cacheHitRate"], 50.0)
+
+    def test_stream_deepseek_executes_streamed_tool_call(self) -> None:
+        tool_delta = {
+            "id": "tool-response",
+            "model": "deepseek-v4-pro",
+            "choices": [
+                {
+                    "delta": {
+                        "reasoning_content": "Need exact factorial.",
+                        "content": "Working. ",
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "id": "call_1",
+                                "type": "function",
+                                "function": {"name": "python_eval", "arguments": json.dumps({"expression": "factorial(5)"})},
+                            }
+                        ]
+                    }
+                }
+            ],
+        }
+        final_delta = {
+            "id": "final-response",
+            "model": "deepseek-v4-pro",
+            "usage": {"prompt_cache_hit_tokens": 1, "prompt_cache_miss_tokens": 1},
+            "choices": [{"delta": {"content": "120"}}],
+        }
+        events: list[dict[str, object]] = []
+        with patch(
+            "urllib.request.urlopen",
+            side_effect=[
+                FakeStream([f"data: {json.dumps(tool_delta)}\n".encode("utf-8"), b"data: [DONE]\n"]),
+                FakeStream([f"data: {json.dumps(final_delta)}\n".encode("utf-8"), b"data: [DONE]\n"]),
+            ],
+        ) as mocked:
+            stream_deepseek({"apiKey": "test", "model": "expert", "messages": [{"role": "user", "content": "5!"}]}, events.append)
+
+        second_request = mocked.call_args_list[1].args[0]
+        second_body = json.loads(second_request.data.decode("utf-8"))
+        assistant_messages = [message for message in second_body["messages"] if message.get("role") == "assistant"]
+        system_notes = [event for event in events if event.get("type") == "system_note"]
+        done = [event for event in events if event.get("type") == "done"][0]
+        diagnostics = done["diagnostics"]
+        assert isinstance(diagnostics, dict)
+        self.assertEqual(assistant_messages[-1]["content"], "Working. ")
+        self.assertEqual(assistant_messages[-1]["reasoning_content"], "Need exact factorial.")
+        self.assertTrue(any("python_eval" in str(event.get("text")) for event in system_notes))
+        self.assertEqual(done["content"], "Working. 120")
+        self.assertEqual(diagnostics["toolCallCount"], 1)
+
+    def test_stream_deepseek_emits_memory_suggestion_event(self) -> None:
+        tool_delta = {
+            "id": "tool-response",
+            "model": "deepseek-v4-pro",
+            "choices": [
+                {
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "id": "call_1",
+                                "type": "function",
+                                "function": {
+                                    "name": "suggest_memory",
+                                    "arguments": json.dumps({"content": "Prefers concise answers", "category": "preference"}),
+                                },
+                            }
+                        ]
+                    }
+                }
+            ],
+        }
+        final_delta = {
+            "id": "final-response",
+            "model": "deepseek-v4-pro",
+            "choices": [{"delta": {"content": "ok"}}],
+        }
+        events: list[dict[str, object]] = []
+        with patch(
+            "urllib.request.urlopen",
+            side_effect=[
+                FakeStream([f"data: {json.dumps(tool_delta)}\n".encode("utf-8"), b"data: [DONE]\n"]),
+                FakeStream([f"data: {json.dumps(final_delta)}\n".encode("utf-8"), b"data: [DONE]\n"]),
+            ],
+        ):
+            stream_deepseek(
+                {
+                    "apiKey": "test",
+                    "model": "expert",
+                    "memoryScope": "project:alpha",
+                    "messages": [{"role": "user", "content": "I prefer concise answers"}],
+                },
+                events.append,
+            )
+
+        suggestion = [event for event in events if event.get("type") == "memory_suggestion"][0]
+        done = [event for event in events if event.get("type") == "done"][0]
+        self.assertEqual(suggestion["content"], "Prefers concise answers")
+        self.assertEqual(suggestion["scope"], "project:alpha")
+        self.assertEqual(done["memorySuggestions"], [{key: suggestion[key] for key in ("content", "category", "scope", "conflicts")}])
+
+    def test_stream_search_notes_use_system_note_not_reasoning(self) -> None:
+        chunk = {
+            "id": "response-id",
+            "model": "deepseek-v4-pro",
+            "choices": [{"delta": {"reasoning_content": "model reasoning", "content": "answer"}}],
+        }
+        search_data = {
+            "status": "done",
+            "query": "latest docs",
+            "reason": "fresh",
+            "results": [{"title": "Docs", "url": "https://example.com", "content": "ok"}],
+            "rounds": [],
+            "cached": False,
+        }
+        events: list[dict[str, object]] = []
+        with (
+            patch.object(deepseek_client, "search_multiple", return_value=search_data),
+            patch("urllib.request.urlopen", return_value=FakeStream([f"data: {json.dumps(chunk)}\n".encode("utf-8"), b"data: [DONE]\n"])),
+        ):
+            stream_deepseek(
+                {
+                    "apiKey": "test",
+                    "model": "expert",
+                    "searchEnabled": True,
+                    "searchMode": "on",
+                    "messages": [{"role": "user", "content": "latest docs"}],
+                },
+                events.append,
+            )
+
+        system_notes = [event for event in events if event.get("type") == "system_note"]
+        reasoning_events = [event for event in events if event.get("type") == "reasoning"]
+        done = [event for event in events if event.get("type") == "done"][0]
+        self.assertGreaterEqual(len(system_notes), 2)
+        self.assertEqual(reasoning_events, [{"type": "reasoning", "text": "model reasoning"}])
+        self.assertEqual(done["reasoning"], "model reasoning")
+        self.assertNotIn("多轮搜索", str(done["reasoning"]))
+
+    def test_stream_deepseek_converts_sse_error_event(self) -> None:
+        events: list[dict[str, object]] = []
+
+        with patch("urllib.request.urlopen", return_value=FakeStream([b"event: error\n", b'data: {"error":{"message":"stream failed"}}\n'])):
+            stream_deepseek({"apiKey": "test", "model": "expert", "messages": [{"role": "user", "content": "Question"}]}, events.append)
+
+        self.assertEqual(events[-1]["type"], "error")
+        self.assertEqual(events[-1]["error"], "stream failed")
+        self.assertEqual(events[-1]["code"], ErrorCode.UPSTREAM_FAILURE.value)
+
+    def test_force_final_answer_without_tools_drops_tools_and_appends_hint(self) -> None:
+        body = {
+            "model": "expert",
+            "tools": [{"type": "function"}],
+            "messages": [
+                {"role": "user", "content": "first"},
+                {"role": "assistant", "content": "second"},
+            ],
+        }
+        result = deepseek_client.force_final_answer_without_tools(body)
+        self.assertNotIn("tools", result)
+        self.assertEqual(result["model"], "expert")
+        self.assertEqual(len(result["messages"]), 3)
+        self.assertEqual(result["messages"][-1]["role"], "user")
+        self.assertIn("工具调用次数已经用完", result["messages"][-1]["content"])
+        self.assertEqual(body["messages"][-1]["role"], "assistant")
+        self.assertIn("tools", body)
+
+
+class FakeResponse:
+    def __init__(self, data: bytes) -> None:
+        self.data = data
+
+    def __enter__(self) -> "FakeResponse":
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return self.data
+
+
+class FakeStream:
+    def __init__(self, lines: list[bytes]) -> None:
+        self.lines = lines
+
+    def __enter__(self) -> "FakeStream":
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
+        return None
+
+    def __iter__(self) -> object:
+        return iter(self.lines)
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+

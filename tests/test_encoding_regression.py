@@ -1,0 +1,1232 @@
+from __future__ import annotations
+
+import json
+import struct
+import unittest
+from pathlib import Path
+
+
+def png_dimensions(path: Path) -> tuple[int, int]:
+    data = path.read_bytes()
+    if not data.startswith(b"\x89PNG\r\n\x1a\n"):
+        raise AssertionError(f"{path} is not a PNG file")
+    return struct.unpack(">II", data[16:24])
+
+
+class EncodingRegressionTests(unittest.TestCase):
+    def test_python_sources_do_not_start_with_utf8_bom(self) -> None:
+        python_files = [Path("app.py")] + list(Path("deepseek_mobile").rglob("*.py")) + list(Path("tests").rglob("*.py"))
+        offenders = [str(path) for path in python_files if path.read_bytes().startswith(b"\xef\xbb\xbf")]
+
+        self.assertEqual(offenders, [])
+
+    def test_runtime_files_do_not_contain_known_mojibake_fragments(self) -> None:
+        bad_fragments = [
+            "\u93b4\u621d\u539b",
+            "\u6fb6\u6c33\u7586",
+            "\u7ed7?",
+            "\u6924?",
+            "\u6fb6\u8fab\u89e6",
+        ]
+        runtime_files = list(Path("deepseek_mobile").rglob("*.py")) + [
+            path for path in Path("static").rglob("*.js") if "vendor" not in path.parts
+        ]
+        offenders: list[str] = []
+
+        for path in runtime_files:
+            text = path.read_text(encoding="utf-8")
+            if any(fragment in text for fragment in bad_fragments) or any("\ue000" <= char <= "\uf8ff" for char in text):
+                offenders.append(str(path))
+
+        self.assertEqual(offenders, [])
+
+    def test_frontend_stream_and_favicon_guards_are_present(self) -> None:
+        text = Path("static/modules/chat.js").read_text(encoding="utf-8")
+        stream = Path("static/modules/stream.js").read_text(encoding="utf-8")
+        panels = Path("static/modules/panels.js").read_text(encoding="utf-8")
+        html = Path("static/index.html").read_text(encoding="utf-8")
+
+        self.assertIn("function parseStreamEventLine(line", stream)
+        self.assertIn("JSON.parse(trimmed)", stream)
+        self.assertIn("\"Skipped invalid stream event line\"", stream)
+        self.assertIn('event.type === "system_note"', text)
+        self.assertIn("assistantMessage.systemNotes.push(text)", text)
+        self.assertIn("function systemNotesForMessage(message)", text)
+        self.assertIn("isHttpUrl(result.favicon)", text)
+        self.assertIn("export function isHttpUrl(value)", panels)
+        self.assertIn("image/*", html)
+        self.assertIn(".png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff,.gif", html)
+        self.assertIn("这张图片需要 OCR 才能识别文字", text)
+
+    def test_seek_frontend_entrypoints_are_present(self) -> None:
+        app = Path("static/modules/chat.js").read_text(encoding="utf-8")
+        network = Path("static/modules/network.js").read_text(encoding="utf-8")
+        html = Path("static/index.html").read_text(encoding="utf-8")
+
+        self.assertIn("const presetSeeks = Object.freeze", app)
+        self.assertIn("const seekCore = window.DeepSeekSeekCore", app)
+        self.assertIn("function buildSystemPrompt(seekContext = state.activeSeekId)", app)
+        self.assertIn("[Seek: ${seek.name}]", app)
+        self.assertIn("storageKeys.seeks", app)
+        self.assertIn("storageKeys.tavilyKey", app)
+        self.assertIn('id="tavilyKeyInput"', html)
+        self.assertIn('id="rememberTavilyKeyInput"', html)
+        self.assertIn('id="clearLocalDataButton"', html)
+        self.assertIn('apiFetch("/api/auth/logout"', app)
+        self.assertIn("sessionStorage.removeItem(storageKeys.authToken)", app)
+        self.assertIn("sessionStorage.removeItem(storageKeys.authToken)", network)
+        self.assertNotIn("sessionStorage.setItem(storageKeys.authToken)", network)
+        self.assertNotIn('readCookie("auth_token")', network)
+        self.assertNotIn("prefixToggleButton", app)
+        self.assertNotIn("responsePrefix", app)
+        self.assertNotIn('id="prefixToggleButton"', html)
+        self.assertNotIn("前缀续写", html)
+        self.assertIn('id="activeSeekRow"', html)
+        self.assertIn('id="clearSeekButton"', html)
+        self.assertIn('id="seekReferenceInput"', html)
+        self.assertIn('id="seekReferenceList"', html)
+        self.assertIn('<script src="/seek_core.js"></script>', html)
+        self.assertIn('aria-label="Seek 助手"', html)
+        self.assertIn('id="seekButton"', html)
+
+    def test_formula_frontend_entrypoints_are_present(self) -> None:
+        app = Path("static/modules/chat.js").read_text(encoding="utf-8")
+        markdown = Path("static/modules/markdown.js").read_text(encoding="utf-8")
+        html = Path("static/index.html").read_text(encoding="utf-8")
+        css = Path("static/styles.css").read_text(encoding="utf-8")
+        math = Path("static/math_core.js").read_text(encoding="utf-8")
+        sw = Path("static/sw.js").read_text(encoding="utf-8")
+        workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+
+        self.assertIn("const mathCore = window.DeepSeekMathCore", app)
+        self.assertIn("const formulaPrompt =", app)
+        self.assertIn("renderMathBlock(singleLineDollarMath[1])", markdown)
+        self.assertIn("export function formatContent(value, options = {})", markdown)
+        self.assertIn("export function renderMarkdown(value, { streaming = false } = {})", markdown)
+        self.assertIn("flushPendingMathBlockAsText", markdown)
+        self.assertIn("{ streaming: message.streaming }", app)
+        self.assertIn("function renderMathInline(value)", markdown)
+        self.assertIn('<link rel="stylesheet" href="/vendor/katex/katex.min.css" />', html)
+        self.assertIn('<script src="/vendor/katex/katex.min.js"></script>', html)
+        self.assertIn('<script src="/math_core.js"></script>', html)
+        self.assertIn(".content .katex", css)
+        self.assertIn(".math-pending", css)
+        self.assertIn("global.DeepSeekMathCore = Object.freeze", math)
+        self.assertIn("renderToString(source", math)
+        self.assertIn("data-latex", math)
+        self.assertIn("renderPendingMathIn", math)
+        self.assertIn('"/vendor/katex/katex.min.js"', sw)
+        self.assertIn('"/vendor/katex/fonts/KaTeX_Main-Regular.woff2"', sw)
+        self.assertTrue(Path("static/vendor/katex/katex.min.js").is_file())
+        self.assertTrue(Path("static/vendor/katex/katex.min.css").is_file())
+        self.assertTrue(Path("static/vendor/katex/LICENSE").is_file())
+        self.assertGreaterEqual(len(list(Path("static/vendor/katex/fonts").glob("*.woff2"))), 20)
+        self.assertIn("node --check static/vendor/katex/katex.min.js", workflow)
+        self.assertIn("node --check static/math_core.js", workflow)
+
+    def test_seek_prompt_binding_and_cache_cleanup_are_stable(self) -> None:
+        app = Path("static/modules/chat.js").read_text(encoding="utf-8")
+
+        self.assertNotIn("clearLegacyCaches", app)
+        self.assertIn("function seekSnapshotFromMessage(message)", app)
+        self.assertIn("seekName: normalizeSeekText(value.seekName, 32)", app)
+        self.assertIn("seekReferenceAttachments: normalizeSeekReferenceAttachments(value.seekReferenceAttachments || [])", app)
+        self.assertIn("combinedAttachmentsForMessage(message)", app)
+        self.assertIn('message?.role === "user" ? message.seekReferenceAttachments : []', app)
+        self.assertIn("referenceAttachments: normalizeSeekReferenceAttachments(state.seekEditorAttachments)", app)
+        self.assertIn("systemPrompt: buildSystemPrompt(assistantMessage)", app)
+        self.assertIn("buildCompressedRequestParts(apiKey, requestMessages, assistantMessage)", app)
+        self.assertIn("localStorage.removeItem(storageKeys.activeSeek)", app)
+        self.assertIn("uniqueSeekNamesForMessages(state.messages)", app)
+        self.assertIn("setActiveSeek(\"\", { closePanel: true })", app)
+        self.assertIn("setActiveSeek(seek.id, { newChat: true })", app)
+        self.assertIn("seekCore.latestKnownSeekId(messages, allSeeks())", app)
+
+    def test_v070_productivity_entrypoints_are_present(self) -> None:
+        app = Path("static/modules/chat.js").read_text(encoding="utf-8")
+        html = Path("static/index.html").read_text(encoding="utf-8")
+        css = Path("static/styles.css").read_text(encoding="utf-8")
+        sw = Path("static/sw.js").read_text(encoding="utf-8")
+
+        self.assertIn("deepseek-mobile.draft", app)
+        self.assertIn("function forkConversationFromMessage(messageId)", app)
+        self.assertIn("data-branch-from-message", app)
+        self.assertIn("function quoteMessageForReply(messageId)", app)
+        self.assertIn('id="selectionPopover"', html)
+        self.assertIn("data-selection-action=\"quote\"", html)
+        self.assertNotIn("data-quote-message", app)
+        self.assertIn("function scheduleReminder(reminder)", app)
+        self.assertIn('apiFetch("/api/reminders"', app)
+        self.assertIn('apiFetch("/api/conversations/search"', app)
+        self.assertIn("function toggleConversationFavorite(id)", app)
+        self.assertIn("function editConversationTags(id)", app)
+        self.assertIn('id="draftRestore"', html)
+        self.assertIn('id="quotePreview"', html)
+        self.assertIn('id="historySearchInput"', html)
+        self.assertIn(".history-menu-button", css)
+        self.assertIn('data.type !== "show_reminder"', sw)
+        self.assertIn("deepseek-mobile-v150", sw)
+
+    def test_v071_project_library_and_citations_are_present(self) -> None:
+        app = Path("static/modules/chat.js").read_text(encoding="utf-8")
+        markdown = Path("static/modules/markdown.js").read_text(encoding="utf-8")
+        html = Path("static/index.html").read_text(encoding="utf-8")
+        css = Path("static/styles.css").read_text(encoding="utf-8")
+        sw = Path("static/sw.js").read_text(encoding="utf-8")
+
+        self.assertIn('id="projectButton"', html)
+        self.assertIn('id="projectPanel"', html)
+        self.assertIn('id="activeProjectRow"', html)
+        self.assertIn('id="projectUploadInput"', html)
+        self.assertIn(".pptx,.epub", html)
+        self.assertIn("activeProjectSnapshot()", app)
+        self.assertIn("projectAttachments: normalizeProjectAttachments(project.documents || [])", app)
+        self.assertIn('apiFetch("/api/projects"', app)
+        self.assertIn("/api/project-files?projectId=", app)
+        self.assertIn('apiFetch("/api/file-chunk"', app)
+        self.assertIn("openCitationForMessage", app)
+        self.assertIn('data-citation="${escapeAttribute(id)}"', markdown)
+        self.assertIn(".citation-pin", css)
+        self.assertIn("deepseek-mobile-v150", sw)
+
+    def test_v073_memory_suggestions_and_scopes_are_present(self) -> None:
+        app = Path("static/modules/chat.js").read_text(encoding="utf-8")
+        client = Path("deepseek_mobile/services/deepseek_client.py").read_text(encoding="utf-8")
+        tools = Path("deepseek_mobile/services/tools.py").read_text(encoding="utf-8")
+        memory = Path("deepseek_mobile/services/memory.py").read_text(encoding="utf-8")
+        sw = Path("static/sw.js").read_text(encoding="utf-8")
+
+        self.assertIn('event.type === "memory_suggestion"', app)
+        self.assertIn("function memoryScopeForContext", app)
+        self.assertIn('"memory_suggestion"', client)
+        self.assertIn('"name": "suggest_memory"', tools)
+        self.assertIn("def detect_memory_conflicts", memory)
+        self.assertIn("deepseek-mobile-v150", sw)
+
+    def test_v074_ui_ux_enhancements_are_present(self) -> None:
+        app = Path("static/modules/chat.js").read_text(encoding="utf-8")
+        markdown = Path("static/modules/markdown.js").read_text(encoding="utf-8")
+        html = Path("static/index.html").read_text(encoding="utf-8")
+        css = Path("static/styles.css").read_text(encoding="utf-8")
+        sw = Path("static/sw.js").read_text(encoding="utf-8")
+
+        self.assertIn('id="commandPalette"', html)
+        self.assertIn("function onGlobalKeydown", app)
+        self.assertIn("function openCommandPalette", app)
+        self.assertIn('id="offlineBanner"', html)
+        self.assertIn("state.offlineMode = true", app)
+        self.assertIn('id="themeStyleSelect"', html)
+        self.assertIn('id="themeModeSelect"', html)
+        self.assertIn("function applyAppearanceSettings", app)
+        self.assertIn("data-code-action=\"toggle-collapse\"", markdown)
+        self.assertIn("data-math-action=\"copy\"", markdown)
+        self.assertIn("data-chart-action=\"bar\"", markdown)
+        self.assertIn("function hydrateMermaidDiagrams", markdown)
+        self.assertIn(".command-palette", css)
+        self.assertIn("deepseek-mobile-v150", sw)
+
+    def test_v080_voice_and_share_target_are_present(self) -> None:
+        app = Path("static/modules/chat.js").read_text(encoding="utf-8")
+        html = Path("static/index.html").read_text(encoding="utf-8")
+        css = Path("static/styles.css").read_text(encoding="utf-8")
+        manifest = Path("static/manifest.webmanifest").read_text(encoding="utf-8")
+        server = Path("deepseek_mobile/web/server.py").read_text(encoding="utf-8")
+
+        self.assertIn('id="voiceInputButton"', html)
+        self.assertIn("function startVoiceInput()", app)
+        self.assertIn("function toggleSpeakMessage(messageId)", app)
+        self.assertIn("data-speak-message", app)
+        self.assertIn("function consumeShareTarget()", app)
+        self.assertIn(".voice-button.listening", css)
+        self.assertIn('"share_target"', manifest)
+        self.assertIn('"/share-target"', server)
+        self.assertIn('"/api/share-target"', server)
+
+    def test_v081_share_target_and_speech_fixes_are_present(self) -> None:
+        app = Path("static/modules/chat.js").read_text(encoding="utf-8")
+        speech = Path("static/modules/speech_text.js").read_text(encoding="utf-8")
+        html = Path("static/index.html").read_text(encoding="utf-8")
+        manifest = Path("static/manifest.webmanifest").read_text(encoding="utf-8")
+        server = Path("deepseek_mobile/web/server.py").read_text(encoding="utf-8")
+
+        self.assertIn("SHARE_TARGET_TTL_SECONDS = 30 * 60", server)
+        self.assertIn("require_allowed_host()", server)
+        self.assertIn("function confirmShareTarget(share)", app)
+        self.assertIn("function speechChunks(text)", speech)
+        self.assertIn("function preferredSpeechVoice(lang", speech)
+        self.assertIn("公式略", speech)
+        self.assertIn('id="voiceLanguageSelect"', html)
+        self.assertIn("application/vnd.openxmlformats-officedocument.wordprocessingml.document", manifest)
+        self.assertIn("application/epub+zip", manifest)
+
+    def test_v082_selection_quote_entrypoints_are_present(self) -> None:
+        app = Path("static/modules/chat.js").read_text(encoding="utf-8")
+        html = Path("static/index.html").read_text(encoding="utf-8")
+        css = Path("static/styles.css").read_text(encoding="utf-8")
+        format_module = Path("static/modules/format.js").read_text(encoding="utf-8")
+
+        self.assertIn('id="quoteSelectionButton"', html)
+        self.assertIn("function selectedAssistantQuoteCandidate()", app)
+        self.assertIn("function selectedMathSources(range, bubble)", app)
+        self.assertIn("function setFragmentQuote(messageId, fragment)", app)
+        self.assertIn("data-quote-origin", app)
+        self.assertIn("quoteDraft?.isFragment", format_module)
+        self.assertIn(".selection-quote-button.active", css)
+
+    def test_v083_pwa_icons_and_favicons_are_present(self) -> None:
+        html = Path("static/index.html").read_text(encoding="utf-8")
+        manifest = json.loads(Path("static/manifest.webmanifest").read_text(encoding="utf-8"))
+        sw = Path("static/sw.js").read_text(encoding="utf-8")
+        app = Path("deepseek_mobile/app.py").read_text(encoding="utf-8")
+        server = Path("deepseek_mobile/web/server.py").read_text(encoding="utf-8")
+
+        self.assertIn('<link rel="icon" href="/icons/favicon.svg" type="image/svg+xml" />', html)
+        self.assertIn('<link rel="icon" href="/icons/favicon-32x32.png" sizes="32x32" type="image/png" />', html)
+        self.assertIn('<link rel="icon" href="/favicon.ico" sizes="any" />', html)
+        self.assertIn('<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />', html)
+
+        icons = manifest.get("icons")
+        self.assertIsInstance(icons, list)
+        icon_by_src = {icon.get("src"): icon for icon in icons if isinstance(icon, dict)}
+        for src in [
+            "/icons/icon.svg",
+            "/icons/pwa-192x192.png",
+            "/icons/pwa-512x512.png",
+            "/icons/maskable-192x192.png",
+            "/icons/maskable-512x512.png",
+        ]:
+            with self.subTest(src=src):
+                self.assertIn(src, icon_by_src)
+        self.assertEqual(icon_by_src["/icons/maskable-512x512.png"]["purpose"], "maskable")
+        self.assertEqual(icon_by_src["/icons/pwa-512x512.png"]["purpose"], "any")
+
+        expected_sizes = {
+            "static/icons/pwa-192x192.png": (192, 192),
+            "static/icons/pwa-512x512.png": (512, 512),
+            "static/icons/maskable-192x192.png": (192, 192),
+            "static/icons/maskable-512x512.png": (512, 512),
+            "static/icons/apple-touch-icon.png": (180, 180),
+            "static/icons/badge-96x96.png": (96, 96),
+            "static/icons/favicon-32x32.png": (32, 32),
+            "static/icons/favicon-16x16.png": (16, 16),
+        }
+        for path, size in expected_sizes.items():
+            with self.subTest(path=path):
+                self.assertEqual(png_dimensions(Path(path)), size)
+        self.assertTrue(Path("static/icons/icon.svg").is_file())
+        self.assertTrue(Path("static/icons/favicon.svg").is_file())
+        self.assertEqual(Path("static/favicon.ico").read_bytes()[:4], b"\x00\x00\x01\x00")
+
+        for cached in [
+            '"/favicon.ico"',
+            '"/icons/apple-touch-icon.png"',
+            '"/icons/favicon.svg"',
+            '"/icons/maskable-512x512.png"',
+            '"/icons/pwa-512x512.png"',
+        ]:
+            with self.subTest(cached=cached):
+                self.assertIn(cached, sw)
+        self.assertIn('icon: "/icons/pwa-192x192.png"', sw)
+        self.assertIn('badge: "/icons/badge-96x96.png"', sw)
+        self.assertIn('mimetypes.add_type("image/svg+xml", ".svg")', app)
+        self.assertIn('".svg": "image/svg+xml"', server)
+
+    def test_v084_motion_feedback_and_stream_throttle_are_present(self) -> None:
+        app = Path("static/modules/chat.js").read_text(encoding="utf-8")
+        css = Path("static/styles.css").read_text(encoding="utf-8")
+        sw = Path("static/sw.js").read_text(encoding="utf-8")
+
+        for token in [
+            "--motion-fast",
+            "--motion-base",
+            "--motion-slow",
+            "--ease-out",
+            "--ease-standard",
+            "prefers-reduced-motion: reduce",
+            ".icon-button:not(:disabled):active",
+            ".message[data-fresh=\"true\"]",
+            "@keyframes msg-in",
+            "@keyframes toast-in",
+            ".backdrop.open",
+            ".history-panel.open",
+            ".segmented[data-active-mode=\"expert\"]::before",
+        ]:
+            with self.subTest(token=token):
+                self.assertIn(token, css)
+
+        for token in [
+            "const freshMessageIds = new Set()",
+            "const pendingStreamingMessageIds = new Set()",
+            "function markMessageFresh(message)",
+            "function decorateFreshMessage(node, messageId)",
+            "requestAnimationFrame(flushStreamingMessageUpdates)",
+            "function renderStreamingMessage(message)",
+            "function setBackdropVisible(visible)",
+            "function removeWithMotion(node)",
+            "modelTabs.dataset.activeMode",
+        ]:
+            with self.subTest(token=token):
+                self.assertIn(token, app)
+        self.assertIn("deepseek-mobile-v150", sw)
+
+    def test_v085_selection_quote_reasoning_and_composer_focus_fixes_are_present(self) -> None:
+        app = Path("static/modules/chat.js").read_text(encoding="utf-8")
+        css = Path("static/styles.css").read_text(encoding="utf-8")
+        sw = Path("static/sw.js").read_text(encoding="utf-8")
+        changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
+
+        for token in [
+            "selectionQuoteLocked: null",
+            "lastValidQuoteCandidate: null",
+            "function captureSelectionSnapshot(event)",
+            'quoteSelectionButton.addEventListener("touchstart", captureSelectionSnapshot, { passive: false })',
+            "Boolean((state.selectionQuoteCandidate || state.lastValidQuoteCandidate)?.text)",
+            "state.selectionQuoteLocked || state.selectionQuoteCandidate || selectedAssistantQuoteCandidate() || state.lastValidQuoteCandidate",
+            'return seconds > 0 ? `思考中 ${formatReasoningDuration(seconds)}` : "思考中"',
+            "clearSelectionQuoteState({ render: false })",
+        ]:
+            with self.subTest(token=token):
+                self.assertIn(token, app)
+
+        for token in [
+            "textarea:focus-visible",
+            ".composer:focus-within",
+            "border-color: var(--accent)",
+            "user-select: none",
+            "-webkit-user-select: none",
+        ]:
+            with self.subTest(token=token):
+                self.assertIn(token, css)
+        self.assertNotIn("button:focus-visible,\ntextarea:focus-visible", css)
+
+        self.assertIn("deepseek-mobile-v150", sw)
+        self.assertIn("## [0.8.5]", changelog)
+
+    def test_v086_reasoning_timer_and_busy_interactions_are_present(self) -> None:
+        app = Path("static/modules/chat.js").read_text(encoding="utf-8")
+        sw = Path("static/sw.js").read_text(encoding="utf-8")
+        readme = Path("README.md").read_text(encoding="utf-8")
+        changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
+        api = Path("docs/API.md").read_text(encoding="utf-8")
+
+        for token in [
+            "function markReasoningEnded(message)",
+            "markReasoningEnded(assistantMessage)",
+            "function reasoningElapsedSeconds(message)",
+            "Number(message.reasoningEndedAt) || Number(message.completedAt)",
+            "reasoningEndedAt: Number(value.reasoningEndedAt) || undefined",
+            "delete assistantMessage.reasoningEndedAt",
+            "voiceInputButton.disabled = !supported || state.offlineMode",
+            "const enabled = Boolean((state.selectionQuoteCandidate || state.lastValidQuoteCandidate)?.text) && !state.offlineMode",
+            "sendButton.hidden = isBusy",
+            "regenerateButton.disabled = state.busy",
+        ]:
+            with self.subTest(token=token):
+                self.assertIn(token, app)
+
+        for removed in [
+            "promptInput.disabled = isBusy",
+            "fileInput.disabled = isBusy",
+            "attachmentButton.setAttribute(\"aria-disabled\", String(isBusy))",
+            "speakButton.disabled = state.busy",
+            "quoteButton.disabled = state.busy",
+        ]:
+            with self.subTest(removed=removed):
+                self.assertNotIn(removed, app)
+
+        self.assertIn("deepseek-mobile-v150", sw)
+        self.assertIn("version-1.5.0-blue", readme)
+        self.assertIn("## [0.8.6]", changelog)
+        self.assertIn("适用版本：v1.4.0。", api)
+
+    def test_v090_sidebar_history_layout_is_present(self) -> None:
+        html = Path("static/index.html").read_text(encoding="utf-8")
+        css = Path("static/styles.css").read_text(encoding="utf-8")
+        sw = Path("static/sw.js").read_text(encoding="utf-8")
+        changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
+
+        for token in [
+            'id="historyButton" type="button" aria-label="打开侧边栏" title="侧边栏"',
+            '<nav class="history-nav"',
+            'id="projectButton"',
+            'id="exportChatButton"',
+            'id="seekButton"',
+            'id="historyNewChatButton"',
+            'class="history-row-button history-row-button--primary"',
+            'class="brand-mark history-brand"',
+        ]:
+            with self.subTest(token=token):
+                self.assertIn(token, html)
+        self.assertEqual(html.count('id="historyButton"'), 1)
+        self.assertEqual(html.count('id="projectButton"'), 1)
+        self.assertEqual(html.count('id="seekButton"'), 1)
+        self.assertEqual(html.count('id="exportChatButton"'), 1)
+        self.assertEqual(html.count('id="historyNewChatButton"'), 1)
+        # v1.2.1+ 重构：原 pill 内的 newChatButton 已合并到 historyNewChatButton；
+        # 原 sidebar 内的 closeHistoryButton 已移除（折叠 sidebar 改用外部 nav 的 historyButton）
+        self.assertNotIn('id="newChatButton"', html)
+        self.assertNotIn('id="closeHistoryButton"', html)
+
+        for token in [
+            ".history-nav",
+            ".history-row-button",
+            ".history-row-button--primary",
+            ".history-panel > .history-nav",
+            "overflow: hidden",
+            ".settings-panel",
+            "overflow-y: auto",
+            ".history-list",
+            "flex: 1",
+            "min-height: 40px",
+            ".history-meta",
+            "display: none",
+            ".history-footer",
+            "flex-shrink: 0",
+        ]:
+            with self.subTest(token=token):
+                self.assertIn(token, css)
+        self.assertNotIn(".history-footer {\n  position: sticky", css)
+        self.assertNotIn("background: rgba(255, 255, 255, 0.96)", css)
+        self.assertIn("deepseek-mobile-v150", sw)
+        self.assertIn("## [0.9.0]", changelog)
+
+    def test_v091_tool_calling_improvements_are_present(self) -> None:
+        client = Path("deepseek_mobile/services/deepseek_client.py").read_text(encoding="utf-8")
+        tools = Path("deepseek_mobile/services/tools.py").read_text(encoding="utf-8")
+        app = Path("static/modules/chat.js").read_text(encoding="utf-8")
+        html = Path("static/index.html").read_text(encoding="utf-8")
+        sw = Path("static/sw.js").read_text(encoding="utf-8")
+        readme = Path("README.md").read_text(encoding="utf-8")
+        changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
+        api = Path("docs/API.md").read_text(encoding="utf-8")
+
+        for token in [
+            "REASONING_EFFORTS",
+            "TOOL_PARALLEL_SYSTEM_HINT",
+            'request_body["top_p"] = 1.0',
+            'normalize_reasoning_effort(payload.get("reasoningEffort"))',
+            'assistant_payload["reasoning_content"] = str(reasoning)',
+            '{"content": round_content, "reasoning_content": round_reasoning}',
+        ]:
+            with self.subTest(token=token):
+                self.assertIn(token, client)
+
+        for token in [
+            "MAX_TOOL_ROUNDS = 3",
+            '"strict": True',
+            '"additionalProperties": False',
+            "Evaluate a side-effect-free Python math expression.",
+            "Fetch readable text from one public http(s) URL.",
+            '"pattern": "^(global|project:[A-Za-z0-9_-]{1,64}|seek:[A-Za-z0-9_-]{1,64})$"',
+        ]:
+            with self.subTest(token=token):
+                self.assertIn(token, tools)
+
+        for token in [
+            'reasoningEffort: "deepseek-mobile.reasoning-effort"',
+            "const reasoningEffortSelect = document.querySelector(\"#reasoningEffortSelect\")",
+            "function normalizeReasoningEffort(value)",
+            "reasoningEffort: state.reasoningEffort",
+            "reasoningEffort: assistantMessage.reasoningEffort",
+        ]:
+            with self.subTest(token=token):
+                self.assertIn(token, app)
+
+        self.assertIn('id="reasoningEffortSelect"', html)
+        self.assertIn("deepseek-mobile-v150", sw)
+        self.assertIn("version-1.5.0-blue", readme)
+        self.assertIn("## [0.9.1]", changelog)
+        self.assertIn("适用版本：v1.4.0。", api)
+
+    def test_v092_upload_limits_and_frontend_interactions_are_present(self) -> None:
+        app = Path("static/modules/chat.js").read_text(encoding="utf-8")
+        html = Path("static/index.html").read_text(encoding="utf-8")
+        css = Path("static/styles.css").read_text(encoding="utf-8")
+        normalize = Path("static/modules/normalize.js").read_text(encoding="utf-8")
+        server = Path("deepseek_mobile/web/server.py").read_text(encoding="utf-8")
+        config = Path("deepseek_mobile/core/config.py").read_text(encoding="utf-8")
+        sw = Path("static/sw.js").read_text(encoding="utf-8")
+        readme = Path("README.md").read_text(encoding="utf-8")
+        changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
+        api = Path("docs/API.md").read_text(encoding="utf-8")
+
+        for token in [
+            "upload_file_max_bytes: int = 200_000_000",
+            "upload_max_bytes: int = 220_000_000",
+            "MAX_UPLOAD_FILE_BYTES = settings.files.upload_file_max_bytes",
+            "MAX_UPLOAD_BYTES = settings.files.upload_max_bytes",
+        ]:
+            with self.subTest(token=token):
+                self.assertIn(token, config)
+
+        for token in [
+            '"uploadLimits": {',
+            '"fileMaxBytes": MAX_UPLOAD_FILE_BYTES',
+            '"requestMaxBytes": MAX_UPLOAD_BYTES',
+            "partsize_limit=MAX_UPLOAD_FILE_BYTES",
+            "format_upload_limit(MAX_UPLOAD_FILE_BYTES)",
+        ]:
+            with self.subTest(token=token):
+                self.assertIn(token, server)
+
+        for token in [
+            "defaultUploadLimits",
+            "function onPromptPaste(event)",
+            "function uploadPendingAttachmentFiles",
+            "function validatedUploadFiles",
+            "function decorateUploadItemsWithImagePreviews",
+            "function openImageLightbox",
+            "function exportSingleAssistantMessage",
+            "function confirmAction",
+            "function activateFocusTrap",
+            "function openShortcutPanel",
+            "window.visualViewport",
+            "distance <= 120",
+            "Math.min(viewportHeight * 0.5, 360)",
+            "data-feedback-message",
+            "toast-action",
+        ]:
+            with self.subTest(token=token):
+                self.assertIn(token, app)
+
+        for token in [
+            'id="dropOverlay"',
+            'id="statusLiveRegion"',
+            'id="alertLiveRegion"',
+            'id="shortcutPanel"',
+            'id="confirmDialog"',
+            'id="imageLightbox"',
+        ]:
+            with self.subTest(token=token):
+                self.assertIn(token, html)
+
+        for token in [
+            ".drop-overlay",
+            ".shortcut-panel",
+            ".confirm-dialog",
+            ".image-lightbox",
+            ".message-attachment.image",
+            ".attachment-thumb",
+            ".assistant-more-menu",
+            ".toast-action",
+            "var(--keyboard-inset, 0px)",
+        ]:
+            with self.subTest(token=token):
+                self.assertIn(token, css)
+
+        self.assertIn("thumbnail: String(value.thumbnail || \"\")", normalize)
+        self.assertIn("imagePreview: String(value.imagePreview || \"\")", normalize)
+        self.assertIn("deepseek-mobile-v150", sw)
+        self.assertIn("version-1.5.0-blue", readme)
+        self.assertIn("## [0.9.4]", changelog)
+        self.assertIn("uploadLimits", api)
+
+    def test_v093_model_driven_search_and_selection_popover_are_present(self) -> None:
+        app = Path("static/modules/chat.js").read_text(encoding="utf-8")
+        html = Path("static/index.html").read_text(encoding="utf-8")
+        css = Path("static/styles.css").read_text(encoding="utf-8")
+        tools = Path("deepseek_mobile/services/tools.py").read_text(encoding="utf-8")
+        search = Path("deepseek_mobile/services/search.py").read_text(encoding="utf-8")
+        client = Path("deepseek_mobile/services/deepseek_client.py").read_text(encoding="utf-8")
+        sw = Path("static/sw.js").read_text(encoding="utf-8")
+        readme = Path("README.md").read_text(encoding="utf-8")
+
+        for token in [
+            '"name": "web_search"',
+            '"strict": True',
+            '"intent"',
+            "web_search_callback",
+        ]:
+            with self.subTest(token=token):
+                self.assertIn(token, tools)
+
+        for token in [
+            "def search_single_round(",
+            "def compact_search_tool_result(",
+            "def normalize_search_query_text(",
+            "def search_queries_for(",
+            "variants_by_intent",
+        ]:
+            with self.subTest(token=token):
+                self.assertIn(token, search)
+
+        for token in [
+            "WEB_SEARCH_SYSTEM_HINT",
+            "def tools_for_payload(",
+            "def web_search_callback_for_turn(",
+            "forced_search_mode(payload)",
+            "search_tool_enabled(payload)",
+        ]:
+            with self.subTest(token=token):
+                self.assertIn(token, client)
+
+        for token in [
+            'id="selectionPopover"',
+            'data-selection-action="quote"',
+            'data-selection-action="copy"',
+        ]:
+            with self.subTest(token=token):
+                self.assertIn(token, html)
+
+        for token in [
+            "const selectionPopover = document.querySelector",
+            "function positionSelectionPopover(candidate)",
+            "function setupSelectionPopover()",
+            "navigator.maxTouchPoints > 0",
+            "data-quote-message",
+            "由模型决定本轮是否联网",
+            "search-round-count",
+        ]:
+            with self.subTest(token=token):
+                if token == "data-quote-message":
+                    self.assertNotIn(token, app)
+                else:
+                    self.assertIn(token, app)
+
+        self.assertIn(".selection-popover", css)
+        self.assertIn(".search-round-count", css)
+        self.assertIn("deepseek-mobile-v150", sw)
+        self.assertIn("version-1.5.0-blue", readme)
+
+    def test_v094_citations_titles_peek_and_timeline_are_present(self) -> None:
+        app = Path("static/modules/chat.js").read_text(encoding="utf-8")
+        markdown = Path("static/modules/markdown.js").read_text(encoding="utf-8")
+        css = Path("static/styles.css").read_text(encoding="utf-8")
+        search = Path("deepseek_mobile/services/search.py").read_text(encoding="utf-8")
+        client = Path("deepseek_mobile/services/deepseek_client.py").read_text(encoding="utf-8")
+        tools = Path("deepseek_mobile/services/tools.py").read_text(encoding="utf-8")
+        server = Path("deepseek_mobile/web/server.py").read_text(encoding="utf-8")
+        title = Path("deepseek_mobile/services/title_generator.py").read_text(encoding="utf-8")
+        sw = Path("static/sw.js").read_text(encoding="utf-8")
+        readme = Path("README.md").read_text(encoding="utf-8")
+        changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
+
+        for token in [
+            "citation_offset",
+            '"cite": f"[^',
+            '"citation_id"',
+            "[^Wn]",
+            "format_search_context",
+        ]:
+            with self.subTest(token=token):
+                self.assertIn(token, search)
+
+        for token in ["Cite web search results", "citation_counter", "citation_offset=citation_counter"]:
+            with self.subTest(token=token):
+                self.assertIn(token, client)
+
+        self.assertIn("Each result includes a cite field", tools)
+        self.assertIn('"/api/title"', server)
+        self.assertIn("def generate_title_payload", title)
+        self.assertIn("RATE_LIMITED", title)
+
+        for token in [
+            "function openCitationForMessage",
+            "function webCitationResults",
+            "function appendTimelineReasoning",
+            "function mergeSearchIntoTimeline",
+            "function renderInlineSearchRound",
+            "function maybeAutoGenerateTitle",
+            "function regenerateTitle",
+            "peekClickLockUntil",
+        ]:
+            with self.subTest(token=token):
+                self.assertIn(token, app)
+        # v1.2.7：normalizeTimeline / search 限长校验从 chat.js 抽到了 agent_timeline.js；
+        # 这里同时确认函数已迁出、并且 chat.js 仍然 import 着它，才算完整迁移。
+        agent_timeline = Path("static/modules/agent_timeline.js").read_text(encoding="utf-8")
+        self.assertIn("export function normalizeTimeline", agent_timeline)
+        self.assertIn("snippet.slice(0, 200)", agent_timeline)
+        self.assertIn("normalizeTimeline,", app)
+        self.assertIn('from "./agent_timeline.js"', app)
+
+        self.assertIn("citation-web", markdown)
+        self.assertIn(".reasoning-search-round", css)
+        self.assertIn(".history-title.is-pending-title", css)
+        self.assertIn("deepseek-mobile-v150", sw)
+        self.assertIn("version-1.5.0-blue", readme)
+        self.assertIn("## [0.9.4]", changelog)
+
+    def test_v096_search_hotfix_and_tool_expansion_are_present(self) -> None:
+        app = Path("static/modules/chat.js").read_text(encoding="utf-8")
+        css = Path("static/styles.css").read_text(encoding="utf-8")
+        search = Path("deepseek_mobile/services/search.py").read_text(encoding="utf-8")
+        client = Path("deepseek_mobile/services/deepseek_client.py").read_text(encoding="utf-8")
+        tools = Path("deepseek_mobile/services/tools.py").read_text(encoding="utf-8")
+        sw = Path("static/sw.js").read_text(encoding="utf-8")
+        readme = Path("README.md").read_text(encoding="utf-8")
+        changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
+        api = Path("docs/API.md").read_text(encoding="utf-8")
+        security = Path("docs/SECURITY.md").read_text(encoding="utf-8")
+
+        for token in [
+            "function settleStuckSearchSteps",
+            "function settleStuckSearchData",
+            "settleStuckSearchSteps(assistantMessage)",
+            'document.createElementNS(svgNS, "svg")',
+            'svg.setAttribute("width", "16")',
+            'svg.setAttribute("height", "16")',
+            'svg.setAttribute("fill", "none")',
+            'svg.setAttribute("stroke", "currentColor")',
+            'const seen = new Set();',
+        ]:
+            with self.subTest(token=token):
+                self.assertIn(token, app)
+
+        self.assertIn(".reasoning-search-icon svg", css)
+        self.assertIn("display: block", css)
+        self.assertNotIn(".reasoning-search-icon svg {\n  width: 16px", css)
+
+        for token in [
+            "def simplified_retry_query",
+            "def should_retry_tavily_error",
+            "def search_tavily_with_retry",
+            '"retried": bool(round_data.get("retried"))',
+            '"retryQuery": round_data.get("retryQuery") or ""',
+        ]:
+            with self.subTest(token=token):
+                self.assertIn(token, search)
+
+        self.assertIn("预取搜索失败", client)
+        self.assertIn('not in {"web_search", "compare_search_results"}', client)
+
+        for token in [
+            "SERIAL_TOOL_NAMES",
+            "ThreadPoolExecutor",
+            '"name": "create_reminder"',
+            '"name": "list_reminders"',
+            '"name": "recall_memory"',
+            '"name": "forget_memory"',
+            '"name": "list_project_files"',
+            '"name": "read_file_chunk"',
+            '"name": "data_transform"',
+            '"name": "generate_chart"',
+            '"name": "compare_search_results"',
+            "def data_transform(",
+            "def compare_search_results(",
+        ]:
+            with self.subTest(token=token):
+                self.assertIn(token, tools)
+
+        self.assertIn("deepseek-mobile-v150", sw)
+        self.assertIn("version-1.5.0-blue", readme)
+        self.assertIn("## [0.9.6]", changelog)
+        self.assertIn("适用版本：v1.4.0。", api)
+        self.assertIn("适用版本：v1.4.0。", security)
+
+    def test_v111_visual_theme_system_is_present(self) -> None:
+        app = Path("static/modules/chat.js").read_text(encoding="utf-8")
+        normalize = Path("static/modules/normalize.js").read_text(encoding="utf-8")
+        html = Path("static/index.html").read_text(encoding="utf-8")
+        css = Path("static/styles.css").read_text(encoding="utf-8")
+        sw = Path("static/sw.js").read_text(encoding="utf-8")
+        readme = Path("README.md").read_text(encoding="utf-8")
+        changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
+        frontend_docs = Path("docs/FRONTEND_MODULES.md").read_text(encoding="utf-8")
+        security = Path("docs/SECURITY.md").read_text(encoding="utf-8")
+
+        for token in [
+            'data-theme="chatgpt"',
+            'data-mode="system"',
+            'id="themeStyleSelect"',
+            'id="themeModeSelect"',
+            "deepseek-mobile.theme-style",
+            "deepseek-mobile.theme-mode",
+            "fonts.googleapis.com",
+            "fonts.gstatic.com",
+        ]:
+            with self.subTest(token=token):
+                self.assertIn(token, html)
+
+        for token in [
+            "function normalizeThemeStyle(value)",
+            "function normalizeThemeMode(value)",
+            '"chatgpt", "linear", "notion", "arc"',
+            '"system", "light", "dark"',
+        ]:
+            with self.subTest(token=token):
+                self.assertIn(token, normalize)
+
+        for token in [
+            "state.themeStyle",
+            "state.themeMode",
+            "function syncMetaThemeColor",
+            "root.dataset.theme = state.themeStyle",
+            "root.dataset.mode = state.themeMode",
+            "localStorage.setItem(storageKeys.themeMode, state.themeMode)",
+            "localStorage.getItem(storageKeys.theme)",
+            'showToast("已复制代码", { tone: "success" })',
+            'showToast("复制失败，请长按代码手动复制", { tone: "error" })',
+        ]:
+            with self.subTest(token=token):
+                self.assertIn(token, app)
+        self.assertNotIn("state.theme =", app)
+        self.assertNotIn("#themeSelect", app)
+
+        for token in [
+            "--bg-base",
+            "--bg-elevated",
+            "--surface-user",
+            "--surface-assistant",
+            "--text-primary",
+            "--border-default",
+            "--accent-soft",
+            "--font-body",
+            "--font-mono",
+            "--bg: var(--bg-base)",
+            "--surface: var(--bg-elevated)",
+            "--brand: var(--accent)",
+            ':root[data-theme="chatgpt"][data-mode="light"]',
+            ':root[data-theme="linear"][data-mode="dark"]',
+            ':root[data-theme="notion"][data-mode="system"]',
+            ':root[data-theme="arc"][data-mode="dark"]',
+            "@media (prefers-color-scheme: dark)",
+            '--avatar-blue-bg',
+            ':root[data-theme="arc"][data-mode="system"]',
+            ".message.user .bubble",
+            ".composer:focus-within",
+            "color-mix(in srgb, var(--accent) 22%, transparent)",
+            ".history-item.active::before",
+            ":root[data-theme=\"arc\"] .history-menu",
+            ".reasoning[open]",
+            ".reasoning-search-round.status-error",
+            ".reasoning-source-chip:hover",
+            ".search-panel-result",
+            ".diagnostics-row",
+            ".seek-card.active .seek-avatar",
+            ".code-action.copied",
+            ".toast.is-error",
+            ".toast.is-success",
+            ".command-palette-item.is-active",
+        ]:
+            with self.subTest(token=token):
+                self.assertIn(token, css)
+        self.assertNotIn(':root[data-theme="dark"]', css)
+
+        self.assertIn("deepseek-mobile-v150", sw)
+        self.assertIn("version-1.5.0-blue", readme)
+        self.assertIn("## [1.2.2]", changelog)
+        self.assertIn("normalizeThemeStyle", frontend_docs)
+        self.assertIn("Google Fonts", security)
+
+    def test_v111_search_round_recovery_is_present(self) -> None:
+        app = Path("static/modules/chat.js").read_text(encoding="utf-8")
+        search = Path("deepseek_mobile/services/search.py").read_text(encoding="utf-8")
+        sw = Path("static/sw.js").read_text(encoding="utf-8")
+        readme = Path("README.md").read_text(encoding="utf-8")
+        changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
+
+        # v1.2.7：search round 恢复逻辑分散在 chat.js（settleStuckSearchSteps）和
+        # agent_timeline.js（normalizeTimeline 的 status fallback），分别检查。
+        self.assertIn('settleStuckSearchSteps(message, "搜索已中断")', app)
+        self.assertIn("搜索未完成（页面已刷新或请求已中断）", app)
+        agent_timeline = Path("static/modules/agent_timeline.js").read_text(encoding="utf-8")
+        self.assertIn('rawStatus === "searching" ? "error" : rawStatus', agent_timeline)
+
+        for token in [
+            "variants_by_intent",
+            "SEARCH_ROUND_LIMIT",
+            "最新进展",
+            "最多再补充 1 次 web_search",
+        ]:
+            with self.subTest(token=token):
+                self.assertIn(token, search)
+
+        self.assertIn("deepseek-mobile-v150", sw)
+        self.assertIn("version-1.5.0-blue", readme)
+        self.assertIn("## [1.2.2]", changelog)
+
+    def test_v115_agent_mode_and_search_limits_are_present(self) -> None:
+        app = Path("static/modules/chat.js").read_text(encoding="utf-8")
+        html = Path("static/index.html").read_text(encoding="utf-8")
+        css = Path("static/styles.css").read_text(encoding="utf-8")
+        client = Path("deepseek_mobile/services/deepseek_client.py").read_text(encoding="utf-8")
+        tools = Path("deepseek_mobile/services/tools.py").read_text(encoding="utf-8")
+        server = Path("deepseek_mobile/web/server.py").read_text(encoding="utf-8")
+        multi_agent = Path("deepseek_mobile/services/multi_agent.py").read_text(encoding="utf-8")
+        config = Path("deepseek_mobile/core/config.py").read_text(encoding="utf-8")
+        markdown = Path("static/modules/markdown.js").read_text(encoding="utf-8")
+
+        for token in [
+            'agentMode: "deepseek-mobile.agent-mode"',
+            "state.agentMode",
+            "function renderAgentModeButton()",
+            "function toggleAgentTimelineStep",
+            "agentDisplayMode: \"deepseek-mobile.agent-display-mode\"",
+            'if (event.type === "agent")',
+            'if (event.type === "agent_reasoning")',
+            'if (event.type === "agent_note")',
+            "function renderInlineAgentStep",
+            "reasoning-agent-thought",
+            "reasoning-agent-toggle",
+            "cloneJsonSafe(message.search)",
+            "chatRequestTimeoutMs",
+            "agentChatRequestTimeoutMs",
+            "activityAutoDismissedMessageIds",
+            "fallbackReasoningStepKey",
+            "suppressAutoOpen",
+            # v1.3.2：worker Agent 运行中即使简洁模式也临时显示 reasoning，
+            # 修复 Leader → worker 切换后右侧面板空白；关闭按钮保留 keepState 让手动重开稳定。
+            'const showLiveAgentInfo = status === "running"',
+            'state.agentDisplayMode === "detailed" || showLiveAgentInfo',
+            "closeActivityPanel({ keepState: true })",
+            "function messageHasActivity(message)",
+            "function activityTimelineSteps(message)",
+            "function activityTimelineStepKey(step, index)",
+            "function renderReasoningBlock(message)",
+            "Boolean(message.agentMode && message.streaming)",
+            "agentMode: Boolean(value.agentMode)",
+            # v1.4.0：思考栏桌面侧栏和移动端 details 共用 syncReasoningBody；
+            # 避免点击侧栏时调用不存在的 buildReasoningBody，或移动端渲染缺少 details 构造函数。
+            "syncReasoningBody(body, message);",
+            # v1.4.0：Activity 面板不是 chatLog 子树；Agent 展开/重跑和搜索来源展开
+            # 必须在面板上单独事件委托，否则按钮看得到但点不动。
+            'activityPanel.addEventListener("click", onActivityPanelClick)',
+            "async function onActivityPanelClick(event)",
+            "function searchPanelDataForMessage(message)",
+            "function timelineSearchRoundsForPanel(message)",
+            "openSearchPanelForMessage(searchButton.dataset.searchResults || state.activeActivityMessageId)",
+            "toggleAgentTimelineStep(agentToggleButton.dataset.agentToggle || state.activeActivityMessageId",
+            "await rerunAgentPhase(agentRerunButton.dataset.agentRerun || state.activeActivityMessageId",
+            # v1.3.3：running 卡片在 text/reasoning/output/notes 全空时给"正在思考…"占位，
+            # 避免 worker 刚被 emit 但还没 token 的瞬间，用户看到稀疏卡片误判为"打不开"。
+            '"reasoning-agent-note pending"',
+            '"正在思考…"',
+            "const requestTimeoutMs = (message.agentMode || state.agentMode) ? agentChatRequestTimeoutMs : chatRequestTimeoutMs",
+            "agentMode: state.agentMode",
+        ]:
+            with self.subTest(token=token):
+                self.assertIn(token, app)
+        # v1.2.7：appendTimelineAgent* 系列迁到 agent_timeline.js；
+        # 同时检查（a）函数已 export 到新模块，（b）chat.js 仍然 import 它们。
+        agent_timeline = Path("static/modules/agent_timeline.js").read_text(encoding="utf-8")
+        for token in [
+            "export function appendTimelineAgent",
+            "export function appendTimelineAgentReasoning",
+            "export function appendTimelineAgentNote",
+            "export function appendTimelineAgentDelta",
+            "export function agentExecutionReport",
+            "AGENT_REPORT_PHASE_TITLES",
+            "function normalizeDurationMs",
+            "Number(null) is 0",
+        ]:
+            with self.subTest(token=token):
+                self.assertIn(token, agent_timeline)
+        for token in [
+            "appendTimelineAgent,",
+            "appendTimelineAgentReasoning,",
+            "appendTimelineAgentNote,",
+            "appendTimelineAgentDelta,",
+            "agentExecutionReport,",
+        ]:
+            with self.subTest(token=token):
+                self.assertIn(token, app)
+
+        self.assertIn('id="agentModeButton"', html)
+        self.assertIn('id="agentDisplayModeSelect"', html)
+        self.assertIn(".reasoning-agent-step", css)
+        self.assertIn(".reasoning-agent-toggle", css)
+        self.assertIn(".reasoning-agent-note.pending", css)
+        self.assertIn("复制 Agent 过程", app)
+        self.assertIn("data-copy-agent-report", app)
+        self.assertIn(".activity-panel-tools", css)
+        self.assertNotIn("buildReasoningBody", app)
+        self.assertIn("${summary.count} 个 Agent", app)
+        self.assertIn(".agent-run-summary-item.status-error", css)
+        self.assertIn("border-color: color-mix(in srgb, var(--danger) 36%, transparent)", css)
+        self.assertIn("WEB_SEARCH_TURN_LIMIT = 5", client)
+        self.assertIn("WEB_SEARCH_LIMIT_ERROR", client)
+        self.assertIn("class SearchBudget", client)
+        self.assertIn("class RequestCancelled", client)
+        self.assertIn("MAX_TOOL_ROUNDS = 3", tools)
+        self.assertIn("cancel_event", tools)
+        self.assertIn("Run up to two related web_search queries", tools)
+        self.assertIn("if len(cleaned_queries) >= 2", tools)
+        self.assertIn("stream_multi_agent", server)
+        self.assertIn("cancel_event = threading.Event()", server)
+        self.assertIn("payload.get(\"agentMode\") is True", server)
+        self.assertIn("MULTI_AGENT_TOTAL_SEARCH_LIMIT = 12", multi_agent)
+        self.assertIn("MULTI_AGENT_PER_AGENT_SEARCH_LIMIT = 5", multi_agent)
+        self.assertIn("MULTI_AGENT_TOOL_ROUNDS = 4", multi_agent)
+        self.assertIn("MULTI_AGENT_TIMEOUT_SECONDS", multi_agent)
+        self.assertIn("AGENT_TIMEOUT_SECONDS = MULTI_AGENT_TIMEOUT_SECONDS", multi_agent)
+        self.assertIn("MIDDLE_PARALLEL_AGENT_IDS", multi_agent)
+        self.assertIn("agent_durations_for_diagnostics", multi_agent)
+        self.assertIn('"agentDurations": agent_durations_for_diagnostics(agent_outputs)', multi_agent)
+        self.assertIn("agent_cache_for_diagnostics", multi_agent)
+        self.assertIn('"agentCache": agent_cache_for_diagnostics(agent_outputs, synthesizer_usage or {})', multi_agent)
+        self.assertIn("diagnostics.agentCache", app)
+        self.assertIn("Agent 缓存命中 tokens", app)
+        self.assertIn("Agent 缓存总 tokens", app)
+        self.assertIn("各 Agent 缓存明细", app)
+        self.assertIn('items.join("\\n")', app)
+        self.assertIn('row.classList.add("is-multiline")', app)
+        self.assertIn("white-space: pre-line", css)
+        self.assertIn("formatAgentCacheTotal", app)
+        self.assertIn("hasData", app)
+        self.assertIn("无数据", app)
+        self.assertIn("totalTokens", multi_agent)
+        self.assertIn("formatAgentCacheByAgent", app)
+        self.assertIn('"type": "agent_reasoning"', multi_agent)
+        self.assertIn('"type": "agent_note"', multi_agent)
+        self.assertIn("multi_agent_timeout_seconds: int = 3900", config)
+        self.assertIn('MULTI_AGENT_TIMEOUT_SECONDS", 3900', config)
+        # v1.2.4 起 AGENT_ALLOWED_TOOLS 常量被 agent_tools_for() 函数取代，权限按角色收窄
+        self.assertIn("def agent_tools_for", multi_agent)
+        self.assertIn("flushPendingCodeAsText", markdown)
+
+    def test_v072_local_tools_and_url_fetch_are_present(self) -> None:
+        client = Path("deepseek_mobile/services/deepseek_client.py").read_text(encoding="utf-8")
+        tools = Path("deepseek_mobile/services/tools.py").read_text(encoding="utf-8")
+        server = Path("deepseek_mobile/web/server.py").read_text(encoding="utf-8")
+
+        self.assertIn("available_tool_definitions()", client)
+        self.assertIn("execute_tool_calls(", client)
+        self.assertIn('"name": "python_eval"', tools)
+        self.assertIn('"name": "search_files"', tools)
+        self.assertIn('"name": "fetch_url"', tools)
+        self.assertIn('"name": "web_search"', tools)
+        self.assertIn("web_search_callback", tools)
+        self.assertIn('"/api/fetch-url"', server)
+
+    def test_frontend_tavily_key_can_enable_search(self) -> None:
+        app = Path("static/modules/chat.js").read_text(encoding="utf-8")
+
+        self.assertIn("hasServerSearch: false", app)
+        self.assertIn("function clientTavilyKey()", app)
+        self.assertIn("function tavilyApiKeyForSearch(searchEnabled)", app)
+        self.assertIn("function updateSearchAvailability({ render = true } = {})", app)
+        self.assertIn("state.hasSearch = Boolean(state.hasServerSearch || clientTavilyKey())", app)
+        self.assertIn("tavilyApiKey: tavilyApiKeyForSearch(shouldRequestSearch())", app)
+        self.assertIn("请先设置 Tavily API Key 或启动前配置 TAVILY_API_KEY", app)
+
+    def test_seek_import_export_and_history_labels_are_present(self) -> None:
+        app = Path("static/modules/chat.js").read_text(encoding="utf-8")
+        html = Path("static/index.html").read_text(encoding="utf-8")
+        css = Path("static/styles.css").read_text(encoding="utf-8")
+
+        self.assertIn('id="seekImportButton"', html)
+        self.assertIn('id="seekExportButton"', html)
+        self.assertIn('id="seekImportInput"', html)
+        self.assertIn("function exportCustomSeeks()", app)
+        self.assertIn("async function importSeeksFromFile(event)", app)
+        self.assertIn("function forkSeek(id)", app)
+        self.assertIn("data-seek-fork", app)
+        self.assertIn("function seekNameForConversation(conversation)", app)
+        self.assertIn("history-seek", app)
+        self.assertIn(".seek-panel-actions", css)
+        self.assertIn(".history-seek", css)
+
+    def test_frontend_app_entrypoint_is_split_into_modules(self) -> None:
+        app = Path("static/app.js").read_text(encoding="utf-8")
+        sw = Path("static/sw.js").read_text(encoding="utf-8")
+
+        self.assertLessEqual(len(app.splitlines()), 20)
+        self.assertIn('import { bootstrap } from "./modules/chat.js"', app)
+        for module in [
+            "network",
+            "charts",
+            "format",
+            "markdown",
+            "normalize",
+            "settings",
+            "panels",
+            "reminder_parse",
+            "speech_text",
+            "stream",
+            "agent_timeline",
+            "chat",
+        ]:
+            with self.subTest(module=module):
+                self.assertTrue(Path(f"static/modules/{module}.js").is_file())
+                self.assertIn(f'"/modules/{module}.js"', sw)
+
+    def test_gitignore_excludes_runtime_private_state(self) -> None:
+        ignore = Path(".gitignore").read_text(encoding="utf-8")
+
+        for pattern in [
+            ".auth-token",
+            ".file-cache/",
+            ".agent-runs/",
+            ".memory/",
+            ".projects/",
+            ".reminders/",
+            ".coverage",
+            ".mypy_cache/",
+            ".npm-cache/",
+            ".ruff_cache/",
+            "__pycache__/",
+            ".idea/",
+            "dist/",
+            "server*.log",
+            "pytest-cache-files-*/",
+        ]:
+            with self.subTest(pattern=pattern):
+                self.assertIn(pattern, ignore)
+
+    def test_v140_recoverable_agent_runs_are_present(self) -> None:
+        app = Path("static/modules/chat.js").read_text(encoding="utf-8")
+        html = Path("static/index.html").read_text(encoding="utf-8")
+        css = Path("static/styles.css").read_text(encoding="utf-8")
+        server = Path("deepseek_mobile/web/server.py").read_text(encoding="utf-8")
+        agent_runs = Path("deepseek_mobile/services/agent_runs.py").read_text(encoding="utf-8")
+        multi_agent = Path("deepseek_mobile/services/multi_agent.py").read_text(encoding="utf-8")
+        release = Path("scripts/release.py").read_text(encoding="utf-8")
+        readme = Path("README.md").read_text(encoding="utf-8")
+        changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
+        api = Path("docs/API.md").read_text(encoding="utf-8")
+        architecture = Path("docs/ARCHITECTURE.md").read_text(encoding="utf-8")
+        sw = Path("static/sw.js").read_text(encoding="utf-8")
+
+        for token in [
+            'agentPreset: "deepseek-mobile.agent-preset"',
+            "async function startAgentRunForMessage",
+            "async function attachAgentRunStream",
+            "async function resumePendingAgentRuns",
+            "function ensureAssistantHasVisibleContent(message)",
+            "emptyAgentRunAnswerText",
+            "function markAuthRequired",
+            "state.authRequired",
+            'event.type === "final_reset"',
+            'event.type === "agent_reset"',
+            "resetTimelineAgentPhase",
+            "function renderAgentPlanWorkbench",
+            "function normalizedEditableAgentPlan",
+            "node.className = fresh.className",
+            "单 Agent 重跑不会自动级联其它 Agent",
+            "重新综合最终回答",
+            "/api/agent-runs",
+            "agentRunLastEventIndex",
+        ]:
+            with self.subTest(token=token):
+                self.assertIn(token, app)
+
+        self.assertIn('id="agentPresetSelect"', html)
+        self.assertIn(".agent-plan-workbench", css)
+        self.assertIn("handle_agent_run_post", server)
+        self.assertIn("stream_agent_run", server)
+        self.assertIn("AgentRunRegistry", agent_runs)
+        self.assertIn("events 是恢复 UI 的事实源", agent_runs)
+        self.assertIn('"type": "final_reset"', agent_runs)
+        self.assertIn('"type": "agent_reset"', agent_runs)
+        self.assertIn("ORPHANABLE_STATUSES", agent_runs)
+        self.assertIn("replace_with_retry", agent_runs)
+        self.assertIn("RUN_WRITE_RETRY_DELAYS", agent_runs)
+        self.assertIn("threading.get_ident()", agent_runs)
+        self.assertIn("token_urlsafe(6)", agent_runs)
+        self.assertIn("PermissionError", agent_runs)
+        self.assertIn("stream_agent_plan", multi_agent)
+        self.assertIn("stream_synthesis_for_outputs", multi_agent)
+        self.assertIn("EMPTY_SYNTHESIS_FALLBACK", multi_agent)
+        self.assertIn("content_seen", multi_agent)
+        self.assertIn('".agent-runs"', release)
+        self.assertIn("## v1.4.0 更新", readme)
+        self.assertIn("## [1.4.0]", changelog)
+        self.assertIn("## Agent Run API", api)
+        self.assertIn("deepseek_mobile/services/agent_runs.py", architecture)
+        self.assertIn("deepseek-mobile-v150", sw)
+
+
+if __name__ == "__main__":
+    unittest.main()
+
