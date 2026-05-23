@@ -7847,6 +7847,7 @@ function renderActivityEntry(message) {
 function renderReasoningBlock(message) {
   const block = document.createElement("details");
   block.className = "reasoning";
+  block.dataset.state = message.streaming ? "streaming" : "done";
 
   const summary = document.createElement("summary");
   summary.textContent = reasoningSummaryText(message);
@@ -7891,6 +7892,7 @@ function syncActivityEntry(bubble, message) {
     if (answerContent) bubble.insertBefore(block, answerContent);
     else bubble.append(block);
   } else {
+    existingReasoning.dataset.state = message.streaming ? "streaming" : "done";
     const summary = existingReasoning.querySelector("summary");
     if (summary) summary.textContent = reasoningSummaryText(message);
     const body = existingReasoning.querySelector(".reasoning-body");

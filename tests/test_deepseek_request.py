@@ -290,9 +290,12 @@ class DeepSeekRequestTests(unittest.TestCase):
         self.assertTrue(prepared.body["stream"])
         self.assertEqual(system_message["role"], "system")
         self.assertIn("System prompt", system_message["content"])
-        self.assertIn("Older summary", system_message["content"])
+        # context_summary 改走 dynamic turn-context（注入 latest user），让 system 保持
+        # 字面稳定 → DeepSeek prompt cache 能贯穿历史命中，不会因摘要更新而全 miss。
+        self.assertNotIn("Older summary", system_message["content"])
         self.assertNotIn("Memory context", system_message["content"])
         self.assertNotIn("Search context", system_message["content"])
+        self.assertIn("Older summary", latest_user_message["content"])
         self.assertIn("Memory context", latest_user_message["content"])
         self.assertIn("Search context", latest_user_message["content"])
         self.assertIn("Continue here", latest_user_message["content"])

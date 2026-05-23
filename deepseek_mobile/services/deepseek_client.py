@@ -160,19 +160,23 @@ def build_deepseek_request(
 ) -> PreparedDeepSeekRequest:
     api_key, model, messages = validated or validate_deepseek_payload(payload)
     tools_enabled = payload.get("toolsEnabled") is not False
+
+    # DeepSeek prompt cache 按 message 字面 prefix 严格匹配。任何让 system message
+    # 字符变化的字段都会让其后所有 history 全部 cache miss。这里 stable_system_parts
+    # 只包含真正会话级稳定的内容（角色提示 + 工具/搜索 system hint）。
+    # context_summary 走 dynamic turn-context（注入 latest user），让 system 保持稳定，
+    # 命中可以贯穿到 last assistant message。
     stable_system_parts: list[str] = []
     system_prompt = str(payload.get("systemPrompt") or "").strip()
     if system_prompt:
         stable_system_parts.append(system_prompt)
 
-    context_summary = str(payload.get("contextSummary") or "").strip()
-    if context_summary:
-        stable_system_parts.append(format_context_summary_context(context_summary))
-
     if tools_enabled:
         stable_system_parts.append(TOOL_PARALLEL_SYSTEM_HINT)
         if search_tool_enabled(payload):
             stable_system_parts.append(WEB_SEARCH_SYSTEM_HINT)
+
+    context_summary = str(payload.get("contextSummary") or "").strip()
 
     api_messages: list[dict[str, Any]] = []
     if stable_system_parts:
@@ -313,6 +317,13 @@ def normalize_tool_calls(value: Any) -> list[dict[str, Any]]:
 
 def build_dynamic_turn_context(payload: dict[str, Any], memory_state: dict[str, Any]) -> str:
     dynamic_parts: list[str] = []
+
+    # context_summary 放在 dynamic 段而非 system，让 system message 保持字面稳定，
+    # 提高 DeepSeek prompt cache 命中率。摘要更新时只让 latest user 这一条 miss，
+    # 而不会让所有历史 message 全部 miss。
+    context_summary = str(payload.get("contextSummary") or "").strip()
+    if context_summary:
+        dynamic_parts.append(format_context_summary_context(context_summary))
 
     memory_context = str(memory_state.get("context") or "").strip()
     if memory_context:

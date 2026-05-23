@@ -41,6 +41,7 @@
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
   --ease-in: cubic-bezier(0.4, 0, 1, 1);
   --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-spring: var(--ease-spring);
   --avatar-blue-bg: #dbeafe;
   --avatar-blue-fg: #1d4ed8;
   --avatar-green-bg: #dcfce7;
@@ -796,7 +797,7 @@ p {
 }
 
 .icon-button:active:not(:disabled) {
-  transform: scale(0.92);
+  transform: scale(0.96);
 }
 
 .icon-button:hover {
@@ -816,6 +817,8 @@ p {
 .assistant-icon-action:not(:disabled):active,
 .continue-generation-button:not(:disabled):active,
 .history-new-button:not(:disabled):active,
+.history-row-button:not(:disabled):active,
+.history-seek-button:not(:disabled):active,
 .seek-create-button:not(:disabled):active,
 .seek-save-button:not(:disabled):active,
 .attachment-preview:not(:disabled):active,
@@ -823,6 +826,7 @@ p {
 .user-mobile-action:not(:disabled):active,
 .command-palette-item:not(:disabled):active,
 .conversation-peek-item:not(:disabled):active,
+.assistant-menu-action:not(:disabled):active,
 .attachment-button:not([aria-disabled="true"]):active {
   transform: scale(0.96);
   transition-duration: 50ms;
@@ -1998,33 +2002,66 @@ p {
 }
 
 .reasoning {
-  margin-bottom: 12px;
+  margin: 14px 0;
   border: 0;
   border-left: 3px solid var(--accent-soft);
   border-radius: 0;
   background: transparent;
-  padding-left: 16px;
+  padding-left: 14px;
   transition: border-color var(--motion-base) var(--ease-out);
 }
 
-.reasoning:hover {
+/* 提权一档：Linear / Notion 主题特化里给 .reasoning 设了 border shorthand
+   (border: 1px solid var(--border-default))，会把上面的 border-left 颜色压成边框灰色。
+   再加一条 :root 限定的同名规则把色条颜色拉回主题 accent-soft，让左侧标识在所有主题下都成立。 */
+:root .reasoning {
+  border-top: 0;
+  border-right: 0;
+  border-bottom: 0;
+  border-left: 3px solid var(--accent-soft);
+}
+
+:root .reasoning:hover {
   border-left-color: color-mix(in srgb, var(--accent) 55%, var(--accent-soft));
 }
 
-.reasoning[open] {
+:root .reasoning[open] {
   border-left-color: var(--accent);
+}
+
+:root .reasoning[data-state="streaming"] {
+  border-left-color: var(--accent);
+  animation: reasoning-bar-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes reasoning-bar-pulse {
+  0%, 100% { border-left-color: var(--accent); }
+  50% { border-left-color: color-mix(in srgb, var(--accent) 28%, transparent); }
 }
 
 .reasoning summary {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   cursor: pointer;
-  padding: 4px 0 8px;
+  padding: 5px 12px 5px 10px;
+  border-radius: var(--radius-full);
+  background: var(--bg-sunken);
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: 13.5px;
   font-weight: 600;
+  line-height: 1.2;
   list-style: none;
+  transition:
+    background var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out),
+    box-shadow var(--motion-fast) var(--ease-out),
+    transform var(--motion-fast) var(--ease-out);
+}
+
+.reasoning summary:active {
+  transform: scale(0.97);
+  transition-duration: 50ms;
 }
 
 .reasoning summary::-webkit-details-marker {
@@ -2033,28 +2070,73 @@ p {
 
 .reasoning summary::before {
   content: "";
-  width: 0;
-  height: 0;
-  border-left: 5px solid currentColor;
-  border-top: 4px solid transparent;
-  border-bottom: 4px solid transparent;
-  color: var(--text-tertiary);
+  width: 7px;
+  height: 7px;
+  border-right: 1.75px solid currentColor;
+  border-bottom: 1.75px solid currentColor;
+  border-radius: 1px;
+  margin-right: 1px;
+  transform: rotate(-45deg);
+  transform-origin: 60% 60%;
   transition: transform var(--motion-base) var(--ease-out);
 }
 
 .reasoning[open] summary::before {
-  transform: rotate(90deg);
+  transform: rotate(45deg);
 }
 
 .reasoning summary:hover {
+  background: var(--bg-hover);
   color: var(--text-primary);
 }
 
+.reasoning[open] summary {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.reasoning[data-state="streaming"] summary {
+  background: var(--accent-soft);
+  color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.reasoning[data-state="streaming"] summary::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  margin-left: 2px;
+  animation: reasoning-dot-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes reasoning-dot-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.7); }
+}
+
 .reasoning-body {
-  padding: 4px 0 8px;
+  padding: 10px 0 8px;
   color: var(--text-secondary);
   font-size: 14px;
-  line-height: 1.65;
+  line-height: 1.7;
+}
+
+.reasoning[open] > .reasoning-body {
+  animation: reasoning-body-in var(--motion-base) var(--ease-out);
+  transform-origin: top left;
+}
+
+@keyframes reasoning-body-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .reasoning-body p {
@@ -2967,10 +3049,14 @@ textarea::placeholder {
   position: fixed;
   inset: 0;
   z-index: 10;
-  background: rgba(15, 23, 42, 0.24);
+  background: rgba(15, 23, 42, 0.28);
+  backdrop-filter: blur(6px) saturate(120%);
+  -webkit-backdrop-filter: blur(6px) saturate(120%);
   opacity: 0;
   pointer-events: none;
-  transition: opacity var(--motion-base) var(--ease-out);
+  transition:
+    opacity var(--motion-base) var(--ease-out),
+    backdrop-filter var(--motion-base) var(--ease-out);
 }
 
 .backdrop.open {
@@ -3093,15 +3179,18 @@ textarea::placeholder {
   height: 100dvh;
   overflow: hidden;
   border-right: 1px solid var(--border-default);
+  border-radius: 0 22px 22px 0;
   background: var(--bg-elevated);
-  box-shadow: var(--shadow-md);
+  box-shadow:
+    var(--shadow-lg),
+    inset 0 1px 0 color-mix(in srgb, var(--accent) 18%, transparent);
   padding: calc(18px + env(safe-area-inset-top)) 20px calc(24px + env(safe-area-inset-bottom));
   opacity: 0;
   pointer-events: none;
   transform: translateX(-105%);
   transition:
-    opacity var(--motion-fast) var(--ease-out),
-    transform var(--motion-slow) var(--ease-out);
+    opacity var(--motion-base) var(--ease-out),
+    transform var(--motion-base) var(--ease-spring);
   will-change: transform, opacity;
 }
 
@@ -3159,8 +3248,8 @@ body.history-side-open .history-panel {
   pointer-events: none;
   transform: translateX(105%);
   transition:
-    opacity var(--motion-fast) var(--ease-out),
-    transform var(--motion-slow) var(--ease-out);
+    opacity var(--motion-base) var(--ease-out),
+    transform var(--motion-base) var(--ease-spring);
   will-change: transform, opacity;
 }
 
@@ -4030,6 +4119,11 @@ body.history-side-open .official-rail .brand-mark {
   color: var(--text-primary);
   cursor: pointer;
   font-weight: 600;
+  transition:
+    background var(--motion-fast) var(--ease-out),
+    border-color var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out),
+    transform var(--motion-fast) var(--ease-out);
 }
 
 .history-seek-button:hover {
@@ -4081,6 +4175,8 @@ body.history-side-open .official-rail .brand-mark {
   min-height: 0;
   overflow-y: auto;
   display: grid;
+  grid-auto-rows: max-content;
+  align-content: start;
   gap: 2px;
   margin: 0 -8px;
   padding: 0 8px 12px;
@@ -4453,17 +4549,113 @@ body.history-side-open .official-rail .brand-mark {
   color: var(--text-primary);
   padding: 0 13px;
   outline: none;
+  transition:
+    border-color var(--motion-fast) var(--ease-out),
+    box-shadow var(--motion-fast) var(--ease-out),
+    background var(--motion-fast) var(--ease-out);
+}
+
+.field input:hover,
+.field select:hover {
+  border-color: var(--border-strong);
 }
 
 .field input:focus,
 .field select:focus {
   border-color: var(--accent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 16%, transparent);
 }
 
 .field input[type="range"] {
   min-height: auto;
   padding: 0;
-  accent-color: var(--brand);
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+.field input[type="range"]:hover,
+.field input[type="range"]:focus {
+  border: 0;
+  box-shadow: none;
+}
+
+/* 自绘 range slider：track + thumb（WebKit + Firefox） */
+.field input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 28px;
+  cursor: pointer;
+}
+
+.field input[type="range"]::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border-subtle);
+}
+
+.field input[type="range"]::-moz-range-track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border-subtle);
+}
+
+.field input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  margin-top: -7px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg-elevated);
+  box-shadow: var(--shadow-sm);
+  cursor: grab;
+  transition:
+    transform var(--motion-fast) var(--ease-out),
+    box-shadow var(--motion-fast) var(--ease-out);
+}
+
+.field input[type="range"]::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg-elevated);
+  box-shadow: var(--shadow-sm);
+  cursor: grab;
+  transition:
+    transform var(--motion-fast) var(--ease-out),
+    box-shadow var(--motion-fast) var(--ease-out);
+}
+
+.field input[type="range"]:hover::-webkit-slider-thumb,
+.field input[type="range"]:focus::-webkit-slider-thumb {
+  transform: scale(1.15);
+  box-shadow:
+    var(--shadow-md),
+    0 0 0 6px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.field input[type="range"]:hover::-moz-range-thumb,
+.field input[type="range"]:focus::-moz-range-thumb {
+  transform: scale(1.15);
+  box-shadow:
+    var(--shadow-md),
+    0 0 0 6px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.field input[type="range"]:active::-webkit-slider-thumb {
+  cursor: grabbing;
+  transform: scale(1.05);
+}
+
+.field input[type="range"]:active::-moz-range-thumb {
+  cursor: grabbing;
+  transform: scale(1.05);
 }
 
 .check-row {
@@ -4495,6 +4687,19 @@ body.history-side-open .official-rail .brand-mark {
   background: var(--bg-elevated);
   color: var(--text-primary);
   white-space: nowrap;
+  transition:
+    background var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out),
+    border-color var(--motion-fast) var(--ease-out),
+    transform var(--motion-fast) var(--ease-out),
+    box-shadow var(--motion-fast) var(--ease-out);
+}
+
+.secondary-button:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
 }
 
 .danger-button {
@@ -4502,11 +4707,53 @@ body.history-side-open .official-rail .brand-mark {
   color: var(--danger);
 }
 
+.danger-button:hover {
+  background: color-mix(in srgb, var(--danger) 10%, var(--bg-elevated));
+  border-color: var(--danger);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+
 .settings-note {
   margin: 16px 0 0;
   color: var(--muted-strong);
   font-size: 13px;
   line-height: 1.55;
+}
+
+/* === Settings 面板视觉与动效精修 === */
+
+/* 标题底部细分隔线，让 header 与表单视觉分层 */
+.settings-panel > .settings-header {
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+/* 内容 stagger 入场：前 5 项错开延迟，6 及以后统一一档收尾 */
+.settings-panel.open > * {
+  animation: settings-section-in var(--motion-base) var(--ease-out) backwards;
+}
+
+.settings-panel.open > .sheet-handle {
+  animation: none;
+}
+
+.settings-panel.open > *:nth-child(1) { animation-delay: 0ms; }
+.settings-panel.open > *:nth-child(2) { animation-delay: 40ms; }
+.settings-panel.open > *:nth-child(3) { animation-delay: 70ms; }
+.settings-panel.open > *:nth-child(4) { animation-delay: 95ms; }
+.settings-panel.open > *:nth-child(5) { animation-delay: 115ms; }
+.settings-panel.open > *:nth-child(n+6) { animation-delay: 130ms; }
+
+@keyframes settings-section-in {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 .toast {
@@ -4811,6 +5058,10 @@ body.history-side-open .official-rail .brand-mark {
   padding: 0 10px;
   text-align: left;
   white-space: nowrap;
+  transition:
+    background var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out),
+    transform var(--motion-fast) var(--ease-out);
 }
 
 .assistant-menu-action:hover {
@@ -5962,7 +6213,7 @@ body {
   border-radius: 16px !important;
   padding: 20px !important;
   box-shadow: 0 4px 20px rgba(0,0,0,0.01), 0 2px 5px rgba(0,0,0,0.01) !important;
-  transition: all 350ms cubic-bezier(0.16, 1, 0.3, 1) !important;
+  transition: all 350ms var(--ease-spring) !important;
   will-change: transform, box-shadow, border-color, background-color;
 }
 
@@ -6005,7 +6256,7 @@ body {
   backdrop-filter: blur(20px);
   padding: 8px !important;
   box-shadow: 0 10px 30px rgba(0,0,0,0.03), 0 1px 3px rgba(0,0,0,0.01) !important;
-  transition: all 350ms cubic-bezier(0.16, 1, 0.3, 1) !important;
+  transition: all 350ms var(--ease-spring) !important;
 }
 :root[data-mode="dark"] .composer {
   box-shadow: 0 10px 30px rgba(0,0,0,0.3), 0 1px 3px rgba(0,0,0,0.1) !important;
@@ -6038,7 +6289,7 @@ textarea {
   border-radius: 99px !important;
   border: 1px solid var(--border-subtle) !important;
   font-weight: 550 !important;
-  transition: all 250ms cubic-bezier(0.16, 1, 0.3, 1) !important;
+  transition: all 250ms var(--ease-spring) !important;
 }
 .tool-chip:hover:not(:disabled):not(.active) {
   background: var(--bg-hover) !important;
@@ -6104,7 +6355,7 @@ textarea {
 .history-row-button {
   border-radius: 12px !important;
   font-weight: 550 !important;
-  transition: all 250ms cubic-bezier(0.16, 1, 0.3, 1) !important;
+  transition: all 250ms var(--ease-spring) !important;
 }
 .history-row-button:hover {
   background: var(--bg-hover) !important;
@@ -6134,7 +6385,7 @@ pre code {
 
 /* 12. Dynamic Send Button Micro-Glow */
 .send-button {
-  transition: all 250ms cubic-bezier(0.16, 1, 0.3, 1) !important;
+  transition: all 250ms var(--ease-spring) !important;
 }
 .send-button:not(:disabled):hover {
   transform: scale(1.08) !important;
@@ -6146,10 +6397,10 @@ pre code {
 
 /* 13. Smooth In-view Empty State Stagger Animations */
 .empty-welcome {
-  animation: fadeUp 800ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: fadeUp 800ms var(--ease-spring) both;
 }
 .suggestion-card {
-  animation: fadeUp 800ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: fadeUp 800ms var(--ease-spring) both;
 }
 .suggestion-card:nth-child(1) { animation-delay: 60ms; }
 .suggestion-card:nth-child(2) { animation-delay: 120ms; }
