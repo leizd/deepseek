@@ -236,6 +236,34 @@ def build_deepseek_request(
         "toolCallCount": 0,
         "toolNames": [],
     }
+
+    # === 临时调试：把 request body 各关键字段单独 hash，对比两轮请求里哪个字段在变 ===
+    import hashlib as _hashlib_debug
+    def _hash(obj: Any) -> str:
+        return _hashlib_debug.md5(
+            json.dumps(obj, ensure_ascii=False, sort_keys=False).encode("utf-8", errors="replace")
+        ).hexdigest()[:12]
+
+    _msg_hashes = []
+    for _idx, _m in enumerate(api_messages):
+        _content = str(_m.get("content") or "")
+        _msg_hashes.append((_idx, _m.get("role"), len(_content), _hash(_m)))
+    logger.info(
+        "cache_debug body model=%s stream=%s msgs_n=%d msgs_hash=%s tools_hash=%s tool_choice=%s thinking=%s reasoning_effort=%s temperature=%s top_p=%s",
+        request_body.get("model"),
+        request_body.get("stream"),
+        len(api_messages),
+        _hash(api_messages),
+        _hash(request_body.get("tools")) if "tools" in request_body else "<none>",
+        request_body.get("tool_choice", "<none>"),
+        request_body.get("thinking", "<none>"),
+        request_body.get("reasoning_effort", "<none>"),
+        request_body.get("temperature", "<none>"),
+        request_body.get("top_p", "<none>"),
+    )
+    for _idx, _role, _len, _h in _msg_hashes:
+        logger.info("cache_debug msg[%d] role=%s len=%d hash=%s", _idx, _role, _len, _h)
+
     return PreparedDeepSeekRequest(api_key=api_key, body=request_body, diagnostics=diagnostics)
 
 
@@ -347,12 +375,23 @@ def build_dynamic_turn_context(payload: dict[str, Any], memory_state: dict[str, 
 
 
 def append_context_to_latest_user(messages: list[dict[str, Any]], dynamic_context: str) -> list[dict[str, Any]]:
+    """把本轮 dynamic context 作为独立的 trailing system message 追加到 messages 末尾。
+
+    历史教训：早期实现把 dynamic context 拼到 latest user 的 content 里。但前端 history
+    只持久化原始 user content（未注入版本），所以下一轮发送时那条原本"latest"的 user
+    在 history 中是原始字面 —— 与上一轮发送时（注入版）不同 —— DeepSeek prompt cache
+    在那条 user 处就 miss，整段历史 cache 命中率长期个位数。
+
+    改成 trailing system message 后：
+    - history 里所有 user/assistant 在多轮发送间字面完全稳定 → cache 可贯穿到 latest user
+    - 每轮变化的只剩末尾的 dynamic system message 这一条，对 prefix 命中无影响
+    - 模型按顺序读 prompt，trailing system 紧跟在 latest user 之后，仍作为"回答本轮问题
+      所需的本轮辅助信息"被使用（OpenAI 兼容协议允许 system message 出现在任意位置）
+    """
+    if not dynamic_context:
+        return [dict(message) for message in messages]
     result = [dict(message) for message in messages]
-    for index in range(len(result) - 1, -1, -1):
-        if result[index].get("role") == "user":
-            user_content = str(result[index].get("content") or "")
-            result[index]["content"] = f"{dynamic_context}\n\n[User message]\n{user_content}".strip()
-            return result
+    result.append({"role": "system", "content": dynamic_context})
     return result
 
 
