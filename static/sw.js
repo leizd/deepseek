@@ -1,9 +1,10 @@
 const CACHE_PREFIX = "deepseek-mobile-";
-const CACHE_NAME = "deepseek-mobile-v150";
+const CACHE_NAME = "deepseek-mobile-v166";
 const APP_SHELL = [
   "/",
   "/index.html",
   "/styles.css",
+  "/gemini.css",
   "/favicon.ico",
   "/icons/apple-touch-icon.png",
   "/icons/badge-96x96.png",

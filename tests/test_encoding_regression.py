@@ -165,7 +165,7 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn('id="historySearchInput"', html)
         self.assertIn(".history-menu-button", css)
         self.assertIn('data.type !== "show_reminder"', sw)
-        self.assertIn("deepseek-mobile-v150", sw)
+        self.assertIn("deepseek-mobile-v166", sw)
 
     def test_v071_project_library_and_citations_are_present(self) -> None:
         app = Path("static/modules/chat.js").read_text(encoding="utf-8")
@@ -187,7 +187,7 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn("openCitationForMessage", app)
         self.assertIn('data-citation="${escapeAttribute(id)}"', markdown)
         self.assertIn(".citation-pin", css)
-        self.assertIn("deepseek-mobile-v150", sw)
+        self.assertIn("deepseek-mobile-v166", sw)
 
     def test_v073_memory_suggestions_and_scopes_are_present(self) -> None:
         app = Path("static/modules/chat.js").read_text(encoding="utf-8")
@@ -201,7 +201,7 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn('"memory_suggestion"', client)
         self.assertIn('"name": "suggest_memory"', tools)
         self.assertIn("def detect_memory_conflicts", memory)
-        self.assertIn("deepseek-mobile-v150", sw)
+        self.assertIn("deepseek-mobile-v166", sw)
 
     def test_v074_ui_ux_enhancements_are_present(self) -> None:
         app = Path("static/modules/chat.js").read_text(encoding="utf-8")
@@ -223,7 +223,7 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn("data-chart-action=\"bar\"", markdown)
         self.assertIn("function hydrateMermaidDiagrams", markdown)
         self.assertIn(".command-palette", css)
-        self.assertIn("deepseek-mobile-v150", sw)
+        self.assertIn("deepseek-mobile-v166", sw)
 
     def test_v080_voice_and_share_target_are_present(self) -> None:
         app = Path("static/modules/chat.js").read_text(encoding="utf-8")
@@ -367,7 +367,7 @@ class EncodingRegressionTests(unittest.TestCase):
         ]:
             with self.subTest(token=token):
                 self.assertIn(token, app)
-        self.assertIn("deepseek-mobile-v150", sw)
+        self.assertIn("deepseek-mobile-v166", sw)
 
     def test_v085_selection_quote_reasoning_and_composer_focus_fixes_are_present(self) -> None:
         app = Path("static/modules/chat.js").read_text(encoding="utf-8")
@@ -378,10 +378,21 @@ class EncodingRegressionTests(unittest.TestCase):
         for token in [
             "selectionQuoteLocked: null",
             "lastValidQuoteCandidate: null",
+            "selectionQuoteActionHandledAt: 0",
             "function captureSelectionSnapshot(event)",
+            "function scheduleSelectionRefresh()",
+            'document.addEventListener("pointerup", scheduleSelectionRefresh, { passive: true })',
+            "function chatBubbleForSelection(selection, range)",
+            "function chatBubblesForTextRange(range)",
+            "function rangeIntersectsTextNode(range, node)",
+            "function handleSelectionPointerActivation(event, run)",
+            "event.type !== \"touchstart\"",
+            ".message[data-message-id] .bubble",
+            'quoteSelectionButton.addEventListener("pointerup", quoteSelectionButtonPointerUp)',
             'quoteSelectionButton.addEventListener("touchstart", captureSelectionSnapshot, { passive: false })',
             "Boolean((state.selectionQuoteCandidate || state.lastValidQuoteCandidate)?.text)",
             "state.selectionQuoteLocked || state.selectionQuoteCandidate || selectedAssistantQuoteCandidate() || state.lastValidQuoteCandidate",
+            "![\"assistant\", \"user\"].includes(message.role)",
             'return seconds > 0 ? `思考中 ${formatReasoningDuration(seconds)}` : "思考中"',
             "clearSelectionQuoteState({ render: false })",
         ]:
@@ -394,12 +405,14 @@ class EncodingRegressionTests(unittest.TestCase):
             "border-color: var(--accent)",
             "user-select: none",
             "-webkit-user-select: none",
+            ".message .content",
+            "user-select: text",
         ]:
             with self.subTest(token=token):
                 self.assertIn(token, css)
         self.assertNotIn("button:focus-visible,\ntextarea:focus-visible", css)
 
-        self.assertIn("deepseek-mobile-v150", sw)
+        self.assertIn("deepseek-mobile-v166", sw)
         self.assertIn("## [0.8.5]", changelog)
 
     def test_v086_reasoning_timer_and_busy_interactions_are_present(self) -> None:
@@ -434,10 +447,10 @@ class EncodingRegressionTests(unittest.TestCase):
             with self.subTest(removed=removed):
                 self.assertNotIn(removed, app)
 
-        self.assertIn("deepseek-mobile-v150", sw)
-        self.assertIn("version-1.5.0-blue", readme)
+        self.assertIn("deepseek-mobile-v166", sw)
+        self.assertIn("version-1.6.6-blue", readme)
         self.assertIn("## [0.8.6]", changelog)
-        self.assertIn("适用版本：v1.4.0。", api)
+        self.assertIn("适用版本：v1.6.6。", api)
 
     def test_v090_sidebar_history_layout_is_present(self) -> None:
         html = Path("static/index.html").read_text(encoding="utf-8")
@@ -487,7 +500,7 @@ class EncodingRegressionTests(unittest.TestCase):
                 self.assertIn(token, css)
         self.assertNotIn(".history-footer {\n  position: sticky", css)
         self.assertNotIn("background: rgba(255, 255, 255, 0.96)", css)
-        self.assertIn("deepseek-mobile-v150", sw)
+        self.assertIn("deepseek-mobile-v166", sw)
         self.assertIn("## [0.9.0]", changelog)
 
     def test_v091_tool_calling_improvements_are_present(self) -> None:
@@ -533,10 +546,10 @@ class EncodingRegressionTests(unittest.TestCase):
                 self.assertIn(token, app)
 
         self.assertIn('id="reasoningEffortSelect"', html)
-        self.assertIn("deepseek-mobile-v150", sw)
-        self.assertIn("version-1.5.0-blue", readme)
+        self.assertIn("deepseek-mobile-v166", sw)
+        self.assertIn("version-1.6.6-blue", readme)
         self.assertIn("## [0.9.1]", changelog)
-        self.assertIn("适用版本：v1.4.0。", api)
+        self.assertIn("适用版本：v1.6.6。", api)
 
     def test_v092_upload_limits_and_frontend_interactions_are_present(self) -> None:
         app = Path("static/modules/chat.js").read_text(encoding="utf-8")
@@ -616,8 +629,8 @@ class EncodingRegressionTests(unittest.TestCase):
 
         self.assertIn("thumbnail: String(value.thumbnail || \"\")", normalize)
         self.assertIn("imagePreview: String(value.imagePreview || \"\")", normalize)
-        self.assertIn("deepseek-mobile-v150", sw)
-        self.assertIn("version-1.5.0-blue", readme)
+        self.assertIn("deepseek-mobile-v166", sw)
+        self.assertIn("version-1.6.6-blue", readme)
         self.assertIn("## [0.9.4]", changelog)
         self.assertIn("uploadLimits", api)
 
@@ -656,6 +669,7 @@ class EncodingRegressionTests(unittest.TestCase):
             "def web_search_callback_for_turn(",
             "forced_search_mode(payload)",
             "search_tool_enabled(payload)",
+            "tools_enabled and search_tool_enabled(payload)",
         ]:
             with self.subTest(token=token):
                 self.assertIn(token, client)
@@ -685,8 +699,8 @@ class EncodingRegressionTests(unittest.TestCase):
 
         self.assertIn(".selection-popover", css)
         self.assertIn(".search-round-count", css)
-        self.assertIn("deepseek-mobile-v150", sw)
-        self.assertIn("version-1.5.0-blue", readme)
+        self.assertIn("deepseek-mobile-v166", sw)
+        self.assertIn("version-1.6.6-blue", readme)
 
     def test_v094_citations_titles_peek_and_timeline_are_present(self) -> None:
         app = Path("static/modules/chat.js").read_text(encoding="utf-8")
@@ -718,6 +732,8 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn("Each result includes a cite field", tools)
         self.assertIn('"/api/title"', server)
         self.assertIn("def generate_title_payload", title)
+        self.assertIn("你是一个对话标题生成器", title)
+        self.assertIn("用户首轮提问", title)
         self.assertIn("RATE_LIMITED", title)
 
         for token in [
@@ -728,6 +744,7 @@ class EncodingRegressionTests(unittest.TestCase):
             "function renderInlineSearchRound",
             "function maybeAutoGenerateTitle",
             "function regenerateTitle",
+            "maybeAutoGenerateTitle(conversation, conversation.messages || [])",
             "peekClickLockUntil",
         ]:
             with self.subTest(token=token):
@@ -743,8 +760,8 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn("citation-web", markdown)
         self.assertIn(".reasoning-search-round", css)
         self.assertIn(".history-title.is-pending-title", css)
-        self.assertIn("deepseek-mobile-v150", sw)
-        self.assertIn("version-1.5.0-blue", readme)
+        self.assertIn("deepseek-mobile-v166", sw)
+        self.assertIn("version-1.6.6-blue", readme)
         self.assertIn("## [0.9.4]", changelog)
 
     def test_v096_search_hotfix_and_tool_expansion_are_present(self) -> None:
@@ -808,11 +825,11 @@ class EncodingRegressionTests(unittest.TestCase):
             with self.subTest(token=token):
                 self.assertIn(token, tools)
 
-        self.assertIn("deepseek-mobile-v150", sw)
-        self.assertIn("version-1.5.0-blue", readme)
+        self.assertIn("deepseek-mobile-v166", sw)
+        self.assertIn("version-1.6.6-blue", readme)
         self.assertIn("## [0.9.6]", changelog)
-        self.assertIn("适用版本：v1.4.0。", api)
-        self.assertIn("适用版本：v1.4.0。", security)
+        self.assertIn("适用版本：v1.6.6。", api)
+        self.assertIn("适用版本：v1.6.6。", security)
 
     def test_v111_visual_theme_system_is_present(self) -> None:
         app = Path("static/modules/chat.js").read_text(encoding="utf-8")
@@ -903,8 +920,8 @@ class EncodingRegressionTests(unittest.TestCase):
                 self.assertIn(token, css)
         self.assertNotIn(':root[data-theme="dark"]', css)
 
-        self.assertIn("deepseek-mobile-v150", sw)
-        self.assertIn("version-1.5.0-blue", readme)
+        self.assertIn("deepseek-mobile-v166", sw)
+        self.assertIn("version-1.6.6-blue", readme)
         self.assertIn("## [1.2.2]", changelog)
         self.assertIn("normalizeThemeStyle", frontend_docs)
         self.assertIn("Google Fonts", security)
@@ -932,8 +949,8 @@ class EncodingRegressionTests(unittest.TestCase):
             with self.subTest(token=token):
                 self.assertIn(token, search)
 
-        self.assertIn("deepseek-mobile-v150", sw)
-        self.assertIn("version-1.5.0-blue", readme)
+        self.assertIn("deepseek-mobile-v166", sw)
+        self.assertIn("version-1.6.6-blue", readme)
         self.assertIn("## [1.2.2]", changelog)
 
     def test_v115_agent_mode_and_search_limits_are_present(self) -> None:
@@ -1224,9 +1241,252 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn("## [1.4.0]", changelog)
         self.assertIn("## Agent Run API", api)
         self.assertIn("deepseek_mobile/services/agent_runs.py", architecture)
-        self.assertIn("deepseek-mobile-v150", sw)
+        self.assertIn("deepseek-mobile-v166", sw)
+
+    def test_v160_mobile_launcher_is_present(self) -> None:
+        launch_py = Path("launch.py").read_text(encoding="utf-8")
+        mobile_launcher = Path("deepseek_mobile/launcher/mobile.py").read_text(encoding="utf-8")
+        readme = Path("README.md").read_text(encoding="utf-8")
+        changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
+        sw = Path("static/sw.js").read_text(encoding="utf-8")
+
+        self.assertTrue(Path("launch_mobile.py").is_file())
+        self.assertTrue(Path("launch_mobile.sh").is_file())
+        self.assertTrue(Path("requirements-mobile.txt").is_file())
+        self.assertIn("is_mobile_environment()", launch_py)
+        self.assertIn("DEFAULT_MOBILE_HOST = \"127.0.0.1\"", mobile_launcher)
+        self.assertIn("termux-open-url", mobile_launcher)
+        self.assertIn("prepare_and_start(host=host, port=port, serve=False)", mobile_launcher)
+        self.assertIn("手机本机直接运行", readme)
+        self.assertIn("## [1.6.0]", changelog)
+        self.assertIn("deepseek-mobile-v166", sw)
+
+    def test_v160_web_interaction_fixes_are_present(self) -> None:
+        app = Path("static/modules/chat.js").read_text(encoding="utf-8")
+        sw = Path("static/sw.js").read_text(encoding="utf-8")
+        readme = Path("README.md").read_text(encoding="utf-8")
+        changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
+        architecture = Path("docs/ARCHITECTURE.md").read_text(encoding="utf-8")
+        config = Path("deepseek_mobile/core/config.py").read_text(encoding="utf-8")
+
+        for token in [
+            "function hasClosablePanelOpen()",
+            "if (hasClosablePanelOpen())",
+            "closePanels();",
+            "focusTrapStack: []",
+            "state.focusTrapStack.push({ container, previous })",
+            "const entryIndex = state.focusTrapStack",
+            "Nested dialogs reuse the same tab trap machinery",
+            'activityPanel.addEventListener("click", onActivityPanelClick)',
+            'button[data-copy-agent-report]',
+        ]:
+            with self.subTest(token=token):
+                self.assertIn(token, app)
+
+        self.assertNotIn('copyReport.addEventListener("click"', app)
+        self.assertIn('app_version: str = "1.6.6"', config)
+        self.assertIn("deepseek-mobile-v166", sw)
+        self.assertIn("version-1.6.6-blue", readme)
+        self.assertIn("## [1.6.0]", changelog)
+        self.assertIn("v1.6.0", architecture)
+
+    def test_v161_web_search_tool_cache_stability_is_present(self) -> None:
+        client = Path("deepseek_mobile/services/deepseek_client.py").read_text(encoding="utf-8")
+        search = Path("deepseek_mobile/services/search.py").read_text(encoding="utf-8")
+        tools = Path("deepseek_mobile/services/tools.py").read_text(encoding="utf-8")
+        readme = Path("README.md").read_text(encoding="utf-8")
+        changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
+        api = Path("docs/API.md").read_text(encoding="utf-8")
+        sw = Path("static/sw.js").read_text(encoding="utf-8")
+
+        for token in [
+            "stable_tool_call_id",
+            "canonical_tool_arguments",
+            "stable_ids=True, canonical_arguments=True",
+            "use_cache=True",
+        ]:
+            with self.subTest(token=token):
+                self.assertIn(token, client)
+
+        for token in [
+            "use_cache: bool = False",
+            "load_search_cache(cleaned)",
+            "search_round_from_cache",
+            "save_search_cache(cleaned",
+        ]:
+            with self.subTest(token=token):
+                self.assertIn(token, search)
+
+        for token in [
+            "stable_tool_output_for_model",
+            "strip_volatile_tool_fields",
+            'key not in {"cached"}',
+            "sort_keys=True",
+        ]:
+            with self.subTest(token=token):
+                self.assertIn(token, tools)
+
+        self.assertIn("version-1.6.6-blue", readme)
+        self.assertIn("## [1.6.1]", changelog)
+        self.assertIn("适用版本：v1.6.6。", api)
+        self.assertIn("deepseek-mobile-v166", sw)
+
+
+    def test_v162_android_ocr_bridge_is_present(self) -> None:
+        android_ocr = Path("android/app/src/main/java/com/deepseek/mobile/AndroidOcrBridge.java").read_text(encoding="utf-8")
+        main_activity = Path("android/app/src/main/java/com/deepseek/mobile/MainActivity.java").read_text(encoding="utf-8")
+        build_gradle = Path("android/app/build.gradle").read_text(encoding="utf-8")
+        android_entry = Path("deepseek_mobile/android_entry.py").read_text(encoding="utf-8")
+        ocr = Path("deepseek_mobile/services/ocr.py").read_text(encoding="utf-8")
+        readme = Path("README.md").read_text(encoding="utf-8")
+        changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
+        apk_docs = Path("docs/APK.md").read_text(encoding="utf-8")
+        sw = Path("static/sw.js").read_text(encoding="utf-8")
+
+        for token in [
+            "AndroidOcrBridge",
+            "recognizeImage(byte[] imageBytes)",
+            "recognizePdf(byte[] pdfBytes)",
+            "ChineseTextRecognizerOptions",
+            "PdfRenderer",
+        ]:
+            with self.subTest(token=token):
+                self.assertIn(token, android_ocr)
+
+        self.assertIn("AndroidOcrBridge.initialize(getApplicationContext())", main_activity)
+        self.assertIn("com.google.mlkit:text-recognition-chinese", build_gradle)
+        self.assertIn('versionName "1.6.6"', build_gradle)
+        self.assertIn('os.environ["DEEPSEEK_ANDROID_APP"] = "1"', android_entry)
+        self.assertIn('os.environ.setdefault("OCR_ENABLED", "1")', android_entry)
+        self.assertIn("class AndroidMlKitEngine", ocr)
+        self.assertIn("class WindowsOcrEngine", ocr)
+        self.assertIn("Windows.Media.Ocr.OcrEngine", ocr)
+        self.assertIn("PowerShell is required for Windows OCR.", ocr)
+        self.assertIn('jclass("com.deepseek.mobile.AndroidOcrBridge")', ocr)
+        self.assertIn("DEEPSEEK_ANDROID_APP", ocr)
+        self.assertIn("version-1.6.6-blue", readme)
+        self.assertIn("## [1.6.2]", changelog)
+        self.assertIn("ML Kit", apk_docs)
+        self.assertIn("deepseek-mobile-v166", sw)
+
+    def test_v163_desktop_local_app_shell_is_present(self) -> None:
+        desktop_app = Path("deepseek_mobile/desktop_app.py").read_text(encoding="utf-8")
+        launch_py = Path("launch.py").read_text(encoding="utf-8")
+        build_exe = Path("scripts/build_exe.py").read_text(encoding="utf-8")
+        requirements = Path("requirements.txt").read_text(encoding="utf-8")
+        readme = Path("README.md").read_text(encoding="utf-8")
+        changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
+        api = Path("docs/API.md").read_text(encoding="utf-8")
+        architecture = Path("docs/ARCHITECTURE.md").read_text(encoding="utf-8")
+        frontend_docs = Path("docs/FRONTEND_MODULES.md").read_text(encoding="utf-8")
+        security = Path("docs/SECURITY.md").read_text(encoding="utf-8")
+        sw = Path("static/sw.js").read_text(encoding="utf-8")
+
+        for token in [
+            'prepare_and_start(host="127.0.0.1", serve=True)',
+            "open_app_window(webview_entry_url(handle.computer_url))",
+            "def webview_entry_url",
+            "webview.create_window",
+            "webview.start(debug=False, private_mode=False)",
+            "shutdown_handle(handle)",
+            "messagebox.showerror",
+        ]:
+            with self.subTest(token=token):
+                self.assertIn(token, desktop_app)
+
+        for token in [
+            "local desktop app window",
+            "deepseek_mobile.desktop_app",
+            "--gui",
+            "--server",
+        ]:
+            with self.subTest(token=token):
+                self.assertIn(token, launch_py)
+
+        for token in [
+            "--collect-all=webview",
+            "--collect-all=pythonnet",
+            "--collect-all=clr_loader",
+            "local desktop",
+        ]:
+            with self.subTest(token=token):
+                self.assertIn(token, build_exe)
+
+        self.assertIn("pywebview>=5,<6", requirements)
+        self.assertIn("version-1.6.6-blue", readme)
+        self.assertIn("内嵌 WebView", readme)
+        self.assertIn("## [1.6.3]", changelog)
+        self.assertIn("适用版本：v1.6.6。", api)
+        self.assertIn("deepseek_mobile/desktop_app.py", architecture)
+        self.assertIn("pywebview", architecture)
+        self.assertIn("pywebview", frontend_docs)
+        self.assertIn("内嵌 WebView", security)
+        self.assertIn("deepseek-mobile-v166", sw)
+
+    def test_v165_multi_agent_budget_revision_and_dynamic_dag_are_present(self) -> None:
+        multi_agent = Path("deepseek_mobile/services/multi_agent.py").read_text(encoding="utf-8")
+        config = Path("deepseek_mobile/core/config.py").read_text(encoding="utf-8")
+        client = Path("deepseek_mobile/services/deepseek_client.py").read_text(encoding="utf-8")
+        readme = Path("README.md").read_text(encoding="utf-8")
+        changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
+        api = Path("docs/API.md").read_text(encoding="utf-8")
+        sw = Path("static/sw.js").read_text(encoding="utf-8")
+
+        for token in [
+            "MAX_REVISION_ROUNDS",
+            "CRITIC_VERDICT_INSTRUCTION",
+            "修订建议",
+            "def run_critic_revision",
+            "def parse_critic_verdict",
+            "def plan_has_dependencies",
+            "def layered_plan",
+            "def _dependency_layers",
+            "def _legacy_role_tiers",
+            "depends_on",
+        ]:
+            with self.subTest(token=token):
+                self.assertIn(token, multi_agent)
+
+        self.assertIn("MULTI_AGENT_TOKEN_BUDGET", config)
+        self.assertIn("multi_agent_token_budget", config)
+        self.assertIn("class TokenBudget", client)
+        self.assertIn("version-1.6.6-blue", readme)
+        self.assertIn("## [1.6.5]", changelog)
+        self.assertIn("适用版本：v1.6.6。", api)
+        self.assertIn("deepseek-mobile-v166", sw)
+
+    def test_v166_gemini_skin_and_frontend_fixes_are_present(self) -> None:
+        index_html = Path("static/index.html").read_text(encoding="utf-8")
+        gemini_css = Path("static/gemini.css").read_text(encoding="utf-8")
+        chat_js = Path("static/modules/chat.js").read_text(encoding="utf-8")
+        sw = Path("static/sw.js").read_text(encoding="utf-8")
+        config = Path("deepseek_mobile/core/config.py").read_text(encoding="utf-8")
+        build_gradle = Path("android/app/build.gradle").read_text(encoding="utf-8")
+        readme = Path("README.md").read_text(encoding="utf-8")
+        changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
+
+        # Gemini 皮肤接线：body 作用域 + 叠加样式表 + 新欢迎语
+        self.assertIn('class="gemini-ui"', index_html)
+        self.assertIn("/gemini.css", index_html)
+        self.assertIn("你好，今天能帮你点什么？", index_html)
+        self.assertIn("body.gemini-ui", gemini_css)
+        self.assertIn("#0b57d0", gemini_css)
+
+        # 多 Agent 历史回放重连修复 + 占位符
+        self.assertIn("agentRunStreamIncomplete", chat_js)
+        self.assertIn("AGENT_STREAM_MAX_STALLED_RECONNECTS", chat_js)
+        self.assertIn("问问 DeepSeek", chat_js)
+
+        # SW 预缓存皮肤 + 版本同步到 1.6.6
+        self.assertIn("/gemini.css", sw)
+        self.assertIn("deepseek-mobile-v166", sw)
+        self.assertIn('app_version: str = "1.6.6"', config)
+        self.assertIn('versionName "1.6.6"', build_gradle)
+        self.assertIn("versionCode 166", build_gradle)
+        self.assertIn("version-1.6.6-blue", readme)
+        self.assertIn("## v1.6.6 更新", readme)
+        self.assertIn("## [1.6.6]", changelog)
 
 
 if __name__ == "__main__":
     unittest.main()
-

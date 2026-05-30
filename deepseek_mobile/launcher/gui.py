@@ -28,7 +28,7 @@ from deepseek_mobile.launcher.credentials import (
     LAN_HOST,
     LauncherCredentials,
 )
-from deepseek_mobile.launcher.runtime import LauncherRuntime
+from deepseek_mobile.launcher.runtime import LauncherRuntime, launcher_url_from_log
 
 logger = logging.getLogger("deepseek_mobile.launcher.gui")
 APP_TITLE = f"DeepSeek Mobile {settings.app_version} 启动器"
@@ -651,7 +651,7 @@ class LauncherWindow:
 
     def _update_urls(self, creds: LauncherCredentials) -> None:
         port = creds.port
-        token = settings.auth.token if not creds.auth_disabled and settings.auth.enabled else ""
+        token = settings.auth.token if not creds.auth_disabled else ""
         computer = f"http://127.0.0.1:{port}/"
         try:
             ip = local_ip()
@@ -672,11 +672,11 @@ class LauncherWindow:
             payload = json.loads(line[start:])
         except json.JSONDecodeError:
             return
-        computer = payload.get("computer_url")
-        phone = payload.get("phone_url")
-        if isinstance(computer, str) and computer:
+        computer = launcher_url_from_log(payload.get("computer_url"), settings.auth.token)
+        phone = launcher_url_from_log(payload.get("phone_url"), settings.auth.token)
+        if computer:
             self.computer_url_var.set(computer)
-        if isinstance(phone, str) and phone:
+        if phone:
             self.phone_url_var.set(phone)
         self.open_button.configure(state="normal")
 

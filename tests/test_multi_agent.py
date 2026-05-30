@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from deepseek_mobile.core.config import MULTI_AGENT_TIMEOUT_SECONDS
 from deepseek_mobile.services import multi_agent, tools
-from deepseek_mobile.services.deepseek_client import SearchBudget
+from deepseek_mobile.services.deepseek_client import SearchBudget, TokenBudget
 
 
 # ---------------------------------------------------------------------------
@@ -240,6 +240,45 @@ def test_parse_structured_agent_output_accepts_aliases() -> None:
     assert parsed["evidence"] == "F"
     assert parsed["risks"] == "R"
     assert parsed["full_output"] == "D"
+
+
+def test_parse_structured_agent_output_accepts_non_h2_bold_and_label_headers() -> None:
+    # worker 用 ### / ###### / 整行粗体 / "标题：" 等变体也能正确分段
+    raw = (
+        "### 摘要\n核心结论\n\n"
+        "**关键事实**\n- 事实1\n\n"
+        "###### 风险/不确定\n- 风险1\n\n"
+        "完整分析：\n详细推导"
+    )
+    parsed = multi_agent.parse_structured_agent_output(raw)
+    assert parsed["summary"] == "核心结论"
+    assert parsed["evidence"] == "- 事实1"
+    assert parsed["risks"] == "- 风险1"
+    assert parsed["full_output"] == "详细推导"
+
+
+def test_parse_structured_agent_output_label_line_requires_exact_alias() -> None:
+    # "我的结论如下：" 子串含别名 "结论" 但不精确等于别名，必须当正文留在当前段，不能误切
+    raw = "## 摘要\n我的结论如下：\n- 要点A\n- 要点B"
+    parsed = multi_agent.parse_structured_agent_output(raw)
+    assert parsed["summary"] == "我的结论如下：\n- 要点A\n- 要点B"
+    assert parsed["evidence"] == ""
+    assert parsed["risks"] == ""
+
+
+def test_parse_structured_agent_output_inline_colon_is_not_a_header() -> None:
+    # 冒号后仍有内容的是正文（"风险：xxx"），不能被当成 risks 段起点
+    raw = "## 摘要\n本轮最大风险：系统可能超时\n仍需进一步验证"
+    parsed = multi_agent.parse_structured_agent_output(raw)
+    assert parsed["summary"] == "本轮最大风险：系统可能超时\n仍需进一步验证"
+    assert parsed["risks"] == ""
+
+
+def test_parse_structured_agent_output_bold_non_section_stays_in_body() -> None:
+    # 整行 **强调** 但不是规范段名时按正文处理，不能被当 header 丢内容
+    raw = "## 摘要\n**重点提示**\n结论内容"
+    parsed = multi_agent.parse_structured_agent_output(raw)
+    assert parsed["summary"] == "**重点提示**\n结论内容"
 
 
 def test_run_agent_returns_structured_fields() -> None:
@@ -1247,6 +1286,196 @@ def test_agent_system_prompt_is_stable_across_role_task_and_prior_context() -> N
     assert "你负责事实" not in str(third["systemPrompt"])
 
 
+def test_token_budget_records_exhausts_and_treats_zero_as_unlimited() -> None:
+    budget = TokenBudget(total_limit=100)
+    assert budget.exhausted() is False
+    assert budget.record(60) == 60
+    assert budget.exhausted() is False
+    budget.record(40)
+    assert budget.used == 100
+    assert budget.exhausted() is True
+    # 负数/脏值被夹到 0，不会反向减少已用量
+    budget.record(-5)
+    assert budget.used == 100
+
+    unlimited = TokenBudget(total_limit=0)
+    unlimited.record(10_000_000)
+    assert unlimited.exhausted() is False
+
+
+def test_token_total_for_usage_prefers_total_then_sums_parts() -> None:
+    assert multi_agent._token_total_for_usage({"total_tokens": 123}) == 123
+    assert multi_agent._token_total_for_usage({"prompt_tokens": 10, "completion_tokens": 5}) == 15
+    assert multi_agent._token_total_for_usage(None) == 0
+
+
+def test_diagnostics_for_agent_run_includes_token_budget_fields() -> None:
+    token_budget = TokenBudget(total_limit=2_000_000)
+    token_budget.record(1234)
+    diagnostics = multi_agent.diagnostics_for_agent_run(
+        [{"id": "coder"}],
+        {"total_tokens": 10},
+        SearchBudget(total_limit=8, per_key_limit=2),
+        token_budget,
+    )
+    assert diagnostics["agentTokenBudgetUsed"] == 1234
+    assert diagnostics["agentTokenBudgetLimit"] == 2_000_000
+
+
+def test_stream_agent_plan_token_gate_skips_later_tiers_but_always_synthesizes() -> None:
+    plan = [
+        {"id": "researcher", "task": "r"},
+        {"id": "coder", "task": "c"},
+        {"id": "reasoner", "task": "z"},
+        {"id": "critic", "task": "k"},
+    ]
+    ran: list[str] = []
+
+    def fake_run_agent(payload, *, agent_id, task, search_budget, prior_outputs=None, emit_event=None, **_):
+        ran.append(agent_id)
+        return {
+            "id": agent_id,
+            "name": multi_agent.AGENT_PROFILES[agent_id]["name"],
+            "task": task,
+            "content": "x",
+            "summary": "s",
+            "evidence": "",
+            "risks": "",
+            "full_output": "",
+            "usage": {"total_tokens": 1000},
+        }
+
+    synth_calls: list[bool] = []
+
+    def fake_stream(payload, emit_event, **_):
+        synth_calls.append(True)
+        emit_event({"type": "content", "text": "final"})
+        emit_event({"type": "done", "usage": {"total_tokens": 50}})
+
+    events: list[dict[str, object]] = []
+    with patch.object(multi_agent, "run_agent", side_effect=fake_run_agent), patch.object(
+        multi_agent, "stream_deepseek", side_effect=fake_stream
+    ):
+        multi_agent.stream_agent_plan(
+            {"apiKey": "k", "model": "expert", "messages": [{"role": "user", "content": "q"}]},
+            plan,
+            selected_model="expert",
+            user_query="q",
+            search_budget=SearchBudget(total_limit=8, per_key_limit=2),
+            emit_event=events.append,
+            token_budget=TokenBudget(total_limit=500),
+        )
+
+    # tier1 (researcher) 用掉 1000 > 500 → 后续 tier 全部跳过
+    assert ran == ["researcher"]
+    # 综合阶段无论预算如何都必须执行，保证有最终答案
+    assert synth_calls == [True]
+    assert any(
+        event.get("type") == "agent_note" and "预算" in str(event.get("text")) for event in events
+    )
+    done = [event for event in events if event.get("type") == "done"][-1]
+    diagnostics = done["diagnostics"]
+    assert diagnostics["agentTokenBudgetLimit"] == 500
+    # researcher(1000) + 综合(50) 都被记账
+    assert diagnostics["agentTokenBudgetUsed"] == 1050
+
+
+def test_stream_agent_plan_high_budget_runs_all_tiers() -> None:
+    plan = [
+        {"id": "researcher", "task": "r"},
+        {"id": "coder", "task": "c"},
+        {"id": "critic", "task": "k"},
+    ]
+    ran: list[str] = []
+
+    def fake_run_agent(payload, *, agent_id, task, search_budget, prior_outputs=None, emit_event=None, **_):
+        ran.append(agent_id)
+        return {
+            "id": agent_id,
+            "name": multi_agent.AGENT_PROFILES[agent_id]["name"],
+            "task": task,
+            "content": "x",
+            "summary": "s",
+            "evidence": "",
+            "risks": "",
+            "full_output": "",
+            "usage": {"total_tokens": 1000},
+        }
+
+    def fake_stream(payload, emit_event, **_):
+        emit_event({"type": "content", "text": "final"})
+        emit_event({"type": "done", "usage": {"total_tokens": 50}})
+
+    events: list[dict[str, object]] = []
+    with patch.object(multi_agent, "run_agent", side_effect=fake_run_agent), patch.object(
+        multi_agent, "stream_deepseek", side_effect=fake_stream
+    ):
+        multi_agent.stream_agent_plan(
+            {"apiKey": "k", "model": "expert", "messages": [{"role": "user", "content": "q"}]},
+            plan,
+            selected_model="expert",
+            user_query="q",
+            search_budget=SearchBudget(total_limit=8, per_key_limit=2),
+            emit_event=events.append,
+            token_budget=TokenBudget(total_limit=2_000_000),
+        )
+
+    assert set(ran) == {"researcher", "coder", "critic"}
+    assert not any(
+        event.get("type") == "agent_note" and "预算" in str(event.get("text")) for event in events
+    )
+    done = [event for event in events if event.get("type") == "done"][-1]
+    assert done["diagnostics"]["agentTokenBudgetUsed"] == 3050
+
+
+def test_agent_model_for_falls_back_and_thinking_tracks_model() -> None:
+    # 仅 pro 支持 thinking，flash 不支持——这是模型/thinking 联动的依据
+    assert multi_agent.model_supports_thinking("deepseek-v4-pro") is True
+    assert multi_agent.model_supports_thinking("deepseek-v4-flash") is False
+    with patch.object(multi_agent, "AGENT_MODELS", {"critic": "deepseek-v4-flash"}):
+        assert multi_agent.agent_model_for("critic") == "deepseek-v4-flash"
+        # 未配置的角色回退到 DEFAULT_MODEL（pro），不会 KeyError
+        assert multi_agent.agent_model_for("planner") == multi_agent.DEFAULT_MODEL
+
+
+def test_worker_payload_downgrade_to_flash_disables_thinking() -> None:
+    payload = {"apiKey": "k", "model": "expert", "systemPrompt": "s", "messages": [{"role": "user", "content": "q"}]}
+    agent_models = {
+        "planner": "deepseek-v4-pro",
+        "researcher": "deepseek-v4-pro",
+        "coder": "deepseek-v4-pro",
+        "reasoner": "deepseek-v4-pro",
+        "critic": "deepseek-v4-flash",
+    }
+    with patch.object(multi_agent, "AGENT_MODELS", agent_models):
+        critic = multi_agent._agent_payload_for(payload, agent_id="critic", task="审", prior_outputs=[])
+        coder = multi_agent._agent_payload_for(payload, agent_id="coder", task="写", prior_outputs=[])
+
+    # 降级到 flash 的角色必须同步关闭 thinking（flash 不支持深度推理）
+    assert critic["model"] == "deepseek-v4-flash"
+    assert critic["thinkingEnabled"] is False
+    # 未降级的角色保持 pro + thinking，零行为变化
+    assert coder["model"] == "deepseek-v4-pro"
+    assert coder["thinkingEnabled"] is True
+
+
+def test_planner_payload_follows_configured_model_and_thinking() -> None:
+    captured: dict[str, object] = {}
+
+    def fake_call(call_payload: dict[str, object], **_) -> dict[str, object]:
+        captured.update(call_payload)
+        return {"content": "{}"}
+
+    payload = {"apiKey": "k", "model": "expert", "messages": [{"role": "user", "content": "q"}]}
+    with patch.object(multi_agent, "AGENT_MODELS", {"planner": "deepseek-v4-flash"}), patch.object(
+        multi_agent, "call_deepseek", side_effect=fake_call
+    ):
+        multi_agent.plan_agents(payload, emit_event=None)
+
+    assert captured["model"] == "deepseek-v4-flash"
+    assert captured["thinkingEnabled"] is False
+
+
 def test_synthesize_answer_streams_when_emit_event_provided() -> None:
     fake_outputs = [{"id": "reasoner", "name": "推理 Agent", "task": "推理", "summary": "前置结论"}]
 
@@ -1291,3 +1520,380 @@ def test_stream_synthesis_emits_visible_fallback_when_only_reasoning_returns() -
     content_events = [event for event in events if event.get("type") == "content"]
     assert content_events == [{"type": "content", "text": multi_agent.EMPTY_SYNTHESIS_FALLBACK}]
     assert events[-1]["type"] == "done"
+
+
+# ---------------------------------------------------------------------------
+# Phase 3：Critic 修订环（结构化 verdict + 点名重跑）
+# ---------------------------------------------------------------------------
+
+
+def _worker_output(agent_id: str, **extra: object) -> dict[str, object]:
+    base: dict[str, object] = {
+        "id": agent_id,
+        "name": multi_agent.AGENT_PROFILES.get(agent_id, {}).get("name", agent_id),
+        "task": "原始子任务",
+        "content": "x",
+        "summary": "s",
+        "evidence": "",
+        "risks": "",
+        "full_output": "",
+        "usage": {"total_tokens": 100},
+    }
+    base.update(extra)
+    return base
+
+
+def test_parse_critic_verdict_reads_named_worker_or_none() -> None:
+    assert multi_agent.parse_critic_verdict(_worker_output("critic", risks="修订建议：coder")) == "coder"
+    # full-width / half-width 分隔符、id 在独立行都能解析
+    assert multi_agent.parse_critic_verdict(_worker_output("critic", full_output="结论...\n修订建议: reasoner")) == "reasoner"
+    # "无" 明确表示无需修订
+    assert multi_agent.parse_critic_verdict(_worker_output("critic", risks="修订建议：无")) is None
+    # 不接受 critic 自己或未知 id，避免自我循环 / 脏值
+    assert multi_agent.parse_critic_verdict(_worker_output("critic", risks="修订建议：critic")) is None
+    assert multi_agent.parse_critic_verdict(_worker_output("critic", risks="修订建议：planner")) is None
+    # 没有标记行 → None
+    assert multi_agent.parse_critic_verdict(_worker_output("critic", risks="一切正常")) is None
+    # 失败的 Critic 不驱动修订
+    assert multi_agent.parse_critic_verdict(_worker_output("critic", failed=True, risks="修订建议：coder")) is None
+    assert multi_agent.parse_critic_verdict(None) is None
+
+
+def test_build_critique_for_revision_prefers_summary_and_risks() -> None:
+    critique = multi_agent.build_critique_for_revision(
+        {"summary": "核心问题", "risks": "边界没处理", "content": "完整正文"}
+    )
+    assert "核心问题" in critique
+    assert "边界没处理" in critique
+    # 没有 summary/risks 时回退到 content
+    assert multi_agent.build_critique_for_revision({"content": "只有正文"}) == "只有正文"
+
+
+def test_run_critic_revision_reruns_named_worker_and_replaces_output() -> None:
+    agent_outputs = [
+        _worker_output("coder", content="coder v1"),
+        _worker_output("critic", risks="修订建议：coder"),
+    ]
+    plan = [{"id": "coder", "task": "原始子任务"}, {"id": "critic", "task": "复核"}]
+    captured: dict[str, object] = {}
+
+    def fake_run_agent(payload, *, agent_id, task, search_budget, prior_outputs=None, emit_event=None, **_):
+        captured["agent_id"] = agent_id
+        captured["task"] = task
+        return _worker_output("coder", content="coder v2", summary="修订后结论", usage={"total_tokens": 222})
+
+    events: list[dict[str, object]] = []
+    token_budget = TokenBudget(total_limit=2_000_000)
+    with patch.object(multi_agent, "run_agent", side_effect=fake_run_agent) as mock_run:
+        result = multi_agent.run_critic_revision(
+            {"apiKey": "k", "messages": [{"role": "user", "content": "q"}]},
+            plan,
+            agent_outputs,
+            search_budget=SearchBudget(total_limit=8, per_key_limit=2),
+            emit_event=events.append,
+            token_budget=token_budget,
+        )
+
+    mock_run.assert_called_once()
+    assert captured["agent_id"] == "coder"
+    # Critic 反馈被注入重跑子任务
+    assert "反驳审查 Agent" in str(captured["task"])
+    # 目标 worker 被替换为修订后输出，Critic 保持不变
+    assert result[0]["content"] == "coder v2"
+    assert result[1]["id"] == "critic"
+    # 修订后卡片标题仍用计划里的原始子任务，不被长 critique 撑大
+    assert result[0]["task"] == "原始子任务"
+    # 重跑产生的 token 计入预算
+    assert token_budget.used == 222
+    # 事件序列：先重置目标 phase，再 running，再 agent_output，并附 Leader 说明
+    types = [event.get("type") for event in events]
+    assert "agent_reset" in types
+    reset = next(event for event in events if event.get("type") == "agent_reset")
+    assert reset["phase"] == "coder" and reset["reason"] == "critic_revision"
+    assert types.index("agent_reset") < types.index("agent_output")
+    assert any(event.get("type") == "agent_output" and event.get("phase") == "coder" for event in events)
+    assert any(event.get("type") == "agent_note" and "重跑" in str(event.get("text")) for event in events)
+
+
+def test_run_critic_revision_is_noop_when_verdict_is_none() -> None:
+    agent_outputs = [_worker_output("coder"), _worker_output("critic", risks="修订建议：无")]
+    with patch.object(multi_agent, "run_agent") as mock_run:
+        result = multi_agent.run_critic_revision(
+            {"apiKey": "k"},
+            [{"id": "coder", "task": "t"}, {"id": "critic", "task": "c"}],
+            agent_outputs,
+            search_budget=SearchBudget(total_limit=8, per_key_limit=2),
+            emit_event=lambda _event: None,
+            token_budget=TokenBudget(total_limit=2_000_000),
+        )
+    mock_run.assert_not_called()
+    assert result is agent_outputs
+
+
+def test_run_critic_revision_skips_when_token_budget_exhausted() -> None:
+    agent_outputs = [_worker_output("coder"), _worker_output("critic", risks="修订建议：coder")]
+    token_budget = TokenBudget(total_limit=10)
+    token_budget.record(50)  # 已超预算
+    events: list[dict[str, object]] = []
+    with patch.object(multi_agent, "run_agent") as mock_run:
+        result = multi_agent.run_critic_revision(
+            {"apiKey": "k"},
+            [{"id": "coder", "task": "t"}, {"id": "critic", "task": "c"}],
+            agent_outputs,
+            search_budget=SearchBudget(total_limit=8, per_key_limit=2),
+            emit_event=events.append,
+            token_budget=token_budget,
+        )
+    mock_run.assert_not_called()
+    assert result is agent_outputs
+    assert any(event.get("type") == "agent_note" and "预算" in str(event.get("text")) for event in events)
+
+
+def test_run_critic_revision_skips_when_target_not_in_outputs() -> None:
+    # Critic 点名 researcher，但本轮 researcher 没跑 → 直接跳过
+    agent_outputs = [_worker_output("coder"), _worker_output("critic", risks="修订建议：researcher")]
+    with patch.object(multi_agent, "run_agent") as mock_run:
+        result = multi_agent.run_critic_revision(
+            {"apiKey": "k"},
+            [{"id": "coder", "task": "t"}, {"id": "critic", "task": "c"}],
+            agent_outputs,
+            search_budget=SearchBudget(total_limit=8, per_key_limit=2),
+            emit_event=lambda _event: None,
+            token_budget=TokenBudget(total_limit=2_000_000),
+        )
+    mock_run.assert_not_called()
+    assert result is agent_outputs
+
+
+def test_run_critic_revision_keeps_original_output_on_rerun_failure() -> None:
+    agent_outputs = [_worker_output("coder", content="coder v1"), _worker_output("critic", risks="修订建议：coder")]
+    events: list[dict[str, object]] = []
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("rerun failed")
+
+    with patch.object(multi_agent, "run_agent", side_effect=boom):
+        result = multi_agent.run_critic_revision(
+            {"apiKey": "k"},
+            [{"id": "coder", "task": "原始子任务"}, {"id": "critic", "task": "c"}],
+            agent_outputs,
+            search_budget=SearchBudget(total_limit=8, per_key_limit=2),
+            emit_event=events.append,
+            token_budget=TokenBudget(total_limit=2_000_000),
+        )
+    # 重跑失败时保留原结论，不替换、不发 agent_output
+    assert result[0]["content"] == "coder v1"
+    assert not any(event.get("type") == "agent_output" for event in events)
+    assert any(event.get("type") == "agent" and event.get("status") == "error" for event in events)
+
+
+def test_stream_agent_plan_runs_critic_revision_once_then_synthesizes() -> None:
+    plan = [{"id": "coder", "task": "原始子任务"}, {"id": "critic", "task": "复核"}]
+    calls: list[str] = []
+
+    def fake_run_agent(payload, *, agent_id, task, search_budget, prior_outputs=None, emit_event=None, **_):
+        calls.append(agent_id)
+        if agent_id == "critic":
+            return _worker_output("critic", risks="修订建议：coder")
+        if agent_id == "coder" and "反驳审查 Agent" in task:
+            return _worker_output("coder", content="coder v2", summary="修订后结论")
+        return _worker_output("coder", content="coder v1")
+
+    synth_calls: list[bool] = []
+
+    def fake_stream(payload, emit_event, **_):
+        synth_calls.append(True)
+        emit_event({"type": "content", "text": "final"})
+        emit_event({"type": "done", "usage": {"total_tokens": 50}})
+
+    events: list[dict[str, object]] = []
+    with patch.object(multi_agent, "run_agent", side_effect=fake_run_agent), patch.object(
+        multi_agent, "stream_deepseek", side_effect=fake_stream
+    ):
+        result = multi_agent.stream_agent_plan(
+            {"apiKey": "k", "model": "expert", "messages": [{"role": "user", "content": "q"}]},
+            plan,
+            selected_model="expert",
+            user_query="q",
+            search_budget=SearchBudget(total_limit=8, per_key_limit=2),
+            emit_event=events.append,
+            token_budget=TokenBudget(total_limit=2_000_000),
+        )
+
+    # coder 跑两次（原始 + 修订），critic 一次
+    assert calls == ["coder", "critic", "coder"]
+    # 综合阶段只跑一次
+    assert synth_calls == [True]
+    # 最终交给综合的 coder 输出是修订后的版本
+    assert next(item for item in result if item["id"] == "coder")["content"] == "coder v2"
+    # done 事件在所有修订事件之后
+    assert events[-1]["type"] == "done"
+
+
+# ---------------------------------------------------------------------------
+# Phase 3：动态 DAG（hybrid + 复刻现状默认）
+# ---------------------------------------------------------------------------
+
+
+def test_safe_agent_plan_preserves_and_cleans_depends_on() -> None:
+    plan = multi_agent.safe_agent_plan(
+        {
+            "agents": [
+                {"id": "researcher", "task": "r"},
+                # 自依赖 / 未知 id / 重复都要被清掉，只留合法的 researcher 一项
+                {"id": "coder", "task": "c", "depends_on": ["coder", "researcher", "unknown", "researcher"]},
+                {"id": "reasoner", "task": "x", "depends_on": []},
+            ]
+        }
+    )
+    by_id = {item["id"]: item for item in plan}
+    assert by_id["coder"]["depends_on"] == ["researcher"]
+    # 空 / 无 depends_on 不写进 entry，保持旧 plan 形状不变
+    assert "depends_on" not in by_id["researcher"]
+    assert "depends_on" not in by_id["reasoner"]
+
+
+def test_plan_has_dependencies_detects_any_depends_on() -> None:
+    assert multi_agent.plan_has_dependencies([{"id": "coder", "task": "c"}]) is False
+    # 空 depends_on 不算依赖
+    assert multi_agent.plan_has_dependencies([{"id": "coder", "task": "c", "depends_on": []}]) is False
+    assert (
+        multi_agent.plan_has_dependencies(
+            [{"id": "coder", "task": "c"}, {"id": "critic", "task": "v", "depends_on": ["coder"]}]
+        )
+        is True
+    )
+
+
+def test_layered_plan_without_deps_matches_legacy_role_tiers() -> None:
+    # 没有任何 depends_on 时必须逐字复刻旧的角色分层（零行为变化）
+    plan = [
+        {"id": "critic", "task": "review"},
+        {"id": "coder", "task": "code"},
+        {"id": "researcher", "task": "research"},
+    ]
+    assert multi_agent.layered_plan(plan) == multi_agent._legacy_role_tiers(plan)
+
+
+def test_dependency_layers_topological_grouping_and_order() -> None:
+    plan = [
+        {"id": "researcher", "task": "r"},
+        {"id": "coder", "task": "c", "depends_on": ["researcher"]},
+        {"id": "reasoner", "task": "x", "depends_on": ["researcher"]},
+        {"id": "critic", "task": "v", "depends_on": ["coder", "reasoner"]},
+    ]
+    layers = multi_agent.layered_plan(plan)
+    # 拓扑分层：同层并行，层内保持 plan 原顺序
+    assert [[item["id"] for item in layer] for layer in layers] == [
+        ["researcher"],
+        ["coder", "reasoner"],
+        ["critic"],
+    ]
+
+
+def test_dependency_layers_drops_dangling_dependency() -> None:
+    # depends_on 指向本轮没排进 plan 的 researcher → 该依赖被忽略，coder 立即可执行
+    plan = [
+        {"id": "coder", "task": "c", "depends_on": ["researcher"]},
+        {"id": "critic", "task": "v", "depends_on": ["coder"]},
+    ]
+    layers = multi_agent.layered_plan(plan)
+    assert [[item["id"] for item in layer] for layer in layers] == [["coder"], ["critic"]]
+
+
+def test_dependency_layers_breaks_cycle_without_dropping_agents() -> None:
+    # coder↔reasoner 互相依赖：不能死循环，剩余 agent 一次性冲掉且不丢任何一个
+    plan = [
+        {"id": "coder", "task": "c", "depends_on": ["reasoner"]},
+        {"id": "reasoner", "task": "x", "depends_on": ["coder"]},
+    ]
+    layers = multi_agent.layered_plan(plan)
+    assert [[item["id"] for item in layer] for layer in layers] == [["coder", "reasoner"]]
+
+
+def test_execute_agent_tier_parallel_flag_runs_full_layer_concurrently() -> None:
+    """DAG 模式传 parallel=True 时，>2 个 agent 的层也要全部并发启动（不再只并行中间层）。"""
+    started: list[str] = []
+    started_lock = threading.Lock()
+    all_started = threading.Event()
+    tier = [
+        {"id": "researcher", "task": "r"},
+        {"id": "coder", "task": "c"},
+        {"id": "reasoner", "task": "x"},
+    ]
+
+    def fake_run_agent(payload, *, agent_id, task, search_budget, prior_outputs=None, emit_event=None, **_):
+        with started_lock:
+            started.append(agent_id)
+            if len(started) == len(tier):
+                all_started.set()
+        assert all_started.wait(1), "parallel layer should start all workers before any returns"
+        return {
+            "id": agent_id,
+            "name": multi_agent.AGENT_PROFILES[agent_id]["name"],
+            "task": task,
+            "content": f"{agent_id} content",
+            "summary": f"{agent_id} summary",
+            "evidence": "",
+            "risks": "",
+            "full_output": "",
+        }
+
+    with patch.object(multi_agent, "run_agent", side_effect=fake_run_agent):
+        outputs = multi_agent.execute_agent_tier(
+            {"apiKey": "k", "model": "m", "messages": [{"role": "user", "content": "q"}]},
+            tier,
+            prior_outputs=[],
+            search_budget=SearchBudget(total_limit=9, per_key_limit=3),
+            emit_event=lambda _event: None,
+            parallel=True,
+        )
+
+    # 返回顺序仍按 plan 原顺序，但三者确实并发启动过
+    assert [item["id"] for item in outputs] == ["researcher", "coder", "reasoner"]
+    assert set(started) == {"researcher", "coder", "reasoner"}
+
+
+def test_stream_agent_plan_dag_mode_runs_layers_in_dependency_order() -> None:
+    plan = [
+        {"id": "researcher", "task": "r"},
+        {"id": "coder", "task": "c", "depends_on": ["researcher"]},
+        {"id": "reasoner", "task": "x", "depends_on": ["researcher"]},
+        {"id": "critic", "task": "v", "depends_on": ["coder", "reasoner"]},
+    ]
+    calls: list[str] = []
+    calls_lock = threading.Lock()
+
+    def fake_run_agent(payload, *, agent_id, task, search_budget, prior_outputs=None, emit_event=None, **_):
+        with calls_lock:
+            calls.append(agent_id)
+        if agent_id == "critic":
+            # 不触发修订环，专注验证 DAG 层序
+            return _worker_output("critic", risks="修订建议：无")
+        return _worker_output(agent_id)
+
+    synth_calls: list[bool] = []
+
+    def fake_stream(payload, emit_event, **_):
+        synth_calls.append(True)
+        emit_event({"type": "content", "text": "final"})
+        emit_event({"type": "done", "usage": {"total_tokens": 10}})
+
+    with patch.object(multi_agent, "run_agent", side_effect=fake_run_agent), patch.object(
+        multi_agent, "stream_deepseek", side_effect=fake_stream
+    ):
+        multi_agent.stream_agent_plan(
+            {"apiKey": "k", "model": "expert", "messages": [{"role": "user", "content": "q"}]},
+            plan,
+            selected_model="expert",
+            user_query="q",
+            search_budget=SearchBudget(total_limit=9, per_key_limit=3),
+            emit_event=lambda _event: None,
+            token_budget=TokenBudget(total_limit=2_000_000),
+        )
+
+    # researcher 先跑，coder/reasoner 中间层并行，critic 最后；综合只跑一次
+    assert calls[0] == "researcher"
+    assert set(calls[1:3]) == {"coder", "reasoner"}
+    assert calls[-1] == "critic"
+    assert synth_calls == [True]

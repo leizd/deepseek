@@ -188,6 +188,47 @@ class SearchTests(unittest.TestCase):
         self.assertIn("retry failed", str(result["error"]))
         self.assertIn("upstream failed for alpha beta", result["retryError"])
 
+    def test_search_single_round_uses_cache_when_enabled(self) -> None:
+        cached = {
+            "status": "done",
+            "query": "docs",
+            "answer": "cached answer",
+            "results": [{"title": "Cached", "url": "https://example.com", "content": "cached snippet"}],
+        }
+        progress: list[dict[str, object]] = []
+
+        with (
+            patch.object(search, "load_search_cache", return_value=cached),
+            patch.object(search, "search_tavily") as search_tavily,
+        ):
+            result = search.search_single_round("docs", intent="technical", round_index=3, progress_callback=progress.append, use_cache=True)
+
+        search_tavily.assert_not_called()
+        self.assertEqual(result["round"], 3)
+        self.assertTrue(result["cached"])
+        self.assertEqual(result["answer"], "cached answer")
+        self.assertEqual(progress, [{**cached, "round": 3, "response_time": None, "cached": True}])
+
+    def test_search_single_round_saves_successful_results_when_cache_enabled(self) -> None:
+        def fake_search_tavily(query: str, *, tavily_api_key: str = "") -> dict[str, object]:
+            return {
+                "query": query,
+                "answer": "",
+                "results": [{"title": "Result", "url": "https://example.com", "content": "ok"}],
+            }
+
+        with (
+            patch.object(search, "load_search_cache", return_value=None),
+            patch.object(search, "save_search_cache") as save_cache,
+            patch.object(search, "search_tavily", side_effect=fake_search_tavily),
+        ):
+            result = search.search_single_round("docs", intent="technical", round_index=1, use_cache=True)
+
+        self.assertEqual(result["status"], "done")
+        save_cache.assert_called_once()
+        self.assertEqual(save_cache.call_args.args[0], "docs")
+        self.assertEqual(save_cache.call_args.args[1]["results"][0]["url"], "https://example.com")
+
     def test_search_retry_skips_non_transient_missing_key(self) -> None:
         calls: list[str] = []
 

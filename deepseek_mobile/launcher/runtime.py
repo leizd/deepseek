@@ -20,11 +20,14 @@ import sys
 import threading
 from pathlib import Path
 from typing import Callable
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from deepseek_mobile.core.config import settings
+from deepseek_mobile.core.utils import hidden_subprocess_kwargs
 from deepseek_mobile.launcher.credentials import LauncherCredentials
 
 logger = logging.getLogger("deepseek_mobile.launcher.runtime")
+REDACTED_TOKEN_VALUE = "[redacted]"
 
 StatusCallback = Callable[[str], None]
 LogCallback = Callable[[str], None]
@@ -60,7 +63,7 @@ class LauncherRuntime:
                     errors="replace",
                     cwd=str(settings.root),
                     bufsize=1,
-                    creationflags=_no_window_flags(),
+                    **hidden_subprocess_kwargs(),
                 )
             except OSError as exc:
                 self._on_log(f"failed to spawn server: {exc}")
@@ -129,23 +132,46 @@ def build_env(credentials: LauncherCredentials) -> dict[str, str]:
     env["OCR_ENABLED"] = "1" if credentials.ocr_enabled else "0"
     if credentials.auth_disabled:
         env["AUTH_DISABLED"] = "1"
+        env.pop("AUTH_TOKEN", None)
     else:
         env.pop("AUTH_DISABLED", None)
+        if settings.auth.token:
+            env["AUTH_TOKEN"] = settings.auth.token
+        else:
+            env.pop("AUTH_TOKEN", None)
     env.setdefault("PYTHONIOENCODING", "utf-8")
     env.setdefault("PYTHONUTF8", "1")
     return env
+
+
+def launcher_url_from_log(value: object, auth_token: str) -> str:
+    if not isinstance(value, str) or not value:
+        return ""
+    return _restore_redacted_token(value, auth_token)
+
+
+def _restore_redacted_token(url: str, auth_token: str) -> str:
+    parsed = urlsplit(url)
+    query = parse_qsl(parsed.query, keep_blank_values=True)
+    restored: list[tuple[str, str]] = []
+    changed = False
+    for key, value in query:
+        if key == "token" and value == REDACTED_TOKEN_VALUE:
+            if not auth_token:
+                return ""
+            restored.append((key, auth_token))
+            changed = True
+            continue
+        restored.append((key, value))
+    if not changed:
+        return url
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(restored), parsed.fragment))
 
 
 def server_command() -> list[str]:
     if getattr(sys, "frozen", False):
         return [sys.executable, "--server"]
     return [sys.executable, "-m", "deepseek_mobile.app"]
-
-
-def _no_window_flags() -> int:
-    if os.name != "nt":
-        return 0
-    return getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
 def project_root() -> Path:

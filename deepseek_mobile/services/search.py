@@ -149,10 +149,19 @@ def search_single_round(
     citation_offset: int = 0,
     tavily_api_key: str = "",
     progress_callback: Callable[[dict[str, Any]], None] | None = None,
+    use_cache: bool = False,
 ) -> dict[str, Any]:
     cleaned = normalize_search_query_text(query)
     if not cleaned:
         return {"ok": False, "error": "Empty query", "query": "", "round": round_index, "intent": intent, "results": []}
+
+    if use_cache:
+        cached = load_search_cache(cleaned)
+        if cached and cached.get("results"):
+            round_data = search_round_from_cache(cleaned, cached, round_index)
+            if progress_callback:
+                progress_callback(round_data)
+            return compact_search_tool_result(round_data, intent=intent, citation_offset=citation_offset)
 
     if progress_callback:
         progress_callback(search_round_status(cleaned, round_index, "searching"))
@@ -167,9 +176,24 @@ def search_single_round(
         logger.exception("web_search_tool_error", extra={"round": round_index, "query": cleaned})
         round_data = search_round_status(cleaned, round_index, "error", str(exc))
 
+    if use_cache and round_data.get("results"):
+        save_search_cache(cleaned, aggregate_search_rounds(cleaned, [round_data]))
+
     if progress_callback:
         progress_callback(round_data)
     return compact_search_tool_result(round_data, intent=intent, citation_offset=citation_offset)
+
+
+def search_round_from_cache(query: str, cached: dict[str, Any], round_index: int) -> dict[str, Any]:
+    return {
+        "query": str(cached.get("query") or query),
+        "round": round_index,
+        "status": str(cached.get("status") or "done"),
+        "answer": str(cached.get("answer") or ""),
+        "results": [dict(item) for item in cached.get("results") or [] if isinstance(item, dict)],
+        "response_time": cached.get("response_time"),
+        "cached": True,
+    }
 
 
 def compact_search_tool_result(round_data: dict[str, Any], *, intent: str = "general", citation_offset: int = 0) -> dict[str, Any]:

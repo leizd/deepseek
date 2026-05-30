@@ -2,6 +2,139 @@
 
 本项目使用类似 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的分组方式维护变更记录。未发布内容记录在 `[Unreleased]`，正式发版时迁移到具体版本。
 
+## [Unreleased]
+
+### 修复
+
+- 桌面 WebView 启动器打开 token 链接时增加 `desktop=1` 握手；服务端验证 token 后直接返回首页并写入 `auth_token` Cookie，避免内嵌 WebView 在 302 跳转中丢 Cookie 后显示 `Auth required`。
+- 选区引用提问不再要求 selection 的 anchor/focus 都落在同一条助手回复内；只要选区实际命中单条聊天消息气泡即可引用，并支持用户消息和助手消息。触屏 `touchstart` 不再阻断后续 click。
+- DeepSeek 请求尾部 dynamic context 新增当前本地时间和 UTC 时间，支持相对日期和当前时间问题，同时保持稳定 system prompt 与长历史前缀的 cache 友好性。
+- 桌面端 OCR 新增运行时多引擎兜底：Tesseract 依赖缺失或识别过程报错时，PNG/JPG/WebP/BMP/TIFF/GIF 图片会继续调用 Windows 自带 `Windows.Media.Ocr`，并补强 PowerShell 绝对路径查找，避免本地应用环境变量不完整时直接报 `OCR is unavailable`。
+
+### 文档
+
+- 同步 README、API、架构、前端模块、APK 和安全说明，记录桌面启动鉴权、选区引用、当前时间上下文与 Android SDK 34 构建要求。
+
+## [1.6.6]
+
+### 新增
+
+- **Gemini 风格前端皮肤**：新增 `static/gemini.css`，以 `body.gemini-ui` 作用域叠加在 `styles.css` 之后，覆盖设计 token——蓝色主色 `#0b57d0`、Google Sans 字体栈、Material 3 表面与 `28px` 圆角、淡蓝用户气泡、圆形蓝色发送键与面板蓝色 CTA/链接/复选框，外加 `.app-shell` 极光径向渐变。`index.html` 挂上 `body.gemini-ui` 与 `/gemini.css`，欢迎语改为「你好，今天能帮你点什么？」，输入框占位符改为「问问 DeepSeek」。皮肤纯叠加、零 DOM 结构改动，可整体开关。
+
+### 修复
+
+- **多 Agent 历史回放丢答案**：Agent Run 流式连接中断后，若状态仍是 `created/planning/running`，客户端改为带 `after=<已读事件序号>` 自动重连续读，直到拿到终态，并对无进展的重连做退避、超过上限才报错。修复后台已 `done`、却因单次 `readChatStream` 提前结束而落到空综合兜底、并残留卡住「运行中」转圈的问题。
+- 修复 Markdown 行内链接被二次转义：`renderInline` 不再对已转义的 `href` 再调用 `escapeAttribute`，避免 `&` 变成 `&amp;amp;` 导致带查询参数的 URL 打不开。
+- 修复饼图单切片占满 100%（`fraction >= 1`）时退化成零长弧线、渲染为空白的问题，改用整圆 `<circle>` 绘制。
+
+### 清理
+
+- 删除历史列表点击处理里 4 段永远走不到的死分支（`data-edit` / `delete` / `favorite` / `tag-conversation`）——这些动作早已统一由历史菜单 `handleHistoryMenuAction` 处理，底层函数保持不变。
+
+### 构建 / 发布
+
+- `scripts/release.py` 拆分 `EXCLUDED_DIRS`（运行时可清理目录）与新的 `NEVER_PACKAGE_DIRS = {".git", ".claude"}`（仅打包排除），`should_include` 同时排除两者，避免把版本库与本地配置打进发布 zip；新增 `tests/test_release.py` 覆盖 `.git/`、`.claude/`、`.launcher-config.json` 的排除。
+- `.gitignore` 新增 `.launcher-config.json` 及其 `.tmp`，防止本地启动器密钥误入提交。
+- Service Worker 缓存版本更新到 `deepseek-mobile-v166`，并把 `/gemini.css` 加入 `APP_SHELL` 预缓存，新皮肤可离线生效。
+
+## [1.6.5]
+
+### 新增
+
+- **多 Agent token 预算护栏（Phase 2）**：新增 `MULTI_AGENT_TOKEN_BUDGET`（默认 2,000,000，设 `0` 表示不限制）。token 用量事后记账，在层与层之间做软门控——累计超预算后不再启动后续 worker 层，但综合阶段始终执行，保证用户总能拿到最终答案。`done.diagnostics` 新增 `agentTokenBudgetUsed` / `agentTokenBudgetLimit`。
+- **Critic 修订环（Phase 3）**：Critic 复核时会在四段结构之外追加一行机器可读的 `修订建议：<researcher|coder|reasoner|无>`。命中具体角色时，后端带上 Critic 的摘要与风险点名重跑该 worker 一次（仅一轮，`MAX_REVISION_ROUNDS=1`）后再综合；填 `无`、指向 Critic 自身或本轮未运行的角色都会直接跳过（零成本 no-op）。重跑通过 `agent_reset → agent_output` 事件让实时 SSE 和持久化重放都把目标 worker 卡片替换成修订后的结果，综合阶段仍只跑一次，并尊重 token 预算（超预算则跳过修订）。
+- **动态 DAG 编排（Phase 3）**：Planner 计划里的每个 agent 可声明可选 `depends_on`；`layered_plan` 据此做稳定拓扑分层（Kahn），同层无未满足依赖的 agent 并行执行，层内/层间保持 Planner 原顺序，dangling 依赖忽略、成环时安全冲刷不丢 agent。未声明任何依赖的计划完全复刻原有 `researcher → (coder ∥ reasoner) → critic` 三层行为，对存量计划零行为变化；Planner 可逐步开始产出依赖。
+
+### 改进
+
+- 自动生成对话标题链路补全：首轮回复完成后会用 DeepSeek 生成短标题，历史菜单仍可手动重新生成标题。
+
+### 修复
+
+- 修复标题生成提示词乱码，避免模型收到不可读的标题生成要求。
+- 标题生成请求显式关闭 DeepSeek 思考模式，避免短标题 token 被 `reasoning_content` 消耗后返回空标题。
+- 修复历史收藏操作触发自动标题时使用错误消息变量的问题。
+
+### 测试
+
+- 新增多 Agent token 预算门控（超预算跳过后续层、综合仍执行）回归测试。
+- 新增 Critic 修订环测试：结构化 verdict 解析、点名重跑并替换输出、`无`/越界/预算耗尽/重跑失败的兜底、`stream_agent_plan` 只综合一次。
+- 新增动态 DAG 测试：`safe_agent_plan` 清洗/保留 `depends_on`、`plan_has_dependencies`、无依赖时逐字复刻旧角色分层、拓扑分层与层内保序、dangling 依赖丢弃、成环安全冲刷、并行标记生效、DAG 模式按依赖层序执行。
+- Service Worker 缓存版本更新到 `deepseek-mobile-v165`。
+
+## [1.6.3]
+
+### 改进
+
+- Windows 桌面端 exe 默认入口改为本地应用窗口：后端在本机进程内启动，界面通过系统 WebView 嵌入，不再跳外部浏览器标签页。
+- `DeepSeekMobile.exe --gui` 保留旧启动器；`--server` 保留为内部后端入口。
+- 打包脚本新增 `pywebview` / `pythonnet` / `clr_loader` 收集规则，单文件 exe 可直接运行桌面应用壳。
+
+### 修复
+
+- 修复 PyInstaller windowed 模式下 `stdout` / `stderr` 为空导致 `--server` 后端绑定端口后不响应的问题。
+- Service Worker 缓存版本更新到 `deepseek-mobile-v163`。
+
+## [1.6.2]
+
+### 修复
+
+- 修复 Android APK 内点击 OCR 后不可用的问题：APK 启动时默认开启 `OCR_ENABLED=1`，并通过原生 ML Kit 中文文本识别桥接完成图片和扫描 PDF OCR。
+- Android OCR 不再依赖手机系统安装 Tesseract / Poppler；桌面端继续使用原有 Tesseract / Poppler 路线。
+- 修复 OCR PDF 页码标记中的乱码，统一输出 `[PDF 第 N 页 (OCR)]`。
+
+### 测试
+
+- 新增 Android ML Kit OCR 桥接单元测试、APK OCR 环境变量测试和静态回归哨兵。
+- Service Worker 缓存版本更新到 `deepseek-mobile-v162`。
+
+## [1.6.1]
+
+### 修复
+
+- 修复模型主动调用 `web_search` 后 DeepSeek prompt cache 命中率偏低的问题：后端现在会把上游随机 `tool_call_id` 替换为稳定 ID，并把工具参数 JSON 规范化，避免第二轮请求在工具调用消息处过早分叉。
+- `web_search` 单轮工具查询现在会使用 `.search-cache`；同一查询命中缓存时不再重新请求 Tavily，工具结果更稳定，也减少搜索结果细微变化打断后续 DeepSeek 前缀缓存。
+- 传给模型的联网搜索工具结果会移除 `cached` 这类本地状态字段，并使用稳定 JSON 序列化；前端搜索进度和诊断仍保留缓存命中状态。
+
+### 测试
+
+- 新增联网搜索工具交换稳定性测试，覆盖稳定 `tool_call_id`、规范化参数和移除模型侧波动字段。
+- 新增 `search_single_round(use_cache=True)` 测试，覆盖工具搜索读取/写入 `.search-cache`。
+- Service Worker 缓存版本更新到 `deepseek-mobile-v161`。
+
+## [1.6.0]
+
+### 新增
+
+- **手机本机直接运行（P0）**：新增 `deepseek_mobile/launcher/mobile.py`、根目录 `launch_mobile.py` / `launch_mobile.sh` 和 `python launch.py --mobile` 入口。Android Termux、Pydroid 终端等没有桌面 GUI 的环境可以直接启动 Python 后端，并在手机本机浏览器访问 `127.0.0.1`。
+- **Android APK 工程（P0）**：新增 `android/` Gradle + Chaquopy 工程和 `deepseek_mobile/android_entry.py`，可把 Python 后端、静态前端和 Android WebView 壳打包成手机上直接运行的 APK。
+- **移动端自动入口（P0）**：`launch.py` 会识别 `ANDROID_ROOT`、`ANDROID_DATA`、`TERMUX_VERSION`、`PYDROID_PACKAGE`、`ANDROID_ARGUMENT` 等环境标记；手机上直接执行 `python launch.py` 时自动进入控制台启动器，桌面环境仍默认打开 GUI。
+- **手机轻量依赖（P1）**：新增 `requirements-mobile.txt`，只安装 `openpyxl`、`pypdf`、`multipart`、`defusedxml` 等后端依赖，避开 `customtkinter` / Tk 桌面栈。
+- **手机启动体验（P1）**：手机启动器支持 `--api-key`、`--tavily-api-key`、`--port`、`--lan`、`--no-open`、`--auth-disabled`、`--ocr`；Termux 安装 `termux-open-url` 时会自动拉起浏览器，否则打印带 token 的本机访问地址。
+
+### 修复
+
+- 修复普通对话发生本地工具调用后，诊断面板只读取最后一次 DeepSeek 上游请求 usage，导致前面工具回合的 prompt cache 命中被丢弃、最终显示 `Cache hit rate 0%` 的问题；现在同步和流式工具循环都会聚合整轮所有上游请求的 prompt/cache usage。
+
+### 测试
+
+- 新增手机启动器单元测试，覆盖 Android/Termux 环境识别、环境变量构造、局域网/鉴权/OCR 开关和端口校验。
+- Service Worker 缓存版本更新到 `deepseek-mobile-v160`。
+
+## [1.5.1]
+
+### 修复
+
+- 修复开启搜索后 DeepSeek prompt cache 命中率明显变低的问题：`WEB_SEARCH_SYSTEM_HINT` 不再拼进首个 system message，而是和搜索结果一样追加到本轮尾部 dynamic context；搜索开关变化时，稳定 system 与长历史前缀保持一致。
+- 修复 Activity 面板“复制 Agent 过程”会走直接点击和事件委托两条路径、导致重复复制和重复提示的问题。
+- 修复 Escape 不能关闭普通侧栏/面板的问题；设置、Seek、项目、搜索结果、文件预览、记忆、诊断和 Activity 面板现在都能统一收起。
+- 修复嵌套弹层焦点陷阱被覆盖的问题；确认框叠在其它面板上时，关闭后会恢复到底层面板的焦点循环。
+
+### 测试
+
+- 新增 v1.5.1 前端交互静态守卫，覆盖面板 Escape 关闭、焦点陷阱栈、Activity 复制事件委托和版本资源刷新。
+- Service Worker 缓存版本更新到 `deepseek-mobile-v151`。
+
 ## [1.5.0]
 
 ### 新增

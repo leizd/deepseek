@@ -50,14 +50,20 @@ export function pieChartSvg(data) {
   const slices = data
     .map((item, index) => {
       const value = Math.max(0, item.value);
-      const nextAngle = angle + (value / total) * Math.PI * 2;
+      const color = colors[index % colors.length];
+      const fraction = value / total;
+      // 单一切片占满 100% 时，A 弧的起止点重合会退化成空路径（整张饼图空白），改画整圆。
+      if (fraction >= 1) {
+        return `<circle cx="${cx}" cy="${cy}" r="${radius}" fill="${color}"><title>${escapeHtml(item.label)}: ${item.value}</title></circle>`;
+      }
+      const nextAngle = angle + fraction * Math.PI * 2;
       const large = nextAngle - angle > Math.PI ? 1 : 0;
       const x1 = cx + Math.cos(angle) * radius;
       const y1 = cy + Math.sin(angle) * radius;
       const x2 = cx + Math.cos(nextAngle) * radius;
       const y2 = cy + Math.sin(nextAngle) * radius;
       angle = nextAngle;
-      return `<path d="M ${cx} ${cy} L ${x1} ${y1} A ${radius} ${radius} 0 ${large} 1 ${x2} ${y2} Z" fill="${colors[index % colors.length]}"><title>${escapeHtml(item.label)}: ${item.value}</title></path>`;
+      return `<path d="M ${cx} ${cy} L ${x1} ${y1} A ${radius} ${radius} 0 ${large} 1 ${x2} ${y2} Z" fill="${color}"><title>${escapeHtml(item.label)}: ${item.value}</title></path>`;
     })
     .join("");
   const legend = data

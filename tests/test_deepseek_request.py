@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import unittest
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 import deepseek_mobile.services.deepseek_client as deepseek_client
@@ -132,6 +133,36 @@ class DeepSeekRequestTests(unittest.TestCase):
         tool_names = [tool["function"]["name"] for tool in prepared_call.request.body["tools"]]
         self.assertIn("web_search", tool_names)
 
+    def test_search_hint_is_trailing_dynamic_context_for_cache_friendliness(self) -> None:
+        messages = [
+            {"role": "user", "content": "first question"},
+            {"role": "assistant", "content": "first answer"},
+            {"role": "user", "content": "latest docs"},
+        ]
+        without_search = build_deepseek_request(
+            {"apiKey": "test", "model": "expert", "searchEnabled": False, "messages": messages},
+            stream=False,
+        )
+        with_search = build_deepseek_request(
+            {"apiKey": "test", "model": "expert", "searchEnabled": True, "searchMode": "auto", "messages": messages},
+            stream=False,
+        )
+
+        self.assertEqual(without_search.body["messages"][:-1], with_search.body["messages"][:-1])
+        self.assertEqual(without_search.body["messages"][-1]["role"], "system")
+        self.assertEqual(with_search.body["messages"][-1]["role"], "system")
+        self.assertIn(deepseek_client.CURRENT_TIME_CONTEXT_HEADER, without_search.body["messages"][-1]["content"])
+        self.assertIn(deepseek_client.CURRENT_TIME_CONTEXT_HEADER, with_search.body["messages"][-1]["content"])
+        self.assertIn(deepseek_client.WEB_SEARCH_SYSTEM_HINT, with_search.body["messages"][-1]["content"])
+        self.assertNotIn(deepseek_client.WEB_SEARCH_SYSTEM_HINT, with_search.body["messages"][0]["content"])
+
+    def test_current_time_context_includes_local_and_utc_time(self) -> None:
+        context = deepseek_client.format_current_time_context(datetime(2026, 5, 30, 10, 20, 30, tzinfo=timezone.utc))
+
+        self.assertIn(deepseek_client.CURRENT_TIME_CONTEXT_HEADER, context)
+        self.assertIn("Local time: 2026-05-30T10:20:30+00:00", context)
+        self.assertIn("UTC time: 2026-05-30T10:20:30Z", context)
+
     def test_off_search_hides_web_search_tool(self) -> None:
         prepared = build_deepseek_request(
             {
@@ -208,6 +239,7 @@ class DeepSeekRequestTests(unittest.TestCase):
             citation_offset: int,
             tavily_api_key: str,
             progress_callback: object,
+            use_cache: bool = False,
         ) -> dict[str, object]:
             assert callable(progress_callback)
             progress_callback({"round": round_index, "query": query, "status": "done", "results": []})
@@ -243,6 +275,7 @@ class DeepSeekRequestTests(unittest.TestCase):
             citation_offset: int,
             tavily_api_key: str,
             progress_callback: object,
+            use_cache: bool = False,
         ) -> dict[str, object]:
             assert callable(progress_callback)
             return {"query": query, "round": round_index, "intent": intent, "citation_offset": citation_offset, "results": [], "status": "done"}
@@ -469,6 +502,135 @@ class DeepSeekRequestTests(unittest.TestCase):
         self.assertEqual(assistant_messages[-1]["reasoning_content"], "Need exact factorial.")
         self.assertIn("120", tool_messages[0]["content"])
 
+    def test_call_deepseek_stabilizes_web_search_tool_exchange_for_cache(self) -> None:
+        tool_response = {
+            "id": "tool-response",
+            "model": "deepseek-v4-pro",
+            "choices": [
+                {
+                    "message": {
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "id": "random-upstream-id",
+                                "type": "function",
+                                "function": {
+                                    "name": "web_search",
+                                    "arguments": json.dumps({"query": "latest docs", "intent": "fresh"}),
+                                },
+                            }
+                        ],
+                    }
+                }
+            ],
+            "usage": {},
+        }
+        final_response = {
+            "id": "final-response",
+            "model": "deepseek-v4-pro",
+            "choices": [{"message": {"content": "answer"}}],
+            "usage": {},
+        }
+
+        def fake_single_round(
+            query: str,
+            *,
+            intent: str,
+            round_index: int,
+            citation_offset: int,
+            tavily_api_key: str,
+            progress_callback: object,
+            use_cache: bool = False,
+        ) -> dict[str, object]:
+            return {
+                "query": query,
+                "round": round_index,
+                "intent": intent,
+                "results": [{"cite": "[^W1]", "title": "Docs", "url": "https://example.com", "snippet": "ok"}],
+                "status": "done",
+                "cached": False,
+            }
+
+        with (
+            patch.object(deepseek_client, "search_single_round", side_effect=fake_single_round),
+            patch(
+                "urllib.request.urlopen",
+                side_effect=[FakeResponse(json.dumps(tool_response).encode("utf-8")), FakeResponse(json.dumps(final_response).encode("utf-8"))],
+            ) as mocked,
+        ):
+            result = call_deepseek(
+                {
+                    "apiKey": "test",
+                    "model": "expert",
+                    "searchEnabled": True,
+                    "searchMode": "auto",
+                    "messages": [{"role": "user", "content": "latest docs"}],
+                }
+            )
+
+        second_request = mocked.call_args_list[1].args[0]
+        second_body = json.loads(second_request.data.decode("utf-8"))
+        assistant_messages = [message for message in second_body["messages"] if message.get("role") == "assistant"]
+        tool_messages = [message for message in second_body["messages"] if message.get("role") == "tool"]
+        tool_call = assistant_messages[-1]["tool_calls"][0]
+        self.assertEqual(result["content"], "answer")
+        self.assertEqual(tool_call["id"], "call_1_web_search")
+        self.assertEqual(tool_call["function"]["arguments"], '{"intent":"fresh","query":"latest docs"}')
+        self.assertEqual(tool_messages[-1]["tool_call_id"], "call_1_web_search")
+        self.assertNotIn('"cached"', tool_messages[-1]["content"])
+
+    def test_call_deepseek_aggregates_usage_across_tool_rounds(self) -> None:
+        tool_response = {
+            "id": "tool-response",
+            "model": "deepseek-v4-pro",
+            "choices": [
+                {
+                    "message": {
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "id": "call_1",
+                                "type": "function",
+                                "function": {"name": "python_eval", "arguments": json.dumps({"expression": "1+1"})},
+                            }
+                        ],
+                    }
+                }
+            ],
+            "usage": {
+                "prompt_tokens": 100,
+                "completion_tokens": 5,
+                "total_tokens": 105,
+                "prompt_cache_hit_tokens": 80,
+                "prompt_cache_miss_tokens": 20,
+            },
+        }
+        final_response = {
+            "id": "final-response",
+            "model": "deepseek-v4-pro",
+            "choices": [{"message": {"content": "2"}}],
+            "usage": {
+                "prompt_tokens": 50,
+                "completion_tokens": 10,
+                "total_tokens": 60,
+                "prompt_cache_hit_tokens": 0,
+                "prompt_cache_miss_tokens": 50,
+            },
+        }
+
+        with patch(
+            "urllib.request.urlopen",
+            side_effect=[FakeResponse(json.dumps(tool_response).encode("utf-8")), FakeResponse(json.dumps(final_response).encode("utf-8"))],
+        ):
+            result = call_deepseek({"apiKey": "test", "model": "expert", "messages": [{"role": "user", "content": "1+1"}]})
+
+        self.assertEqual(result["usage"]["prompt_tokens"], 150)
+        self.assertEqual(result["usage"]["completion_tokens"], 15)
+        self.assertEqual(result["usage"]["total_tokens"], 165)
+        self.assertEqual(result["diagnostics"]["cacheHitTokens"], 80)
+        self.assertEqual(result["diagnostics"]["cacheMissTokens"], 70)
+        self.assertEqual(result["diagnostics"]["cacheHitRate"], 53.3)
+
     def test_stream_deepseek_done_event_adds_cache_diagnostics_from_usage(self) -> None:
         chunk = {
             "id": "response-id",
@@ -491,6 +653,13 @@ class DeepSeekRequestTests(unittest.TestCase):
         tool_delta = {
             "id": "tool-response",
             "model": "deepseek-v4-pro",
+            "usage": {
+                "prompt_tokens": 60,
+                "completion_tokens": 4,
+                "total_tokens": 64,
+                "prompt_cache_hit_tokens": 40,
+                "prompt_cache_miss_tokens": 20,
+            },
             "choices": [
                 {
                     "delta": {
@@ -511,7 +680,13 @@ class DeepSeekRequestTests(unittest.TestCase):
         final_delta = {
             "id": "final-response",
             "model": "deepseek-v4-pro",
-            "usage": {"prompt_cache_hit_tokens": 1, "prompt_cache_miss_tokens": 1},
+            "usage": {
+                "prompt_tokens": 30,
+                "completion_tokens": 6,
+                "total_tokens": 36,
+                "prompt_cache_hit_tokens": 0,
+                "prompt_cache_miss_tokens": 30,
+            },
             "choices": [{"delta": {"content": "120"}}],
         }
         events: list[dict[str, object]] = []
@@ -536,6 +711,12 @@ class DeepSeekRequestTests(unittest.TestCase):
         self.assertTrue(any("python_eval" in str(event.get("text")) for event in system_notes))
         self.assertEqual(done["content"], "Working. 120")
         self.assertEqual(diagnostics["toolCallCount"], 1)
+        self.assertEqual(done["usage"]["prompt_tokens"], 90)
+        self.assertEqual(done["usage"]["completion_tokens"], 10)
+        self.assertEqual(done["usage"]["total_tokens"], 100)
+        self.assertEqual(diagnostics["cacheHitTokens"], 40)
+        self.assertEqual(diagnostics["cacheMissTokens"], 50)
+        self.assertEqual(diagnostics["cacheHitRate"], 44.4)
 
     def test_stream_deepseek_emits_memory_suggestion_event(self) -> None:
         tool_delta = {
@@ -685,5 +866,3 @@ class FakeStream:
 
 if __name__ == "__main__":
     unittest.main()
-
-

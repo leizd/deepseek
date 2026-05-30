@@ -214,8 +214,10 @@ export function renderInline(value) {
     .join("");
 
   text = escapeHtml(text);
+  // text is already HTML-escaped above, so href/label are safe in attribute/content context.
+  // Re-escaping href would double-encode "&" in query strings (&amp; -> &amp;amp;) and break the link.
   text = text.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, (_, label, href) => {
-    return `<a href="${escapeAttribute(href)}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+    return `<a href="${href}" target="_blank" rel="noopener noreferrer">${label}</a>`;
   });
   text = text.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   text = text.replace(/__([^_]+)__/g, "<strong>$1</strong>");

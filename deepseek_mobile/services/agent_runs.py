@@ -23,6 +23,7 @@ from deepseek_mobile.services.multi_agent import (
     emit_agent_event,
     failed_agent_output,
     new_agent_search_budget,
+    new_agent_token_budget,
     parse_structured_agent_output,
     plan_agents,
     run_agent,
@@ -333,7 +334,7 @@ def plan_for_preset(payload: dict[str, Any], agent_preset: str, emit_event: Call
     if preset == "leader":
         return plan_agents(payload, emit_event), "Leader 自动拆解"
     if preset == "auto":
-        return auto_agent_plan(payload)
+        return auto_agent_plan(payload, emit_event)
     if preset == "code":
         return [
             {"id": "coder", "task": "检查代码、实现路径和工程风险"},
@@ -355,15 +356,42 @@ def plan_for_preset(payload: dict[str, Any], agent_preset: str, emit_event: Call
     return default_agent_plan(), "完整 4-Agent"
 
 
-def auto_agent_plan(payload: dict[str, Any]) -> tuple[list[dict[str, str]], str]:
-    query = latest_user_query(payload).lower()
-    if any(token in query for token in ("```", "bug", "报错", "代码", "实现", "接口", "项目", "函数", "class ")):
-        return plan_for_preset(payload, "code", lambda _event: None)
-    if any(token in query for token in ("最新", "新闻", "搜索", "资料", "来源", "网页", "引用", "今天")):
-        return plan_for_preset(payload, "research", lambda _event: None)
-    if len(query) > 500 or any(token in query for token in ("方案", "架构", "权衡", "复杂", "规划")):
-        return plan_for_preset(payload, "reason", lambda _event: None)
-    return [{"id": "critic", "task": "快速复核回答风险和遗漏"}], "简单复核模式"
+_AUTO_CODE_TOKENS = ("```", "bug", "报错", "代码", "实现", "接口", "项目", "函数", "class ")
+_AUTO_RESEARCH_TOKENS = ("最新", "新闻", "搜索", "资料", "来源", "网页", "引用", "今天")
+_AUTO_REASON_TOKENS = ("方案", "架构", "权衡", "复杂", "规划")
+
+
+def auto_signal_categories(query: str) -> set[str]:
+    """Cheap keyword heuristic: which intent categories does the query signal?"""
+    lowered = query.lower()
+    categories: set[str] = set()
+    if any(token in lowered for token in _AUTO_CODE_TOKENS):
+        categories.add("code")
+    if any(token in lowered for token in _AUTO_RESEARCH_TOKENS):
+        categories.add("research")
+    if len(lowered) > 500 or any(token in lowered for token in _AUTO_REASON_TOKENS):
+        categories.add("reason")
+    return categories
+
+
+def auto_agent_plan(
+    payload: dict[str, Any],
+    emit_event: Callable[[dict[str, Any]], None] | None = None,
+) -> tuple[list[dict[str, str]], str]:
+    """Pick an Agent plan for the "auto" preset.
+
+    A single clear keyword signal maps straight to its static preset (cheap, no
+    extra LLM call — the original fast path). When the query gives *no* signal or
+    *conflicting* signals (e.g. looks like both code and research), the old
+    first-match-wins guess was unreliable and the no-signal fallback was a lone
+    critic with nothing to critique; instead we defer to the LLM planner
+    (:func:`plan_agents`) to actually decompose the task.
+    """
+    categories = auto_signal_categories(latest_user_query(payload))
+    if len(categories) == 1:
+        return plan_for_preset(payload, next(iter(categories)), lambda _event: None)
+    plan = plan_agents(payload, emit_event)
+    return plan, "Leader 自动拆解"
 
 
 def should_confirm_plan(payload: dict[str, Any], *, confirm_plan: bool, agent_preset: str) -> bool:
@@ -427,6 +455,7 @@ def execute_plan(
     user_query: str,
 ) -> None:
     search_budget = new_agent_search_budget()
+    token_budget = new_agent_token_budget()
     stream_agent_plan(
         runtime_payload,
         plan,
@@ -434,6 +463,7 @@ def execute_plan(
         user_query=user_query,
         search_budget=search_budget,
         emit_event=lambda event: append_event(run_id, event),
+        token_budget=token_budget,
     )
 
 

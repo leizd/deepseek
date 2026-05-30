@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import threading
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -155,6 +156,46 @@ def test_confirm_plan_policy_prefers_fast_path_unless_requested_or_auto() -> Non
     assert agent_runs.should_confirm_plan(payload, confirm_plan=False, agent_preset="full") is False
     assert agent_runs.should_confirm_plan(payload, confirm_plan=True, agent_preset="full") is True
     assert agent_runs.should_confirm_plan(payload, confirm_plan=False, agent_preset="auto") is True
+
+
+def test_auto_signal_categories_detects_each_intent() -> None:
+    assert agent_runs.auto_signal_categories("帮我修这个 bug，代码报错了") == {"code"}
+    assert agent_runs.auto_signal_categories("查一下最新新闻和资料来源") == {"research"}
+    assert agent_runs.auto_signal_categories("这个架构方案怎么权衡") == {"reason"}
+    assert agent_runs.auto_signal_categories("用代码实现一个能搜索最新新闻的接口") == {"code", "research"}
+    assert agent_runs.auto_signal_categories("你好呀") == set()
+
+
+def test_auto_agent_plan_single_signal_uses_preset_without_llm() -> None:
+    payload = {"messages": [{"role": "user", "content": "帮我修这个 bug，代码报错了"}]}
+    with patch.object(agent_runs, "plan_agents") as mock_plan:
+        plan, label = agent_runs.auto_agent_plan(payload, lambda _event: None)
+
+    # 单一明确信号走静态 preset，绝不触发 LLM planner（保持 auto 的廉价快路径）
+    mock_plan.assert_not_called()
+    assert [item["id"] for item in plan] == ["coder", "reasoner", "critic"]
+
+
+def test_auto_agent_plan_no_signal_delegates_to_llm_planner() -> None:
+    payload = {"messages": [{"role": "user", "content": "你好呀"}]}
+    fake_plan = [{"id": "reasoner", "task": "拆解"}]
+    with patch.object(agent_runs, "plan_agents", return_value=fake_plan) as mock_plan:
+        plan, label = agent_runs.auto_agent_plan(payload, lambda _event: None)
+
+    mock_plan.assert_called_once()
+    assert plan == fake_plan
+    assert label == "Leader 自动拆解"
+
+
+def test_auto_agent_plan_conflicting_signals_delegate_to_llm_planner() -> None:
+    payload = {"messages": [{"role": "user", "content": "用代码实现一个能搜索最新新闻的接口"}]}
+    fake_plan = [{"id": "researcher", "task": "查"}, {"id": "coder", "task": "写"}]
+    with patch.object(agent_runs, "plan_agents", return_value=fake_plan) as mock_plan:
+        plan, label = agent_runs.auto_agent_plan(payload, lambda _event: None)
+
+    # 多个冲突信号时旧的 first-match-wins 不可靠，改交给 LLM 真正拆解
+    mock_plan.assert_called_once()
+    assert plan == fake_plan
 
 
 def test_rerun_agent_resets_phase_and_final_answer_without_cascading(tmp_settings, monkeypatch: pytest.MonkeyPatch) -> None:

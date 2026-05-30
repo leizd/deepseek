@@ -25,7 +25,7 @@ from deepseek_mobile.core.config import (
 
 class ConfigTests(unittest.TestCase):
     def test_nested_settings_back_compat_constants_match(self) -> None:
-        self.assertEqual(settings.app_version, "1.5.0")
+        self.assertEqual(settings.app_version, "1.6.6")
         self.assertEqual(settings.default_host, "127.0.0.1")
         self.assertEqual(DEFAULT_HOST, settings.default_host)
         self.assertEqual(MULTI_AGENT_TIMEOUT_SECONDS, settings.multi_agent_timeout_seconds)
@@ -92,6 +92,48 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(loaded.multi_agent_timeout_seconds, 3900)
         self.assertEqual(loaded.tavily_timeout_seconds, 45)
 
+    def test_multi_agent_token_budget_defaults_and_env_override(self) -> None:
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(Settings.from_env().multi_agent_token_budget, 2_000_000)
+        with patch.dict("os.environ", {"MULTI_AGENT_TOKEN_BUDGET": "500000"}, clear=True):
+            self.assertEqual(Settings.from_env().multi_agent_token_budget, 500_000)
+        with patch.dict("os.environ", {"MULTI_AGENT_TOKEN_BUDGET": "not-a-number"}, clear=True):
+            self.assertEqual(Settings.from_env().multi_agent_token_budget, 2_000_000)
+
+    def test_agent_models_default_to_pro(self) -> None:
+        with patch.dict("os.environ", {}, clear=True):
+            loaded = Settings.from_env()
+
+        self.assertEqual(
+            dict(loaded.agent_models),
+            {
+                "planner": "deepseek-v4-pro",
+                "researcher": "deepseek-v4-pro",
+                "coder": "deepseek-v4-pro",
+                "reasoner": "deepseek-v4-pro",
+                "critic": "deepseek-v4-pro",
+            },
+        )
+
+    def test_agent_model_env_overrides_per_role_with_fallback(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "AGENT_MODEL_PLANNER": "flash",
+                "AGENT_MODEL_CRITIC": "deepseek-v4-flash",
+                "AGENT_MODEL_CODER": "gpt-9",
+            },
+            clear=True,
+        ):
+            loaded = Settings.from_env()
+
+        self.assertEqual(loaded.agent_models["planner"], "deepseek-v4-flash")
+        self.assertEqual(loaded.agent_models["critic"], "deepseek-v4-flash")
+        # 未识别的值回退到默认 pro，不会把脏值塞进配置
+        self.assertEqual(loaded.agent_models["coder"], "deepseek-v4-pro")
+        self.assertEqual(loaded.agent_models["researcher"], "deepseek-v4-pro")
+        self.assertEqual(loaded.agent_models["reasoner"], "deepseek-v4-pro")
+
     def test_auth_token_persists_across_settings_loads(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, patch.dict("os.environ", {}, clear=True):
             root = Path(tmp)
@@ -101,6 +143,23 @@ class ConfigTests(unittest.TestCase):
                 second = Settings.from_env(root=root)
 
         self.assertEqual(first.auth.token, second.auth.token)
+
+    def test_android_packaging_paths_can_be_overridden_by_env(self) -> None:
+        with tempfile.TemporaryDirectory() as root_tmp, tempfile.TemporaryDirectory() as static_tmp:
+            with patch.dict(
+                "os.environ",
+                {
+                    "DEEPSEEK_MOBILE_ROOT": root_tmp,
+                    "DEEPSEEK_MOBILE_STATIC_DIR": static_tmp,
+                    "AUTH_TOKEN": "android-token",
+                },
+                clear=True,
+            ):
+                loaded = Settings.from_env()
+
+                self.assertEqual(loaded.root, Path(root_tmp).resolve())
+                self.assertEqual(loaded.static_dir, Path(static_tmp).resolve())
+                self.assertEqual(loaded.auth.token, "android-token")
 
     def test_load_or_create_auth_token_reuses_existing_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -112,6 +171,4 @@ class ConfigTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-
 

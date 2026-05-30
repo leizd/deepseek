@@ -29,6 +29,9 @@ TITLE_SYSTEM_PROMPT = (
     "不要加引号、句号、标签或 emoji；抓住具体话题，避免空话；"
     "闲聊或问候返回“闲聊”；优先使用用户主要语言。"
 )
+TITLE_PREFIXES = ("标题：", "标题:", "Title:", "title:")
+TITLE_STRIP_CHARS = "「」『』《》\"'“”‘’` \t\n\r"
+TITLE_TRAILING_PUNCTUATION = ("。", ".", "，", ",", "！", "!", "？", "?", "；", ";", "：", ":")
 
 _TITLE_RATE_LIMIT_LOCK = threading.RLock()
 _TITLE_RATE_LIMITS: dict[str, list[float]] = {}
@@ -53,6 +56,7 @@ def generate_title_payload(payload: dict[str, Any]) -> dict[str, str]:
     request_body = {
         "model": model,
         "stream": False,
+        "thinking": {"type": "disabled"},
         "temperature": 0.3,
         "max_tokens": 60,
         "messages": [
@@ -116,12 +120,12 @@ def _truncate(value: str, limit: int) -> str:
 
 def _sanitize_title(value: str) -> str:
     title = str(value or "").strip()
-    title = title.strip("「」『』\"'“”‘’ \t\n\r").strip()
-    for prefix in ("标题：", "标题:", "Title:", "title:"):
+    title = title.strip(TITLE_STRIP_CHARS).strip()
+    for prefix in TITLE_PREFIXES:
         if title.startswith(prefix):
             title = title[len(prefix):].strip()
     title = title.replace("\n", " ").replace("\r", " ")
     title = " ".join(title.split())
-    while title.endswith(("。", ".", "！", "!", "？", "?")):
+    while title.endswith(TITLE_TRAILING_PUNCTUATION):
         title = title[:-1].strip()
     return title[:TITLE_MAX_CHARS]

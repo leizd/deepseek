@@ -141,6 +141,25 @@ class ErrorTests(unittest.TestCase):
         self.assertIn("Max-Age=2592000", cookie_header)
         self.assertIn("SameSite=Strict", cookie_header)
 
+    def test_desktop_root_token_sets_cookie_and_serves_index(self) -> None:
+        running_server, thread = self.make_server()
+        try:
+            connection = http.client.HTTPConnection("127.0.0.1", running_server.server_address[1], timeout=5)
+            connection.request("GET", f"/?token={server_module.settings.auth.token}&desktop=1")
+            response = connection.getresponse()
+            body = response.read().decode("utf-8", errors="replace")
+        finally:
+            connection.close()
+            running_server.shutdown()
+            running_server.server_close()
+            thread.join(timeout=5)
+
+        self.assertEqual(response.status, 200)
+        self.assertIn("<!doctype html>", body.lower())
+        cookie_header = response.getheader("Set-Cookie") or ""
+        self.assertIn("auth_token=", cookie_header)
+        self.assertIn("HttpOnly", cookie_header)
+
     def test_auth_cookie_quotes_custom_token_safely(self) -> None:
         cookie = SimpleCookie()
         cookie.load(server_module.auth_cookie_header("a&b c;z"))

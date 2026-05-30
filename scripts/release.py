@@ -14,6 +14,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+# Runtime data / caches: excluded from the zip AND safe to delete with --clean-workspace.
 EXCLUDED_DIRS = {
     ".file-cache",
     ".agent-runs",
@@ -30,6 +31,11 @@ EXCLUDED_DIRS = {
     "__pycache__",
     "dist",
     "build",
+}
+# VCS / tooling metadata: excluded from the zip but NEVER deleted (clean_workspace must not touch these).
+NEVER_PACKAGE_DIRS = {
+    ".git",
+    ".claude",
 }
 EXCLUDED_DIR_PATTERNS = {
     "pytest-cache-files-*",
@@ -52,7 +58,7 @@ EXCLUDED_FILE_PATTERNS = {
 def should_include(path: Path, root: Path) -> bool:
     relative = path.relative_to(root)
     parts = set(relative.parts)
-    if parts.intersection(EXCLUDED_DIRS):
+    if parts.intersection(EXCLUDED_DIRS | NEVER_PACKAGE_DIRS):
         return False
     if any(fnmatch.fnmatch(part, pattern) for part in relative.parts for pattern in EXCLUDED_DIR_PATTERNS):
         return False

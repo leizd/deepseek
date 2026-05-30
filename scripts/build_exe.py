@@ -8,8 +8,9 @@ Usage:
 
 The resulting ``dist/DeepSeekMobile.exe`` (or ``DeepSeekMobile`` on macOS /
 Linux) bundles ``launch.py``, the entire ``deepseek_mobile`` package, the
-``static`` web assets, and KaTeX fonts. The same exe can launch the GUI (no
-args) or run as the HTTP server (``--server`` arg).
+``static`` web assets, and KaTeX fonts. The same exe opens the local desktop
+app window by default, can launch the legacy GUI with ``--gui``, or run as the
+HTTP server with ``--server``.
 """
 
 from __future__ import annotations
@@ -81,6 +82,9 @@ def main() -> int:
         args.name,
         f"--add-data={STATIC_DIR}{os.pathsep}static",
         "--collect-data=customtkinter",
+        "--collect-all=webview",
+        "--collect-all=pythonnet",
+        "--collect-all=clr_loader",
     ]
     if args.onefile:
         cmd.append("--onefile")

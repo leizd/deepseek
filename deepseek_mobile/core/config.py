@@ -20,6 +20,9 @@ def _runtime_root() -> Path:
     survives across runs; ``sys._MEIPASS`` is a per-invocation temp dir and is
     not safe to write to.
     """
+    env_root = os.environ.get("DEEPSEEK_MOBILE_ROOT", "").strip()
+    if env_root:
+        return Path(env_root).expanduser().resolve()
     if getattr(sys, "frozen", False) and hasattr(sys, "executable"):
         return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parents[2]
@@ -27,6 +30,9 @@ def _runtime_root() -> Path:
 
 def _bundled_static_dir() -> Path:
     """Directory where read-only static assets live (frozen bundle vs. repo)."""
+    env_static_dir = os.environ.get("DEEPSEEK_MOBILE_STATIC_DIR", "").strip()
+    if env_static_dir:
+        return Path(env_static_dir).expanduser().resolve()
     meipass = getattr(sys, "_MEIPASS", None)
     if meipass:
         return Path(meipass) / "static"
@@ -95,12 +101,16 @@ class OCRSettings:
 @dataclass(frozen=True, slots=True)
 class Settings:
     root: Path = ROOT
-    app_version: str = "1.5.0"
+    app_version: str = "1.6.6"
     deepseek_url: str = "https://api.deepseek.com/chat/completions"
     tavily_url: str = "https://api.tavily.com/search"
     deepseek_timeout_seconds: int = 180
     multi_agent_timeout_seconds: int = 3900
     tavily_timeout_seconds: int = 45
+    # 多 Agent 一次运行的累计 token 上限（prompt+completion，跨所有 worker+综合）。默认设
+    # 得很高，只作失控保护网，正常运行不会触达；综合阶段永远不受其影响。可经环境变量
+    # MULTI_AGENT_TOKEN_BUDGET 收紧；设为 0 表示不限制。
+    multi_agent_token_budget: int = 2_000_000
     deepseek_api_key: str = ""
     tavily_api_key: str = ""
     default_host: str = "127.0.0.1"
@@ -122,6 +132,20 @@ class Settings:
                 "v4flash": "deepseek-v4-flash",
                 "flash": "deepseek-v4-flash",
                 "fast": "deepseek-v4-flash",
+            }
+        )
+    )
+    # 多 Agent 各角色用的模型，默认全部 deepseek-v4-pro（保持历史行为）。可用环境变量
+    # AGENT_MODEL_PLANNER / _RESEARCHER / _CODER / _REASONER / _CRITIC 单独降级到
+    # deepseek-v4-flash（更便宜更快，但不带 thinking 深度推理）。
+    agent_models: Mapping[str, str] = field(
+        default_factory=lambda: MappingProxyType(
+            {
+                "planner": "deepseek-v4-pro",
+                "researcher": "deepseek-v4-pro",
+                "coder": "deepseek-v4-pro",
+                "reasoner": "deepseek-v4-pro",
+                "critic": "deepseek-v4-pro",
             }
         )
     )
@@ -173,21 +197,24 @@ class Settings:
         return self.root / ".auth-token"
 
     @classmethod
-    def from_env(cls, root: Path = ROOT) -> "Settings":
+    def from_env(cls, root: Path | None = None) -> "Settings":
+        runtime_root = _runtime_root() if root is None else root
         auth_token = os.environ.get("AUTH_TOKEN", "").strip()
         file_defaults = FileSettings()
         return cls(
-            root=root,
+            root=runtime_root,
             deepseek_timeout_seconds=_env_int("DEEPSEEK_TIMEOUT_SECONDS", 180),
             multi_agent_timeout_seconds=_env_int("MULTI_AGENT_TIMEOUT_SECONDS", 3900),
             tavily_timeout_seconds=_env_int("TAVILY_TIMEOUT_SECONDS", 45),
+            multi_agent_token_budget=_env_int("MULTI_AGENT_TOKEN_BUDGET", 2_000_000),
+            agent_models=_agent_models_from_env(),
             deepseek_api_key=os.environ.get("DEEPSEEK_API_KEY", "").strip(),
             tavily_api_key=os.environ.get("TAVILY_API_KEY", "").strip(),
             default_host=os.environ.get("HOST", "127.0.0.1").strip() or "127.0.0.1",
             default_port=_env_int("PORT", 8000),
             auth=AuthSettings(
                 enabled=not _env_bool("AUTH_DISABLED", False),
-                token=auth_token or load_or_create_auth_token(root),
+                token=auth_token or load_or_create_auth_token(runtime_root),
                 allowed_hosts=_env_tuple("AUTH_ALLOWED_HOSTS"),
             ),
             files=FileSettings(
@@ -243,6 +270,32 @@ def _env_tuple(name: str) -> tuple[str, ...]:
     return tuple(part.strip() for part in raw.split(",") if part.strip())
 
 
+_AGENT_MODEL_ENV = {
+    "planner": "AGENT_MODEL_PLANNER",
+    "researcher": "AGENT_MODEL_RESEARCHER",
+    "coder": "AGENT_MODEL_CODER",
+    "reasoner": "AGENT_MODEL_REASONER",
+    "critic": "AGENT_MODEL_CRITIC",
+}
+_AGENT_MODEL_CHOICES = {
+    "pro": "deepseek-v4-pro",
+    "flash": "deepseek-v4-flash",
+    "deepseek-v4-pro": "deepseek-v4-pro",
+    "deepseek-v4-flash": "deepseek-v4-flash",
+}
+
+
+def _env_agent_model(name: str, default: str = "deepseek-v4-pro") -> str:
+    raw = os.environ.get(name, "").strip().lower()
+    if not raw:
+        return default
+    return _AGENT_MODEL_CHOICES.get(raw, default)
+
+
+def _agent_models_from_env() -> Mapping[str, str]:
+    return MappingProxyType({role: _env_agent_model(env) for role, env in _AGENT_MODEL_ENV.items()})
+
+
 settings = Settings.from_env()
 
 STATIC_DIR = settings.static_dir
@@ -251,6 +304,7 @@ DEEPSEEK_URL = settings.deepseek_url
 TAVILY_URL = settings.tavily_url
 DEEPSEEK_TIMEOUT_SECONDS = settings.deepseek_timeout_seconds
 MULTI_AGENT_TIMEOUT_SECONDS = settings.multi_agent_timeout_seconds
+MULTI_AGENT_TOKEN_BUDGET = settings.multi_agent_token_budget
 TAVILY_TIMEOUT_SECONDS = settings.tavily_timeout_seconds
 TAVILY_API_KEY = settings.tavily_api_key
 DEFAULT_HOST = settings.default_host
@@ -259,6 +313,7 @@ DEFAULT_MODEL = settings.default_model
 SUPPORTED_MODELS = settings.supported_models
 MODEL_ROUTES = settings.model_routes
 MODEL_ALIASES = settings.model_aliases
+AGENT_MODELS = settings.agent_models
 
 SEARCH_RESULT_LIMIT = settings.search.result_limit
 SEARCH_ROUND_LIMIT = settings.search.round_limit
@@ -344,7 +399,8 @@ def configure_logging(level: int = logging.INFO) -> None:
         root_logger.setLevel(level)
         return
 
-    handler = logging.StreamHandler()
+    stream = sys.stderr if sys.stderr is not None else open(os.devnull, "w", encoding="utf-8")
+    handler = logging.StreamHandler(stream)
     handler.setFormatter(JsonLogFormatter())
     root_logger.addHandler(handler)
     root_logger.setLevel(level)

@@ -308,11 +308,29 @@ class DeepSeekMobileHandler(SimpleHTTPRequestHandler):
             self.write_json(AppError("Auth required", code=ErrorCode.UNAUTHORIZED, status=401).to_response(), status=401)
             return True
 
+        if query.get("desktop", [""])[0] in {"1", "true", "yes"}:
+            self.write_authenticated_index()
+            return True
+
         self.send_response(302)
         self.send_header("Location", "/")
         self.send_header("Set-Cookie", auth_cookie_header(settings.auth.token))
         self.end_headers()
         return True
+
+    def write_authenticated_index(self) -> None:
+        try:
+            body = (STATIC_DIR / "index.html").read_bytes()
+        except OSError:
+            self.write_json({"error": "Not found", "code": ErrorCode.NOT_FOUND.value}, status=404)
+            return
+
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Set-Cookie", auth_cookie_header(settings.auth.token))
+        self.end_headers()
+        self.wfile.write(body)
 
     def handle_auth_logout(self) -> None:
         body = json.dumps({"ok": True}, ensure_ascii=False).encode("utf-8")
@@ -1033,5 +1051,4 @@ def redact_sensitive_query(value: str) -> str:
     for placeholder, redacted in placeholders:
         value = value.replace(placeholder, redacted)
     return value
-
 

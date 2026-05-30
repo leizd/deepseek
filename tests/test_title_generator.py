@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import unittest
 from unittest.mock import patch
 
@@ -30,6 +31,34 @@ class TitleGeneratorTests(unittest.TestCase):
 
         self.assertEqual(cm.exception.status, 429)
         self.assertEqual(cm.exception.code, ErrorCode.RATE_LIMITED)
+
+    def test_generate_title_uses_readable_prompt_and_sanitizes_response(self) -> None:
+        class FakeResponse:
+            def __enter__(self) -> "FakeResponse":
+                return self
+
+            def __exit__(self, *args: object) -> None:
+                return None
+
+            def read(self) -> bytes:
+                return json.dumps({"choices": [{"message": {"content": "标题：自动标题生成。"}}]}).encode("utf-8")
+
+        with patch.object(title_generator.urllib.request, "urlopen", return_value=FakeResponse()) as urlopen:
+            result = generate_title_payload(
+                {
+                    "apiKey": "fake",
+                    "userMessage": "帮我总结一下网络协议",
+                    "assistantMessage": "这段回答介绍了 OSI 和 TCP/IP。",
+                }
+            )
+
+        self.assertEqual(result, {"title": "自动标题生成"})
+        request = urlopen.call_args.args[0]
+        body = json.loads(request.data.decode("utf-8"))
+        self.assertEqual(body["thinking"], {"type": "disabled"})
+        self.assertIn("你是一个对话标题生成器", body["messages"][0]["content"])
+        self.assertIn("用户首轮提问", body["messages"][1]["content"])
+        self.assertIn("助手首轮回复摘要", body["messages"][1]["content"])
 
 
 if __name__ == "__main__":

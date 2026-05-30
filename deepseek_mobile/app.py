@@ -163,7 +163,8 @@ def log_server_started(computer_url: str, phone_url: str) -> None:
             "phone_url": redact_sensitive_query(phone_url),
         },
     )
-    if sys.stdout.isatty():
+    stdout = getattr(sys, "stdout", None)
+    if stdout is not None and stdout.isatty():
         print(f"Computer: {computer_url}", flush=True)
         print(f"Phone: {phone_url}", flush=True)
 

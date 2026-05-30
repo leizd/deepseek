@@ -8,6 +8,7 @@ import threading
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Callable
 
 from deepseek_mobile.core.config import (
@@ -57,6 +58,9 @@ TOOL_BUDGET_EXHAUSTED_PROMPT = (
 )
 
 
+CURRENT_TIME_CONTEXT_HEADER = "[Current time]"
+
+
 class RequestCancelled(Exception):
     """Raised internally when a streaming request is cancelled or the client disconnects."""
 
@@ -98,6 +102,33 @@ class SearchBudget:
             self.used += 1
             self.used_by_key[normalized_key] = self.used_by_key.get(normalized_key, 0) + 1
             return True
+
+
+class TokenBudget:
+    """Thread-safe post-hoc token accounting for a multi-agent run.
+
+    Unlike :class:`SearchBudget` (a *pre-action* gate on countable searches), a
+    call's token count is only known *after* it returns. So this records usage
+    as workers finish and exposes :meth:`exhausted` so the orchestrator can stop
+    launching *new* tiers once the run has already overspent — it can never abort
+    an in-flight call. ``total_limit <= 0`` means unlimited (never exhausted).
+    """
+
+    def __init__(self, *, total_limit: int) -> None:
+        self.total_limit = max(0, int(total_limit))
+        self.used = 0
+        self._lock = threading.Lock()
+
+    def record(self, tokens: int) -> int:
+        with self._lock:
+            self.used += max(0, int(tokens))
+            return self.used
+
+    def exhausted(self) -> bool:
+        if self.total_limit <= 0:
+            return False
+        with self._lock:
+            return self.used >= self.total_limit
 
 
 @dataclass(frozen=True)
@@ -163,9 +194,9 @@ def build_deepseek_request(
 
     # DeepSeek prompt cache 按 message 字面 prefix 严格匹配。任何让 system message
     # 字符变化的字段都会让其后所有 history 全部 cache miss。这里 stable_system_parts
-    # 只包含真正会话级稳定的内容（角色提示 + 工具/搜索 system hint）。
-    # context_summary 走 dynamic turn-context（注入 latest user），让 system 保持稳定，
-    # 命中可以贯穿到 last assistant message。
+    # 只包含真正会话级稳定的内容（角色提示 + 通用工具并行 hint）。
+    # 搜索 hint / context_summary / memory 都走 trailing dynamic context，让 system
+    # 在搜索开关变化时也保持稳定，命中可以贯穿到 last assistant message。
     stable_system_parts: list[str] = []
     system_prompt = str(payload.get("systemPrompt") or "").strip()
     if system_prompt:
@@ -173,8 +204,6 @@ def build_deepseek_request(
 
     if tools_enabled:
         stable_system_parts.append(TOOL_PARALLEL_SYSTEM_HINT)
-        if search_tool_enabled(payload):
-            stable_system_parts.append(WEB_SEARCH_SYSTEM_HINT)
 
     context_summary = str(payload.get("contextSummary") or "").strip()
 
@@ -188,7 +217,7 @@ def build_deepseek_request(
     memory_state = memory_state or empty_memory_state(payload)
     memory_enabled = bool(memory_state.get("enabled"))
     memory_hit_count = int(memory_state.get("hitCount") or 0)
-    dynamic_context = build_dynamic_turn_context(payload, memory_state)
+    dynamic_context = build_dynamic_turn_context(payload, memory_state, tools_enabled=tools_enabled)
     if dynamic_context:
         normalized_messages = append_context_to_latest_user(normalized_messages, dynamic_context)
 
@@ -236,33 +265,6 @@ def build_deepseek_request(
         "toolCallCount": 0,
         "toolNames": [],
     }
-
-    # === 临时调试：把 request body 各关键字段单独 hash，对比两轮请求里哪个字段在变 ===
-    import hashlib as _hashlib_debug
-    def _hash(obj: Any) -> str:
-        return _hashlib_debug.md5(
-            json.dumps(obj, ensure_ascii=False, sort_keys=False).encode("utf-8", errors="replace")
-        ).hexdigest()[:12]
-
-    _msg_hashes = []
-    for _idx, _m in enumerate(api_messages):
-        _content = str(_m.get("content") or "")
-        _msg_hashes.append((_idx, _m.get("role"), len(_content), _hash(_m)))
-    logger.info(
-        "cache_debug body model=%s stream=%s msgs_n=%d msgs_hash=%s tools_hash=%s tool_choice=%s thinking=%s reasoning_effort=%s temperature=%s top_p=%s",
-        request_body.get("model"),
-        request_body.get("stream"),
-        len(api_messages),
-        _hash(api_messages),
-        _hash(request_body.get("tools")) if "tools" in request_body else "<none>",
-        request_body.get("tool_choice", "<none>"),
-        request_body.get("thinking", "<none>"),
-        request_body.get("reasoning_effort", "<none>"),
-        request_body.get("temperature", "<none>"),
-        request_body.get("top_p", "<none>"),
-    )
-    for _idx, _role, _len, _h in _msg_hashes:
-        logger.info("cache_debug msg[%d] role=%s len=%d hash=%s", _idx, _role, _len, _h)
 
     return PreparedDeepSeekRequest(api_key=api_key, body=request_body, diagnostics=diagnostics)
 
@@ -320,7 +322,7 @@ def normalize_chat_messages(messages: list[Any]) -> list[dict[str, Any]]:
     return api_messages
 
 
-def normalize_tool_calls(value: Any) -> list[dict[str, Any]]:
+def normalize_tool_calls(value: Any, *, stable_ids: bool = False, canonical_arguments: bool = False) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
     tool_calls: list[dict[str, Any]] = []
@@ -333,18 +335,53 @@ def normalize_tool_calls(value: Any) -> list[dict[str, Any]]:
         arguments = function.get("arguments", "")
         if not name:
             continue
+        normalized_arguments = canonical_tool_arguments(arguments) if canonical_arguments else (
+            arguments if isinstance(arguments, str) else json.dumps(arguments, ensure_ascii=False)
+        )
+        tool_call_id = stable_tool_call_id(index, name) if stable_ids else str(item.get("id") or f"call_{index + 1}")
         tool_calls.append(
             {
-                "id": str(item.get("id") or f"call_{index + 1}"),
+                "id": tool_call_id,
                 "type": str(item.get("type") or "function"),
-                "function": {"name": name, "arguments": arguments if isinstance(arguments, str) else json.dumps(arguments, ensure_ascii=False)},
+                "function": {"name": name, "arguments": normalized_arguments},
             }
         )
     return tool_calls
 
 
-def build_dynamic_turn_context(payload: dict[str, Any], memory_state: dict[str, Any]) -> str:
-    dynamic_parts: list[str] = []
+def stable_tool_call_id(index: int, name: str) -> str:
+    safe_name = "".join(char if char.isalnum() else "_" for char in name.lower()).strip("_") or "tool"
+    return f"call_{index + 1}_{safe_name[:48]}"
+
+
+def canonical_tool_arguments(arguments: Any) -> str:
+    if isinstance(arguments, str):
+        try:
+            parsed = json.loads(arguments)
+        except json.JSONDecodeError:
+            return arguments.strip()
+    else:
+        parsed = arguments
+    return json.dumps(parsed, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def format_current_time_context(now: datetime | None = None) -> str:
+    current = now or datetime.now().astimezone()
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc).astimezone()
+    utc_time = current.astimezone(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    local_time = current.isoformat(timespec="seconds")
+    timezone_name = current.tzname() or str(current.tzinfo) or "local"
+    return (
+        f"{CURRENT_TIME_CONTEXT_HEADER}\n"
+        f"Local time: {local_time} ({timezone_name})\n"
+        f"UTC time: {utc_time}\n"
+        "Use this timestamp for current-time and relative-date questions in this turn."
+    )
+
+
+def build_dynamic_turn_context(payload: dict[str, Any], memory_state: dict[str, Any], *, tools_enabled: bool = True) -> str:
+    dynamic_parts: list[str] = [format_current_time_context()]
 
     # context_summary 放在 dynamic 段而非 system，让 system message 保持字面稳定，
     # 提高 DeepSeek prompt cache 命中率。摘要更新时只让 latest user 这一条 miss，
@@ -360,6 +397,11 @@ def build_dynamic_turn_context(payload: dict[str, Any], memory_state: dict[str, 
     memory_notice = str(memory_state.get("notice") or "").strip()
     if memory_notice:
         dynamic_parts.append(format_memory_notice(memory_notice))
+
+    # 搜索能力是本轮开关，不属于稳定会话前缀。放在尾部 dynamic context 后，
+    # 从“搜索关”切到“搜索开”不会让系统提示后的整段历史全部 cache miss。
+    if tools_enabled and search_tool_enabled(payload):
+        dynamic_parts.append(WEB_SEARCH_SYSTEM_HINT)
 
     search_context = str(payload.get("searchContext") or "").strip()
     if search_context:
@@ -537,6 +579,7 @@ def web_search_callback_for_turn(
             citation_offset=citation_counter,
             tavily_api_key=tavily_api_key,
             progress_callback=record_progress,
+            use_cache=True,
         )
         citation_counter += len(result.get("results") or [])
         if key:
@@ -567,6 +610,26 @@ def diagnostics_with_usage(diagnostics: dict[str, Any], usage: dict[str, Any]) -
     result["cacheMissTokens"] = miss_tokens
     total_cache_tokens = hit_tokens + miss_tokens
     result["cacheHitRate"] = round((hit_tokens / total_cache_tokens) * 100, 1) if total_cache_tokens else 0.0
+    return result
+
+
+USAGE_SUM_FIELDS = (
+    ("prompt_tokens", "promptTokens"),
+    ("completion_tokens", "completionTokens"),
+    ("total_tokens", "totalTokens"),
+    ("prompt_cache_hit_tokens", "promptCacheHitTokens"),
+    ("prompt_cache_miss_tokens", "promptCacheMissTokens"),
+)
+
+
+def merge_usage_totals(total: dict[str, Any], usage: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(usage, dict) or not usage:
+        return dict(total)
+    result = dict(total)
+    for canonical, alias in USAGE_SUM_FIELDS:
+        value = usage_int(usage, canonical, alias)
+        if value:
+            result[canonical] = usage_int(result, canonical, alias) + value
     return result
 
 
@@ -674,7 +737,7 @@ def merge_stream_tool_call_deltas(accumulator: dict[int, dict[str, Any]], deltas
 
 
 def finalized_stream_tool_calls(accumulator: dict[int, dict[str, Any]]) -> list[dict[str, Any]]:
-    return normalize_tool_calls([accumulator[index] for index in sorted(accumulator)])
+    return normalize_tool_calls([accumulator[index] for index in sorted(accumulator)], stable_ids=True, canonical_arguments=True)
 
 
 def call_deepseek(
@@ -699,6 +762,9 @@ def call_deepseek(
         search_budget=search_budget,
         budget_key=budget_key,
     )
+    response_json: dict[str, Any] = {}
+    answer: dict[str, Any] = {}
+    usage_totals: dict[str, Any] = {}
     for tool_round in range(max_tool_rounds + 2):
         request = request_with_body(prepared, body, accept="application/json")
         try:
@@ -710,8 +776,9 @@ def call_deepseek(
         except urllib.error.URLError as exc:
             code = ErrorCode.UPSTREAM_TIMEOUT if "timed out" in str(exc.reason).lower() else ErrorCode.UPSTREAM_FAILURE
             raise AppError(f"Cannot reach DeepSeek API: {exc.reason}", code=code, status=502) from exc
+        usage_totals = merge_usage_totals(usage_totals, response_json.get("usage") or {})
         answer = first_response_message(response_json)
-        tool_calls = normalize_tool_calls(answer.get("tool_calls"))
+        tool_calls = normalize_tool_calls(answer.get("tool_calls"), stable_ids=True, canonical_arguments=True)
         if not tool_calls:
             break
         if tool_round >= max_tool_rounds:
@@ -728,7 +795,7 @@ def call_deepseek(
             default_memory_scope=default_memory_scope,
             web_search_callback=perform_web_search if search_tool_enabled(payload) else None,
         )
-    usage = response_json.get("usage") or {}
+    usage = usage_totals or response_json.get("usage") or {}
     search_data = current_search_data()
     diagnostics = diagnostics_with_tools(prepared.diagnostics, count=tool_call_count, names=seen_tool_names)
     result = {
@@ -809,6 +876,7 @@ def stream_deepseek(
             stream_tool_calls: dict[int, dict[str, Any]] = {}
             round_content = ""
             round_reasoning = ""
+            round_usage: dict[str, Any] = {}
             request = request_with_body(prepared, body, accept="text/event-stream")
 
             with urllib.request.urlopen(request, timeout=DEEPSEEK_TIMEOUT_SECONDS) as upstream:
@@ -837,12 +905,12 @@ def stream_deepseek(
                         continue
                     response_id = chunk.get("id") or response_id
                     response_model = chunk.get("model") or response_model
-                    if isinstance(chunk.get("usage"), dict):
-                        usage = chunk["usage"]
                     choices = chunk.get("choices") or []
                     if not choices:
                         continue
                     delta = choices[0].get("delta") or {}
+                    if isinstance(chunk.get("usage"), dict):
+                        round_usage = chunk["usage"]
                     merge_stream_tool_call_deltas(stream_tool_calls, delta.get("tool_calls"))
                     delta_reasoning = (
                         delta.get("reasoning_content")
@@ -863,6 +931,7 @@ def stream_deepseek(
                         emit_checked({"type": "content", "text": text})
 
             tool_calls = finalized_stream_tool_calls(stream_tool_calls)
+            usage = merge_usage_totals(usage, round_usage)
             raise_if_cancelled(cancel_event)
             if not tool_calls:
                 break

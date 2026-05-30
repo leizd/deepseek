@@ -1432,6 +1432,21 @@ p {
   font-size: var(--content-font-size);
 }
 
+.message .bubble,
+.message .content,
+.message .content * {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.message button,
+.message .message-meta-actions,
+.assistant-actions,
+.user-mobile-actions {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
 .content h1,
 .content h2,
 .content h3,
@@ -6417,4 +6432,3 @@ pre code {
     transform: translateY(0);
   }
 }
-

@@ -1,6 +1,6 @@
 ﻿# 前端模块索引
 
-适用版本：v1.4.0；模块拆分自 v0.8.2 起。
+适用版本：v1.6.6；模块拆分自 v0.8.2 起。
 
 `static/modules/chat.js` 仍然是聊天主流程和渲染入口，但第一轮拆分已经把不依赖 `state`、不直接操作 DOM 的纯函数移出。后续新增工具函数时，优先放到下面对应模块，避免继续扩大 `chat.js`。
 
@@ -20,6 +20,10 @@ v1.3.7 继续把诊断面板留在 `chat.js`：`renderDiagnosticsPanel()` 读取
 v1.3.8 继续只调整 `chat.js` 的诊断展示：`formatAgentCacheTotal()` / `formatAgentCacheRate()` / `formatAgentCacheByAgent()` 会识别 `hasData=false` 和 `hitRate=null`，把缺失 usage 显示为“无数据”；Service Worker 缓存版本同步到 `deepseek-mobile-v138`。
 
 v1.4.0 在 `chat.js` 接入可恢复 Agent Run：前端先创建 run，再 attach `/stream?after=N`，持久化 `agentRunId` / `agentRunLastEventIndex`，并通过 `agent_reset`、`final_reset` 恢复 Activity timeline 与最终回答。计划确认模式新增 `.agent-plan-workbench`，允许用户编辑 Agent 计划后再执行；Service Worker 缓存版本同步到 `deepseek-mobile-v140`。
+
+v1.5.1 继续把交互状态留在 `chat.js`：`hasClosablePanelOpen()` 让 Escape 能统一收起设置、Seek、项目、搜索、文件预览、记忆、诊断和 Activity 面板；`focusTrapStack` 让确认框叠在其它面板上时可以恢复到底层焦点陷阱；Activity 面板“复制 Agent 过程”只保留 `onActivityPanelClick` 事件委托，避免直接监听和委托同时触发。搜索 cache 修复在后端请求组装层完成，前端只需要随 Service Worker `deepseek-mobile-v151` 刷新新版脚本。
+
+v1.6.6 仍不新增前端模块；选区引用继续留在 `chat.js`。`scheduleSelectionRefresh()` 在 `mouseup`、`keyup` 和 `touchend` 后刷新浏览器 selection，`chatBubbleForSelection()` 改为按实际 range 命中单条 `.message[data-message-id] .bubble` 判断来源，因此用户消息和助手消息都能引用；触屏 `touchstart` 不再阻断引用操作按钮的后续 click。桌面 WebView 启动鉴权和当前时间 dynamic context 均在后端完成，前端只按既有 `/api/*` 路由工作。v1.6.3 不改变前端模块边界；Windows 本地桌面应用壳只把既有前端装进 pywebview 窗口，仍通过同一套 `/api/*` 路由工作。Service Worker 缓存版本同步到 `deepseek-mobile-v163`。v1.6.2 的 APK 内 OCR 修复在 Android 原生桥接和后端 OCR 选择层完成。v1.6.1 的联网搜索工具 cache 友好修复在后端工具交换和搜索缓存层完成。v1.6.0 手机本机运行由 Python 启动器完成。
 
 ## 已拆出的纯函数
 
@@ -43,5 +47,4 @@ v1.4.0 在 `chat.js` 接入可恢复 Agent Run：前端先创建 run，再 attac
 ## 测试约定
 
 纯函数模块由 `tests/test_frontend_utils.py` 通过 Node 动态导入测试。以后新增纯函数时，优先在这里补低成本单测，再接入 `chat.js`。
-
 

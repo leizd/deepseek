@@ -23,6 +23,16 @@ def test_startup_structured_log_redacts_token_urls() -> None:
     assert "%5Bredacted%5D" in serialized
 
 
+def test_startup_log_handles_windowed_stdout() -> None:
+    with patch.object(app_module.sys, "stdout", None), patch.object(app_module.logger, "info") as info:
+        app_module.log_server_started(
+            "http://127.0.0.1:8000/",
+            "http://192.168.1.2:8000/",
+        )
+
+    info.assert_called_once()
+
+
 def test_cleanup_runtime_caches_runs_both_cleaners_and_swallows_errors() -> None:
     with (
         patch.object(app_module, "cleanup_file_cache", side_effect=RuntimeError("file boom")) as file_cleanup,

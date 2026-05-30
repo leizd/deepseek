@@ -142,7 +142,13 @@ def local_ip_from_ipconfig() -> str | None:
         return None
 
     try:
-        output = subprocess.check_output(["ipconfig"], text=True, encoding="gbk", errors="ignore")
+        output = subprocess.check_output(
+            ["ipconfig"],
+            text=True,
+            encoding="gbk",
+            errors="ignore",
+            **hidden_subprocess_kwargs(),
+        )
     except (OSError, subprocess.SubprocessError):
         return None
 
@@ -155,6 +161,25 @@ def local_ip_from_ipconfig() -> str | None:
         if is_lan_ip(candidate):
             return candidate
     return None
+
+def hidden_subprocess_kwargs() -> dict[str, Any]:
+    if os.name != "nt":
+        return {}
+
+    kwargs: dict[str, Any] = {}
+    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    if creationflags:
+        kwargs["creationflags"] = creationflags
+
+    startupinfo_factory = getattr(subprocess, "STARTUPINFO", None)
+    if startupinfo_factory is not None:
+        startupinfo = startupinfo_factory()
+        startupinfo.dwFlags |= getattr(subprocess, "STARTF_USESHOWWINDOW", 0)
+        if hasattr(subprocess, "SW_HIDE"):
+            startupinfo.wShowWindow = getattr(subprocess, "SW_HIDE")
+        kwargs["startupinfo"] = startupinfo
+
+    return kwargs
 
 def is_rfc1918_ip(value: str) -> bool:
     try:

@@ -39,8 +39,9 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/vendor/katex/katex.min.css" />
     <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/gemini.css" />
   </head>
-  <body>
+  <body class="gemini-ui">
     <div class="app-shell is-empty">
       <div class="offline-banner" id="offlineBanner" hidden>
         <strong>离线模式</strong>
@@ -63,71 +64,7 @@
 
       <section class="empty-state" id="emptyState">
         <div class="empty-welcome">
-          <h1>你好，今天想聊什么？</h1>
-          <p class="empty-subtitle">选一个方向开始，或者直接发送消息</p>
-        </div>
-
-        <div class="suggestion-grid" id="suggestionGrid">
-          <button type="button" class="suggestion-card" data-prompt="帮我针对以下话题做头脑风暴，给出至少 8 个新颖、可执行的方向，并简要说明每个方向的亮点：&#10;&#10;">
-            <span class="suggestion-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24">
-                <path d="M9 18h6" />
-                <path d="M10 22h4" />
-                <path d="M12 2a7 7 0 0 0-4 12.7c.7.5 1 1.3 1 2.1V18h6v-1.2c0-.8.3-1.6 1-2.1A7 7 0 0 0 12 2Z" />
-              </svg>
-            </span>
-            <span class="suggestion-title">头脑风暴</span>
-            <span class="suggestion-desc">激发灵感，探索更多</span>
-            <span class="suggestion-arrow" aria-hidden="true">
-              <svg viewBox="0 0 24 24"><path d="M5 12h14M13 5l7 7-7 7" /></svg>
-            </span>
-          </button>
-
-          <button type="button" class="suggestion-card" data-prompt="请帮我提炼以下内容的关键要点，按重要性排序，每条不超过 30 字：&#10;&#10;">
-            <span class="suggestion-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24">
-                <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z" />
-                <path d="M14 3v6h6" />
-                <path d="M8 13h8M8 17h5" />
-              </svg>
-            </span>
-            <span class="suggestion-title">总结要点</span>
-            <span class="suggestion-desc">提炼关键内容</span>
-            <span class="suggestion-arrow" aria-hidden="true">
-              <svg viewBox="0 0 24 24"><path d="M5 12h14M13 5l7 7-7 7" /></svg>
-            </span>
-          </button>
-
-          <button type="button" class="suggestion-card" data-prompt="请帮我分析以下数据，找出趋势、异常和可能的原因，并给出后续行动建议：&#10;&#10;">
-            <span class="suggestion-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24">
-                <path d="M3 3v18h18" />
-                <rect x="7" y="12" width="3" height="6" />
-                <rect x="12" y="8" width="3" height="10" />
-                <rect x="17" y="4" width="3" height="14" />
-              </svg>
-            </span>
-            <span class="suggestion-title">数据分析</span>
-            <span class="suggestion-desc">洞察趋势，发现规律</span>
-            <span class="suggestion-arrow" aria-hidden="true">
-              <svg viewBox="0 0 24 24"><path d="M5 12h14M13 5l7 7-7 7" /></svg>
-            </span>
-          </button>
-
-          <button type="button" class="suggestion-card" data-prompt="请帮我审阅这段代码，找出 bug、性能问题和可读性改进点，并给出优化后的版本：&#10;&#10;```&#10;&#10;```">
-            <span class="suggestion-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24">
-                <path d="m8 6-6 6 6 6" />
-                <path d="m16 6 6 6-6 6" />
-                <path d="m14 4-4 16" />
-              </svg>
-            </span>
-            <span class="suggestion-title">代码助手</span>
-            <span class="suggestion-desc">编写、解释、优化代码</span>
-            <span class="suggestion-arrow" aria-hidden="true">
-              <svg viewBox="0 0 24 24"><path d="M5 12h14M13 5l7 7-7 7" /></svg>
-            </span>
-          </button>
+          <h1>你好，今天能帮你点什么？</h1>
         </div>
 
         <div class="segmented" id="modelTabs" aria-label="模型选择">
@@ -176,7 +113,7 @@
           </button>
         </div>
         <label class="sr-only" for="promptInput">输入消息</label>
-        <textarea id="promptInput" rows="1" placeholder="给 DeepSeek 发送消息" autocomplete="off"></textarea>
+        <textarea id="promptInput" rows="1" placeholder="问问 DeepSeek" autocomplete="off"></textarea>
         <div class="draft-restore" id="draftRestore" hidden>
           <span>发现未发送草稿</span>
           <button type="button" id="restoreDraftButton">恢复</button>

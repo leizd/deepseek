@@ -608,8 +608,25 @@ def tool_result_message(tool_call: dict[str, Any], output: dict[str, Any]) -> di
         "role": "tool",
         "tool_call_id": str(tool_call.get("id") or ""),
         "name": str(output.get("tool") or ""),
-        "content": json.dumps(output, ensure_ascii=False)[:MAX_TOOL_RESULT_CHARS],
+        "content": json.dumps(stable_tool_output_for_model(output), ensure_ascii=False, sort_keys=True, separators=(",", ":"))[
+            :MAX_TOOL_RESULT_CHARS
+        ],
     }
+
+
+def stable_tool_output_for_model(output: dict[str, Any]) -> dict[str, Any]:
+    tool_name = str(output.get("tool") or "")
+    if tool_name not in {"web_search", "compare_search_results"}:
+        return output
+    return strip_volatile_tool_fields(output)
+
+
+def strip_volatile_tool_fields(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {key: strip_volatile_tool_fields(item) for key, item in value.items() if key not in {"cached"}}
+    if isinstance(value, list):
+        return [strip_volatile_tool_fields(item) for item in value]
+    return value
 
 
 def tool_call_name(tool_call: dict[str, Any]) -> str:

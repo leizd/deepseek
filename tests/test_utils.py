@@ -95,6 +95,31 @@ class UtilsTests(unittest.TestCase):
 
         self.assertEqual(mocked.call_count, 2)
 
+    def test_local_ip_from_ipconfig_hides_windows_console(self) -> None:
+        class FakeStartupInfo:
+            def __init__(self) -> None:
+                self.dwFlags = 0
+                self.wShowWindow = 1
+
+        startup_info = FakeStartupInfo()
+        output = "IPv4 Address. . . . . . . . . . . : 192.168.1.20"
+
+        with (
+            patch.object(utils.os, "name", "nt"),
+            patch.object(utils.subprocess, "CREATE_NO_WINDOW", 0x08000000, create=True),
+            patch.object(utils.subprocess, "STARTF_USESHOWWINDOW", 1, create=True),
+            patch.object(utils.subprocess, "SW_HIDE", 0, create=True),
+            patch.object(utils.subprocess, "STARTUPINFO", return_value=startup_info, create=True),
+            patch.object(utils.subprocess, "check_output", return_value=output) as check_output,
+        ):
+            self.assertEqual(utils.local_ip_from_ipconfig(), "192.168.1.20")
+
+        kwargs = check_output.call_args.kwargs
+        self.assertEqual(kwargs["creationflags"], 0x08000000)
+        self.assertIs(kwargs["startupinfo"], startup_info)
+        self.assertEqual(startup_info.dwFlags & 1, 1)
+        self.assertEqual(startup_info.wShowWindow, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

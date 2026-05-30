@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Double-click (or run from a terminal) to open the DeepSeek Mobile launcher window.
+# Double-click (or run from a terminal) to open the DeepSeek Mobile local app window.
 set -e
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$DIR"

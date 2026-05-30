@@ -156,6 +156,8 @@ const draftSaveIntervalMs = 2000;
 const reminderPollIntervalMs = 60000;
 const chatRequestTimeoutMs = 240000;
 const agentChatRequestTimeoutMs = 75 * 60 * 1000;
+// Agent Run 流被提前掐断时最多无进展重连几次（每次退避），再失败就当作真错误而非空综合。
+const AGENT_STREAM_MAX_STALLED_RECONNECTS = 6;
 const emptyAgentRunAnswerText = "多个 Agent 已完成分析，但综合阶段没有返回正文。请点击“重新综合最终回答”再试一次。";
 const contextCompression = {
   enabled: true,
@@ -217,6 +219,7 @@ const state = {
   selectionQuoteCandidate: null,
   selectionQuoteLocked: null,
   lastValidQuoteCandidate: null,
+  selectionQuoteActionHandledAt: 0,
   draftTimer: 0,
   reminderTimer: 0,
   offlineMode: false,
@@ -241,6 +244,7 @@ const state = {
   confirmResolve: null,
   previousFocus: null,
   focusTrap: null,
+  focusTrapStack: [],
   imageLightboxItems: [],
   imageLightboxIndex: 0,
   peekClickLockUntil: 0,
@@ -455,6 +459,10 @@ function setupEvents() {
   });
   window.addEventListener("beforeunload", stopSpeechPlayback);
   document.addEventListener("selectionchange", onSelectionChange);
+  document.addEventListener("pointerup", scheduleSelectionRefresh, { passive: true });
+  document.addEventListener("mouseup", scheduleSelectionRefresh, { passive: true });
+  document.addEventListener("keyup", scheduleSelectionRefresh, { passive: true });
+  document.addEventListener("touchend", scheduleSelectionRefresh, { passive: true });
   window.matchMedia?.("(prefers-color-scheme: dark)")?.addEventListener?.("change", () => {
     if (state.themeMode === "system") applyAppearanceSettings();
   });
@@ -546,6 +554,8 @@ function setupEvents() {
     quoteSelectionButton.addEventListener("pointerdown", captureSelectionSnapshot);
     quoteSelectionButton.addEventListener("mousedown", captureSelectionSnapshot);
     quoteSelectionButton.addEventListener("touchstart", captureSelectionSnapshot, { passive: false });
+    quoteSelectionButton.addEventListener("pointerup", quoteSelectionButtonPointerUp);
+    quoteSelectionButton.addEventListener("touchend", quoteSelectionButtonTouchEnd, { passive: false });
     quoteSelectionButton.addEventListener("click", quoteSelectedAssistantText);
   }
   setupSelectionPopover();
@@ -1029,6 +1039,11 @@ function onGlobalKeydown(event) {
       cancelMessageEdit();
       return;
     }
+    if (hasClosablePanelOpen()) {
+      event.preventDefault();
+      closePanels();
+      return;
+    }
   }
 
   if (key === "Tab" && state.focusTrap) {
@@ -1066,6 +1081,23 @@ function closeCommandPalette() {
 
 function isCommandPaletteOpen() {
   return Boolean(commandPalette && !commandPalette.hidden);
+}
+
+function hasClosablePanelOpen() {
+  // Escape should dismiss the visible workspace layer, including panels that
+  // are not backed by the modal backdrop on wide screens.
+  const historyModal = historyPanel?.classList.contains("open") && !document.body.classList.contains("history-side-open");
+  return Boolean(
+    historyModal ||
+      settingsPanel?.classList.contains("open") ||
+      seekPanel?.classList.contains("open") ||
+      projectPanel?.classList.contains("open") ||
+      searchPanel?.classList.contains("open") ||
+      filePreviewPanel?.classList.contains("open") ||
+      memoryPanel?.classList.contains("open") ||
+      diagnosticsPanel?.classList.contains("open") ||
+      activityPanel?.classList.contains("open")
+  );
 }
 
 function commandPaletteItems() {
@@ -1397,6 +1429,10 @@ function joinDictationText(base, addition) {
 
 function onSelectionChange() {
   const next = selectedAssistantQuoteCandidate();
+  if (!next?.text && state.selectionQuoteLocked?.text) {
+    renderSelectionQuoteButton();
+    return;
+  }
   state.selectionQuoteCandidate = next;
   if (next?.text) {
     state.lastValidQuoteCandidate = next;
@@ -1405,9 +1441,14 @@ function onSelectionChange() {
   positionSelectionPopover(next);
 }
 
+function scheduleSelectionRefresh() {
+  requestAnimationFrame(onSelectionChange);
+  window.setTimeout(onSelectionChange, 80);
+}
+
 function captureSelectionSnapshot(event) {
   if (!quoteSelectionButton || quoteSelectionButton.disabled) return;
-  event.preventDefault();
+  if (event.cancelable && event.type !== "touchstart") event.preventDefault();
   const candidate = state.selectionQuoteCandidate || selectedAssistantQuoteCandidate() || state.lastValidQuoteCandidate;
   if (candidate?.text) {
     state.selectionQuoteLocked = candidate;
@@ -1417,7 +1458,7 @@ function captureSelectionSnapshot(event) {
 function setupSelectionPopover() {
   if (!selectionPopover) return;
   const lockCandidate = (event) => {
-    event.preventDefault();
+    if (event.cancelable && event.type !== "touchstart") event.preventDefault();
     const candidate = state.selectionQuoteCandidate || selectedAssistantQuoteCandidate() || state.lastValidQuoteCandidate;
     if (candidate?.text) {
       state.selectionQuoteLocked = candidate;
@@ -1426,6 +1467,8 @@ function setupSelectionPopover() {
   selectionPopover.addEventListener("pointerdown", lockCandidate);
   selectionPopover.addEventListener("mousedown", lockCandidate);
   selectionPopover.addEventListener("touchstart", lockCandidate, { passive: false });
+  selectionPopover.addEventListener("pointerup", onSelectionPopoverPointerUp);
+  selectionPopover.addEventListener("touchend", onSelectionPopoverTouchEnd, { passive: false });
   selectionPopover.addEventListener("click", onSelectionPopoverClick);
   chatLog.addEventListener("scroll", hideSelectionPopover, { passive: true });
   window.addEventListener("scroll", hideSelectionPopover, { passive: true });
@@ -1442,6 +1485,20 @@ function setupSelectionPopover() {
 }
 
 function onSelectionPopoverClick(event) {
+  if (shouldSkipSelectionSyntheticClick(event)) return;
+  handleSelectionPopoverAction(event);
+}
+
+function onSelectionPopoverPointerUp(event) {
+  if (event.pointerType === "mouse") return;
+  handleSelectionPointerActivation(event, () => handleSelectionPopoverAction(event));
+}
+
+function onSelectionPopoverTouchEnd(event) {
+  handleSelectionPointerActivation(event, () => handleSelectionPopoverAction(event));
+}
+
+function handleSelectionPopoverAction(event) {
   const button = event.target instanceof Element ? event.target.closest("button[data-selection-action]") : null;
   if (!button) return;
   const candidate = state.selectionQuoteLocked || state.selectionQuoteCandidate || selectedAssistantQuoteCandidate() || state.lastValidQuoteCandidate;
@@ -1458,17 +1515,45 @@ function onSelectionPopoverClick(event) {
   }
 }
 
+function quoteSelectionButtonPointerUp(event) {
+  if (event.pointerType === "mouse") return;
+  handleSelectionPointerActivation(event, quoteSelectedAssistantText);
+}
+
+function quoteSelectionButtonTouchEnd(event) {
+  handleSelectionPointerActivation(event, quoteSelectedAssistantText);
+}
+
+function handleSelectionPointerActivation(event, run) {
+  if (recentlyHandledSelectionAction()) return;
+  if (event?.cancelable) event.preventDefault();
+  event?.stopPropagation?.();
+  state.selectionQuoteActionHandledAt = Date.now();
+  run();
+}
+
+function shouldSkipSelectionSyntheticClick(event) {
+  if (!recentlyHandledSelectionAction()) return false;
+  if (event?.cancelable) event.preventDefault();
+  event?.stopPropagation?.();
+  return true;
+}
+
+function recentlyHandledSelectionAction() {
+  return Date.now() - Number(state.selectionQuoteActionHandledAt || 0) < 550;
+}
+
 function positionSelectionPopover(candidate) {
   if (!selectionPopover) return;
   const selection = window.getSelection?.();
   if (!candidate?.text || !selection || selection.rangeCount === 0 || selection.isCollapsed) {
-    hideSelectionPopover();
+    if (!state.selectionQuoteLocked?.text) hideSelectionPopover();
     return;
   }
   const range = selection.getRangeAt(0);
-  const rect = range.getBoundingClientRect();
+  const rect = selectionRectForRange(range);
   if (!rect || (!rect.width && !rect.height)) {
-    hideSelectionPopover();
+    if (!state.selectionQuoteLocked?.text) hideSelectionPopover();
     return;
   }
 
@@ -1496,6 +1581,25 @@ function positionSelectionPopover(candidate) {
   selectionPopover.style.visibility = "";
 }
 
+function selectionRectForRange(range) {
+  const rects = Array.from(range.getClientRects?.() || []).filter((rect) => rect && (rect.width || rect.height));
+  if (rects.length) {
+    const first = rects[0];
+    const last = rects[rects.length - 1];
+    const left = Math.min(...rects.map((rect) => rect.left));
+    const right = Math.max(...rects.map((rect) => rect.right));
+    return {
+      top: first.top,
+      bottom: last.bottom,
+      left,
+      right,
+      width: Math.max(1, right - left),
+      height: Math.max(1, last.bottom - first.top),
+    };
+  }
+  return range.getBoundingClientRect?.() || null;
+}
+
 function hideSelectionPopover() {
   if (!selectionPopover) return;
   selectionPopover.classList.remove("is-visible");
@@ -1511,25 +1615,66 @@ function isSelectionPopoverOpen() {
 function selectedAssistantQuoteCandidate() {
   const selection = window.getSelection?.();
   if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return null;
-  const anchorBubble = assistantBubbleForSelectionNode(selection.anchorNode);
-  const focusBubble = assistantBubbleForSelectionNode(selection.focusNode);
-  if (!anchorBubble || anchorBubble !== focusBubble) return null;
+  const range = selection.getRangeAt(0);
+  const bubble = chatBubbleForSelection(selection, range);
+  if (!bubble) return null;
 
-  const messageNode = anchorBubble.closest(".message.assistant[data-message-id]");
+  const messageNode = bubble.closest(".message[data-message-id]");
   const messageId = messageNode?.dataset.messageId || "";
   if (!messageId) return null;
 
-  const range = selection.getRangeAt(0);
-  if (!rangeIntersectsElement(range, anchorBubble)) return null;
-  const text = selectedAssistantText(range, anchorBubble);
+  const text = selectedAssistantText(range, bubble);
   if (!text) return null;
-  return { messageId, text };
+  const role = messageNode.classList.contains("user") ? "user" : "assistant";
+  return { messageId, role, text };
 }
 
-function assistantBubbleForSelectionNode(node) {
+function chatBubbleForSelection(selection, range) {
+  const anchorBubble = chatBubbleForSelectionNode(selection.anchorNode);
+  const focusBubble = chatBubbleForSelectionNode(selection.focusNode);
+  if (anchorBubble && anchorBubble === focusBubble && rangeIntersectsElement(range, anchorBubble)) {
+    return anchorBubble;
+  }
+  const textBubbles = chatBubblesForTextRange(range);
+  if (textBubbles.length === 1) return textBubbles[0];
+  const bubbles = Array.from(chatLog?.querySelectorAll(".message[data-message-id] .bubble") || []).filter((bubble) =>
+    rangeIntersectsElement(range, bubble)
+  );
+  return bubbles.length === 1 ? bubbles[0] : null;
+}
+
+function chatBubblesForTextRange(range) {
+  const root = selectionSearchRoot(range);
+  if (!root) return [];
+  const bubbles = new Set();
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      if (!String(node.nodeValue || "").trim()) return NodeFilter.FILTER_REJECT;
+      const bubble = chatBubbleForSelectionNode(node);
+      if (!bubble) return NodeFilter.FILTER_REJECT;
+      if (!rangeIntersectsTextNode(range, node)) return NodeFilter.FILTER_REJECT;
+      return NodeFilter.FILTER_ACCEPT;
+    },
+  });
+  let node = walker.nextNode();
+  while (node) {
+    const bubble = chatBubbleForSelectionNode(node);
+    if (bubble) bubbles.add(bubble);
+    if (bubbles.size > 1) break;
+    node = walker.nextNode();
+  }
+  return Array.from(bubbles);
+}
+
+function selectionSearchRoot(range) {
+  const element = elementFromSelectionNode(range?.commonAncestorContainer);
+  return element?.closest(".message[data-message-id]") || chatLog || null;
+}
+
+function chatBubbleForSelectionNode(node) {
   const element = elementFromSelectionNode(node);
   const bubble = element?.closest(".bubble");
-  if (!bubble?.closest(".message.assistant[data-message-id]")) return null;
+  if (!bubble?.closest(".message[data-message-id]")) return null;
   return bubble;
 }
 
@@ -1582,6 +1727,19 @@ function rangeIntersectsElement(range, element) {
   }
 }
 
+function rangeIntersectsTextNode(range, node) {
+  try {
+    const nodeRange = document.createRange();
+    nodeRange.selectNodeContents(node);
+    return (
+      range.compareBoundaryPoints(Range.END_TO_START, nodeRange) > 0 &&
+      range.compareBoundaryPoints(Range.START_TO_END, nodeRange) < 0
+    );
+  } catch {
+    return false;
+  }
+}
+
 function renderSelectionQuoteButton() {
   if (!quoteSelectionButton) return;
   const enabled = Boolean((state.selectionQuoteCandidate || state.lastValidQuoteCandidate)?.text) && !state.offlineMode;
@@ -1590,11 +1748,12 @@ function renderSelectionQuoteButton() {
   quoteSelectionButton.setAttribute("aria-pressed", String(enabled));
 }
 
-function quoteSelectedAssistantText() {
+function quoteSelectedAssistantText(event) {
+  if (event?.type === "click" && shouldSkipSelectionSyntheticClick(event)) return;
   const candidate = state.selectionQuoteLocked || state.selectionQuoteCandidate || selectedAssistantQuoteCandidate() || state.lastValidQuoteCandidate;
   state.selectionQuoteLocked = null;
   if (!candidate?.text) {
-    showToast("请先在助手回复里选择一段内容");
+    showToast("请先在聊天消息里选择一段内容");
     renderSelectionQuoteButton();
     return;
   }
@@ -1605,13 +1764,13 @@ function setFragmentQuote(messageId, fragment) {
   const text = String(fragment || "").trim();
   if (!text) return;
   const message = state.messages.find((item) => item.id === messageId);
-  if (!message || message.role !== "assistant") {
+  if (!message || !["assistant", "user"].includes(message.role)) {
     clearSelectionQuoteState();
     return;
   }
   state.quoteDraft = {
     messageId,
-    role: "assistant",
+    role: message.role,
     text,
     fragment: text,
     isFragment: true,
@@ -1880,6 +2039,11 @@ function mergeImportedSeeks(payload) {
 }
 
 function setActiveSeek(id, options = {}) {
+  // 切 Seek 若要顺带开新对话，流式生成中先挡住，避免半套用（Seek 切了但 startNewConversation 被拦）。
+  if (options.newChat && state.busy) {
+    showToast("正在生成回复，请先停止再切换 Seek");
+    return;
+  }
   const seek = findSeekById(id);
   state.activeSeekId = seek ? seek.id : "";
   if (state.activeSeekId) {
@@ -1913,7 +2077,7 @@ function renderActiveSeekChip() {
   if (activeSeekRow) activeSeekRow.hidden = !seek;
   if (activeSeekChip) activeSeekChip.hidden = !seek;
   if (!seek) {
-    if (promptInput) promptInput.placeholder = "给 DeepSeek 发送消息";
+    if (promptInput) promptInput.placeholder = "问问 DeepSeek";
     return;
   }
   if (!activeSeekChip) return;
@@ -3501,22 +3665,46 @@ async function resumePendingAgentRuns() {
   }
 }
 
+// 这些状态表示 Agent Run 还没到终态（与 resumePendingAgentRuns 一致）。流若在此之前结束需重连续读。
+function agentRunStreamIncomplete(message) {
+  return ["created", "planning", "running"].includes(String(message?.agentRunStatus || ""));
+}
+
 async function attachAgentRunStream(assistantMessage) {
   const runId = String(assistantMessage.agentRunId || "");
   if (!runId) throw new Error("缺少 Agent Run ID");
-  const after = Number.isFinite(Number(assistantMessage.agentRunLastEventIndex)) ? Number(assistantMessage.agentRunLastEventIndex) : -1;
-  const response = await apiFetch(`/api/agent-runs/${encodeURIComponent(runId)}/stream?after=${after}`, {
-    method: "GET",
-    signal: state.abortController?.signal,
-  });
-  if (!response.ok) {
-    const data = await response.json().catch(() => ({}));
-    throw new Error(apiErrorMessage(response, data, `连接 Agent Run 失败：${response.status}`));
+  // 单次读流可能在 run 到达终态前结束（慢任务 / 网络抖动 / 连接被中间层切断）。若就此收手，会把
+  // 后端其实已经产出的最终答案丢掉，前端反而显示"综合阶段没有返回正文"。这里循环带 ?after=lastIndex
+  // 重连续读，直到 run 真正到终态；服务端 stream_agent_run 会一直挂到终态才关，所以正常情况下只连一两次。
+  let stalledReconnects = 0;
+  while (true) {
+    const before = Number.isFinite(Number(assistantMessage.agentRunLastEventIndex))
+      ? Number(assistantMessage.agentRunLastEventIndex)
+      : -1;
+    const response = await apiFetch(`/api/agent-runs/${encodeURIComponent(runId)}/stream?after=${before}`, {
+      method: "GET",
+      signal: state.abortController?.signal,
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(apiErrorMessage(response, data, `连接 Agent Run 失败：${response.status}`));
+    }
+    await readChatStream(response, {
+      waitUntilResumed: waitUntilOutputResumed,
+      onEvent: (event) => handleStreamEvent(event, assistantMessage),
+    });
+    // 流结束。run 已到终态（done / awaiting_plan / failed …）→ 收工。
+    if (!agentRunStreamIncomplete(assistantMessage)) return;
+    // 未到终态却断流：重连。读到新事件就清零退避计数；连续无进展则退避 + 设上限，避免忙循环。
+    const advanced = Number(assistantMessage.agentRunLastEventIndex) > before;
+    stalledReconnects = advanced ? 0 : stalledReconnects + 1;
+    if (stalledReconnects > AGENT_STREAM_MAX_STALLED_RECONNECTS) {
+      throw new Error("Agent Run 流多次中断，未能读到最终结果");
+    }
+    if (!advanced) {
+      await new Promise((resolve) => setTimeout(resolve, Math.min(2000, 400 * stalledReconnects)));
+    }
   }
-  await readChatStream(response, {
-    waitUntilResumed: waitUntilOutputResumed,
-    onEvent: (event) => handleStreamEvent(event, assistantMessage),
-  });
 }
 
 async function continueGeneration(messageId) {
@@ -5437,7 +5625,7 @@ function markUploadFailed(uploadId, error) {
 
 function friendlyUploadError(message) {
   if (/No OCR engine|OCR dependencies|Tesseract|ocr_unavailable/i.test(String(message || ""))) {
-    return "OCR is unavailable. Install requirements-ocr.txt and Tesseract. PDF OCR also needs pdftoppm on PATH.";
+    return "OCR 不可用：Windows 自带 OCR 或 Tesseract 都未能启动。请重启应用后再试；扫描 PDF 仍需要 pdftoppm。";
   }
   const text = String(message || "文件识别失败");
   if (/image OCR|image text|in image|图片|图像/i.test(text)) {
@@ -6880,6 +7068,11 @@ function messageHasActivity(message) {
 }
 
 function startNewConversation() {
+  // 流式生成期间切换/新建会让在途请求写进错误的对话且 busy 卡死，必须先停止（与其它变更动作一致）。
+  if (state.busy) {
+    showToast("正在生成回复，请先停止再新建对话");
+    return;
+  }
   state.currentConversationId = null;
   state.editingConversationId = null;
   state.editingMessageId = null;
@@ -6902,6 +7095,11 @@ function startNewConversation() {
 function openConversation(id) {
   const conversation = state.conversations.find((item) => item.id === id);
   if (!conversation) return;
+  // 切换对话会用目标对话覆盖 state.messages；流式生成中这么做会破坏在途请求并卡住 busy。
+  if (state.busy) {
+    showToast("正在生成回复，请先停止再切换对话");
+    return;
+  }
   state.currentConversationId = conversation.id;
   state.editingMessageId = null;
   state.pendingAttachments = [];
@@ -7154,29 +7352,7 @@ function onHistoryListClick(event) {
     return;
   }
 
-  const editButton = event.target.closest("button[data-edit-conversation]");
-  if (editButton) {
-    startEditConversationTitle(editButton.dataset.editConversation);
-    return;
-  }
-
-  const deleteButton = event.target.closest("button[data-delete-conversation]");
-  if (deleteButton) {
-    deleteConversation(deleteButton.dataset.deleteConversation);
-    return;
-  }
-
-  const favoriteButton = event.target.closest("button[data-favorite-conversation]");
-  if (favoriteButton) {
-    toggleConversationFavorite(favoriteButton.dataset.favoriteConversation);
-    return;
-  }
-
-  const tagButton = event.target.closest("button[data-tag-conversation]");
-  if (tagButton) {
-    editConversationTags(tagButton.dataset.tagConversation);
-    return;
-  }
+  // 编辑/删除/收藏/标签已移到行内弹出菜单（handleHistoryMenuAction），历史列表里不再有这些 data 属性的按钮。
 
   const item = event.target.closest("button[data-conversation-id]");
   if (item) {
@@ -7264,7 +7440,7 @@ function toggleConversationFavorite(id) {
   conversation.updatedAt = Date.now();
   saveConversations();
   renderHistoryList();
-  maybeAutoGenerateTitle(conversation, messages);
+  maybeAutoGenerateTitle(conversation, conversation.messages || []);
 }
 
 function editConversationTags(id) {
@@ -8001,7 +8177,6 @@ function renderActivityPanel() {
     copyReport.className = "secondary-button activity-report-copy";
     copyReport.dataset.copyAgentReport = message.id;
     copyReport.textContent = "复制 Agent 过程";
-    copyReport.addEventListener("click", () => copyAgentExecutionReport(message.id));
     tools.append(copyReport);
     activityPanelBody.append(tools);
   }
@@ -9534,17 +9709,36 @@ function isShortcutPanelOpen() {
 
 function activateFocusTrap(container) {
   if (!container) return;
-  state.previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : state.previousFocus;
+  const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const current = state.focusTrapStack[state.focusTrapStack.length - 1];
+  // Nested dialogs reuse the same tab trap machinery; keep a stack so closing
+  // a confirmation dialog restores the panel trap underneath instead of
+  // dropping focus control completely.
+  if (current?.container === container) {
+    current.previous = previous || current.previous;
+  } else {
+    state.focusTrapStack.push({ container, previous });
+  }
+  state.previousFocus = previous || state.previousFocus;
   state.focusTrap = container;
 }
 
 function deactivateFocusTrap(container) {
-  if (state.focusTrap !== container) return;
-  state.focusTrap = null;
-  const previous = state.previousFocus;
-  state.previousFocus = null;
-  if (previous?.isConnected) {
-    requestAnimationFrame(() => previous.focus());
+  const entryIndex = state.focusTrapStack.map((entry) => entry.container).lastIndexOf(container);
+  if (entryIndex < 0) {
+    if (state.focusTrap === container) {
+      state.focusTrap = null;
+      state.previousFocus = null;
+    }
+    return;
+  }
+  const [entry] = state.focusTrapStack.splice(entryIndex, 1);
+  const removedTop = entryIndex === state.focusTrapStack.length;
+  const current = state.focusTrapStack[state.focusTrapStack.length - 1] || null;
+  state.focusTrap = current?.container || null;
+  state.previousFocus = current?.previous || null;
+  if (removedTop && entry.previous?.isConnected) {
+    requestAnimationFrame(() => entry.previous.focus());
   }
 }
 

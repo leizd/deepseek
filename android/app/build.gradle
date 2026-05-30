@@ -1,0 +1,62 @@
+plugins {
+    id "com.android.application"
+    id "com.chaquo.python"
+}
+
+def syncedPythonDir = layout.buildDirectory.dir("generated/python")
+
+tasks.register("syncPythonSources", Sync) {
+    into syncedPythonDir
+    from("${rootProject.projectDir}/../deepseek_mobile") {
+        into "deepseek_mobile"
+        exclude "**/__pycache__/**", "**/*.pyc"
+    }
+    from("${rootProject.projectDir}/../static") {
+        into "static"
+    }
+}
+
+android {
+    namespace "com.deepseek.mobile"
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.deepseek.mobile"
+        minSdk 24
+        targetSdk 34
+        versionCode 166
+        versionName "1.6.6"
+
+        ndk {
+            abiFilters "arm64-v8a", "x86_64"
+        }
+    }
+}
+
+dependencies {
+    implementation "com.google.mlkit:text-recognition-chinese:16.0.1"
+}
+
+chaquopy {
+    defaultConfig {
+        version = "3.13"
+        buildPython "D:/python/python.exe"
+        extractPackages("deepseek_mobile")
+        pip {
+            install "-r", "${rootProject.projectDir}/../requirements-mobile.txt"
+        }
+    }
+
+    sourceSets {
+        getByName("main") {
+            srcDir syncedPythonDir
+        }
+    }
+}
+
+preBuild.dependsOn syncPythonSources
+tasks.configureEach { task ->
+    if (task.name != "syncPythonSources" && task.name.toLowerCase().contains("python")) {
+        task.dependsOn syncPythonSources
+    }
+}
