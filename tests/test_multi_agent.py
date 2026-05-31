@@ -43,14 +43,14 @@ def test_search_budget_enforces_total_and_per_agent_limits() -> None:
 
 
 def test_multi_agent_search_budget_defaults_are_raised_for_researcher() -> None:
-    assert multi_agent.MULTI_AGENT_TOTAL_SEARCH_LIMIT == 12
-    assert multi_agent.MULTI_AGENT_PER_AGENT_SEARCH_LIMIT == 5
+    assert multi_agent.MULTI_AGENT_TOTAL_SEARCH_LIMIT == 36
+    assert multi_agent.MULTI_AGENT_PER_AGENT_SEARCH_LIMIT == 15
     assert multi_agent.MULTI_AGENT_TOOL_ROUNDS == 4
 
     budget = multi_agent.new_agent_search_budget()
-    assert all(budget.try_consume("researcher") for _ in range(5))
+    assert all(budget.try_consume("researcher") for _ in range(multi_agent.MULTI_AGENT_PER_AGENT_SEARCH_LIMIT))
     assert budget.try_consume("researcher") is False
-    assert budget.used == 5
+    assert budget.used == multi_agent.MULTI_AGENT_PER_AGENT_SEARCH_LIMIT
 
 
 def test_layered_plan_orders_researcher_middle_critic() -> None:
@@ -1092,7 +1092,7 @@ def test_run_agent_search_clause_matches_role() -> None:
     assert "你负责事实" in researcher_message
     assert "你负责代码" in coder_message
     assert "如需要外部信息可以搜索" in researcher_message
-    assert "最多可搜索 5 次" in researcher_message
+    assert f"最多可搜索 {multi_agent.MULTI_AGENT_PER_AGENT_SEARCH_LIMIT} 次" in researcher_message
     assert "不要联网搜索" in coder_message
     assert "基于 Researcher 已给出的资料" in coder_message
     assert "如需要外部信息可以搜索" not in coder_message

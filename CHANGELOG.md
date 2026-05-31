@@ -4,16 +4,28 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **图片视觉理解（多模态）**：上传图片后默认直接交给 `deepseek-v4-pro` 视觉模型理解（读图、看图答题、识别公式 / 图表），不再只靠 OCR 提取纯文字。前端只给本轮最新提问的图片附上 base64，后端在消息组装层（`normalize_chat_messages`）把它转成 OpenAI 兼容的多模态 `content`（`text` + `image_url`）并强制走 v4-pro；普通对话和多 Agent worker 共用同一组装路径，两者都能读图。历史轮的图片退回 OCR 文字摘要，省 token 且保持长历史的 prompt cache 前缀稳定。OCR（Tesseract + OpenCV 预处理）保留为视觉不可用 / 纯文字提取时的降级路径。`/api/chat` 请求体上限相应放宽到 16 MB。
+
+### 优化
+
+- **搜索上限大幅放宽**：非 Agent 单轮对话 `web_search` 次数上限 5→15；多 Agent 每个 worker 搜索上限 5→15、整次任务总搜索预算 12→36；Tavily 单次返回结果数 5→15、注入模型上下文的结果数 8→24。复杂问题可检索更多来源，代价是 Tavily 调用量与 input token 同步上升。
+- **本地轻量 OCR 增强**：新增 `OCR_MODE=fast|balanced|quality`、`OCR_PDF_DPI`、`OCR_MAX_IMAGE_PIXELS`、`OCR_FORMULA_CMD`、`OCR_FORMULA_TIMEOUT_SECONDS`。Tesseract 会生成多种 OpenCV 预处理候选（Otsu、自适应阈值、弱光增强、quality 倾斜校正），按多个 `psm` 重试并用可读字符评分选最佳结果；公式截图会额外受益于单行/原始行模式、保留词间距、可选 `equ` 公式语言包、数学符号友好的噪声过滤和评分。若本机安装 `pix2tex` / `latexocr` 或配置 `OCR_FORMULA_CMD`，后端会把公式 OCR 输出的 LaTeX 与 Tesseract/Windows OCR 一起评分择优；扫描 PDF 改为逐页处理，Tesseract 某页为空或失败时可继续用 Windows OCR 或公式命令兜底；Android ML Kit PDF 渲染 scale 提升到 3 并保留像素上限保护。OCR 结果会做基础结构整理，仍保持本机文字识别，不接入云端视觉。
+
 ### 修复
 
 - 桌面 WebView 启动器打开 token 链接时增加 `desktop=1` 握手；服务端验证 token 后直接返回首页并写入 `auth_token` Cookie，避免内嵌 WebView 在 302 跳转中丢 Cookie 后显示 `Auth required`。
 - 选区引用提问不再要求 selection 的 anchor/focus 都落在同一条助手回复内；只要选区实际命中单条聊天消息气泡即可引用，并支持用户消息和助手消息。触屏 `touchstart` 不再阻断后续 click。
 - DeepSeek 请求尾部 dynamic context 新增当前本地时间和 UTC 时间，支持相对日期和当前时间问题，同时保持稳定 system prompt 与长历史前缀的 cache 友好性。
 - 桌面端 OCR 新增运行时多引擎兜底：Tesseract 依赖缺失或识别过程报错时，PNG/JPG/WebP/BMP/TIFF/GIF 图片会继续调用 Windows 自带 `Windows.Media.Ocr`，并补强 PowerShell 绝对路径查找，避免本地应用环境变量不完整时直接报 `OCR is unavailable`。
+- 修复专家模式宽屏下右侧 Activity 面板里「复制 LaTeX」「复制代码」「表格转图表」按钮点击完全无反应：`onActivityPanelClick` 此前缺少这些内容块级按钮分支，现与主聊天区共用 `handleContentBlockClick`。
+- 修复批量上传图片走不到 OCR：seek 参考批量上传和普通批量上传此前漏传 `ocrEnabled`，与单文件上传路径不一致，导致含图片的批量上传直接报 `ocr_required`。
 
 ### 文档
 
 - 同步 README、API、架构、前端模块、APK 和安全说明，记录桌面启动鉴权、选区引用、当前时间上下文与 Android SDK 34 构建要求。
+- README 与架构说明补充桌面 OCR 的 OpenCV 预处理流程、扫描 PDF 渲染 DPI 提升，以及搜索次数 / 结果数上限的调整。
 
 ## [1.6.6]
 

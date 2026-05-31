@@ -22,7 +22,7 @@ DeepSeek Mobile 是一个本地优先的 AI 客户端：桌面端可通过内嵌
 | `deepseek_mobile/services/search.py` | 搜索触发、多轮 Tavily 查询、结果聚合、缓存和 Prompt 格式化。 |
 | `deepseek_mobile/services/tools.py` | DeepSeek function calling 本地工具：受限数学计算、缓存文件搜索、公共网页二次精读、提醒、记忆、项目文件、数据转换、图表规格、多查询搜索对比和长期记忆建议。 |
 | `deepseek_mobile/services/files.py` | 文件文本抽取、分块、缓存和附件上下文检索。 |
-| `deepseek_mobile/services/ocr.py` | 可选的本地 OCR：Android 走 ML Kit，Windows 桌面可用系统 OCR 兜底，其它桌面环境走 Tesseract；支持扫描 PDF 转图识别和图片文字识别。 |
+| `deepseek_mobile/services/ocr.py` | 可选的本地 OCR：Android 走 ML Kit，Windows 桌面可用系统 OCR 兜底，其它桌面环境走 Tesseract（按 `OCR_MODE` 生成 OpenCV 预处理候选、多 `psm` 重试、逐页 PDF 兜底）；支持扫描 PDF 转图识别和图片文字识别。 |
 | `deepseek_mobile/core/config.py` | 不可变设置、环境变量解析、兼容常量和 JSON 日志。 |
 | `deepseek_mobile/core/errors.py` | `AppError` 和稳定 API 错误码。 |
 | `deepseek_mobile/core/utils.py` | 模型名、评分、文件名、时间戳、token URL 和局域网 IP 工具函数。 |
@@ -154,7 +154,11 @@ KaTeX 的 JS、CSS、woff2 字体和许可证都放在 `static/vendor/katex/`，
 
 上传走 `POST /api/file-text`。后端使用 `multipart>=1.3,<2` 的流式 parser 读取表单，抽取文件文本、分块并写入 `.file-cache/{fileId}.json`。项目文档上传走 `POST /api/project-files`，复用同一解析链路，但写入 `.projects/{projectId}/files/`。如果运行环境里的 `multipart` 命名空间被不兼容包覆盖，服务端会在解析前做能力校验并返回明确错误。聊天消息只保存附件元数据；发送消息时，`services.chat_payload.expanded_message_content()` 会调用 `services.files.build_attachment_context()`，按当前问题检索最相关的文件片段。
 
-扫描版 PDF 会先尝试原生文本抽取；没有可复制文字时才进入 OCR。PNG、JPG、WebP、BMP、TIFF、GIF 等图片会被识别为 `kind=image`，并在 OCR 开启时通过 `services.ocr.extract_image_ocr()` 提取文字。桌面端优先使用 Tesseract；Windows 本地应用在 Tesseract 或 Python OCR 依赖不可用、或 Tesseract 运行时识别失败时，会通过 `WindowsOcrEngine` 调用系统 `Windows.Media.Ocr` 继续识别图片，避免截图上传直接失败。扫描 PDF OCR 仍需要 Poppler / `pdftoppm` 把页面转图；Android APK 会先选择 `AndroidMlKitEngine`，通过 `AndroidOcrBridge` 调用 ML Kit 中文文本识别处理图片和扫描 PDF 页面。OCR 仅在全局开启或上传请求携带 `ocrEnabled=1` 时运行。当前这是“图片文字识别”路线，不接入独立视觉模型，也不会把原始图片 base64 发送给 DeepSeek。
+扫描版 PDF 会先尝试原生文本抽取；没有可复制文字时才进入 OCR。PNG、JPG、WebP、BMP、TIFF、GIF 等图片会被识别为 `kind=image`，并在 OCR 开启时通过 `services.ocr.extract_image_ocr()` 提取文字。桌面端优先使用 Tesseract；Windows 本地应用在 Tesseract 或 Python OCR 依赖不可用、或 Tesseract 在某张图/某页 PDF 上失败时，会通过 `WindowsOcrEngine` 调用系统 `Windows.Media.Ocr` 继续识别，避免截图上传或整份扫描 PDF 直接失败。扫描 PDF OCR 仍需要 Poppler / `pdftoppm` 把页面转图；渲染 DPI 来自 `OCR_PDF_DPI`（默认 300，限制 150..450），超大图片会按 `OCR_MAX_IMAGE_PIXELS` 等比缩小。
+
+Tesseract 路线的 `OCR_MODE=fast|balanced|quality` 控制本地轻量增强档位：`fast` 少重试，`balanced` 默认使用 Otsu/自适应阈值/弱光增强候选和多个 `psm`，`quality` 额外尝试轻量倾斜校正。为提高公式截图可读性，Tesseract 参数会保留词间距并补跑单行/原始行模式；若本机安装了 `equ` 公式语言包，也会自动加入语言组合。
+
+公式 OCR 可以通过 `OCR_FORMULA_CMD` 接入本地命令行引擎，命令模板中的 `{image}` 会替换成临时图片路径；未显式配置时会自动尝试 PATH 中的 `pix2tex` 或 `latexocr`。命令输出可以是纯文本、Markdown 代码围栏或带 `latex`/`text`/`result` 字段的 JSON。`FormulaOcrCommandEngine` 会与 Tesseract、Windows OCR 一起进入同一候选链，由 OCR 文本评分选择最可信结果；扫描 PDF 仍按页执行，因此公式页和普通文本页可以各自用最适合的引擎。Android APK 会先选择 `AndroidMlKitEngine`，通过 `AndroidOcrBridge` 调用 ML Kit 中文文本识别处理图片和扫描 PDF 页面，PDF 渲染 scale 为 3 且保留像素上限保护。OCR 仅在全局开启或上传请求携带 `ocrEnabled=1` 时运行。当前这是“图片文字识别”路线，不接入云端视觉模型，也不会把原始图片 base64 发送给 DeepSeek。
 
 ## 缓存与本地状态
 

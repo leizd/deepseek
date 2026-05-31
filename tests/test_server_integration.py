@@ -353,6 +353,7 @@ class ServerIntegrationTests(unittest.TestCase):
             payload["uploadLimits"],
             {"fileMaxBytes": 200_000_000, "requestMaxBytes": 220_000_000, "maxFiles": server_module.MAX_MULTIPART_FILES},
         )
+        self.assertEqual(payload["ocr"], {"enabled": server_module.settings.ocr.enabled, "mode": "balanced", "localOnly": True})
 
     def test_pwa_icon_static_assets_are_served_with_image_types(self) -> None:
         for path, expected_type in [

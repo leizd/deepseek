@@ -47,8 +47,8 @@ def model_supports_thinking(model: str) -> bool:
     return model == THINKING_CAPABLE_MODEL
 
 
-MULTI_AGENT_TOTAL_SEARCH_LIMIT = 12
-MULTI_AGENT_PER_AGENT_SEARCH_LIMIT = 5
+MULTI_AGENT_TOTAL_SEARCH_LIMIT = 36
+MULTI_AGENT_PER_AGENT_SEARCH_LIMIT = 15
 MULTI_AGENT_TOOL_ROUNDS = 4
 # v1.2.3 起取消单 Agent / 总预算两层硬截断，v1.2.4 进一步改成 worker 结构化输出，
 # Leader 综合只吃 summary + evidence + risks，full_output 走 Activity 面板，

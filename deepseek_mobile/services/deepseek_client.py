@@ -50,7 +50,7 @@ WEB_SEARCH_SYSTEM_HINT = (
     "Do not invent citation ids or use free-form labels like [Source] or [Reddit]. "
     "Cite uploaded files with the existing [^Fn-m] markers."
 )
-WEB_SEARCH_TURN_LIMIT = 5
+WEB_SEARCH_TURN_LIMIT = 15
 WEB_SEARCH_LIMIT_ERROR = "本轮搜索次数已达上限，请基于已有搜索结果回答。"
 TOOL_BUDGET_EXHAUSTED_PROMPT = (
     "本轮可用的本地工具调用次数已经用完。请不要再调用任何工具，"
@@ -223,6 +223,11 @@ def build_deepseek_request(
 
     api_messages.extend(normalized_messages)
 
+    # 含图片的多模态消息强制走视觉模型 deepseek-v4-pro（仅它支持读图 + 深度理解）；
+    # 普通对话和多 Agent worker 共用此组装路径，所以两者都自动获得视觉能力。
+    if _has_image_content(api_messages):
+        model = "deepseek-v4-pro"
+
     request_body: dict[str, Any] = {"model": model, "messages": api_messages, "stream": stream}
     if tools_enabled:
         request_body["tools"] = tools_for_payload(payload)
@@ -299,6 +304,36 @@ def normalize_reasoning_effort(value: Any) -> str:
     return effort if effort in REASONING_EFFORTS else "high"
 
 
+def _image_content_parts(message: dict[str, Any]) -> list[dict[str, Any]]:
+    """从 user message 的附件里提取带 base64 的图片，转成 OpenAI 兼容的 image_url content part。
+
+    只认 ``imageData`` 为 ``data:image/...;base64,`` 形式的附件。前端只给本轮最新 user
+    message 的图片注入 ``imageData``（历史图片不带），从而实现“图片首轮走视觉模型、后续轮
+    退回 OCR 文字”，既省 token 又不破坏长历史的 cache 前缀。
+    """
+    attachments = message.get("attachments")
+    if not isinstance(attachments, list):
+        return []
+    parts: list[dict[str, Any]] = []
+    for attachment in attachments:
+        if not isinstance(attachment, dict):
+            continue
+        image_data = str(attachment.get("imageData") or "").strip()
+        if image_data.startswith("data:image/") and len(image_data) > 32:
+            parts.append({"type": "image_url", "image_url": {"url": image_data}})
+    return parts
+
+
+def _has_image_content(api_messages: list[dict[str, Any]]) -> bool:
+    for message in api_messages:
+        content = message.get("content")
+        if isinstance(content, list) and any(
+            isinstance(part, dict) and part.get("type") == "image_url" for part in content
+        ):
+            return True
+    return False
+
+
 def normalize_chat_messages(messages: list[Any]) -> list[dict[str, Any]]:
     api_messages: list[dict[str, Any]] = []
     for message in messages:
@@ -311,6 +346,14 @@ def normalize_chat_messages(messages: list[Any]) -> list[dict[str, Any]]:
             if isinstance(content, str) and content.strip() and tool_call_id:
                 api_messages.append({"role": "tool", "tool_call_id": tool_call_id, "content": content.strip()})
             continue
+        if role == "user":
+            image_parts = _image_content_parts(message)
+            if image_parts:
+                text = content.strip() if isinstance(content, str) else ""
+                parts: list[dict[str, Any]] = [{"type": "text", "text": text}] if text else []
+                parts.extend(image_parts)
+                api_messages.append({"role": "user", "content": parts})
+                continue
         if role not in {"user", "assistant"} or not isinstance(content, str):
             continue
         tool_calls = normalize_tool_calls(message.get("tool_calls")) if role == "assistant" else []

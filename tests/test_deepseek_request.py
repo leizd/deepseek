@@ -16,6 +16,51 @@ class DeepSeekRequestTests(unittest.TestCase):
             validate_deepseek_payload({"messages": [{"role": "user", "content": "hi"}]})
         self.assertEqual(cm.exception.code, ErrorCode.MISSING_API_KEY)
 
+    def test_user_image_attachment_becomes_multimodal_content(self) -> None:
+        img = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+        req = build_deepseek_request(
+            {
+                "apiKey": "k",
+                "model": "deepseek-v4-flash",
+                "messages": [
+                    {"role": "user", "content": "这是什么", "attachments": [{"kind": "image", "name": "a.png", "imageData": img}]}
+                ],
+            },
+            stream=False,
+        )
+        user = next(m for m in req.body["messages"] if m["role"] == "user")
+        self.assertIsInstance(user["content"], list)
+        types = [part.get("type") for part in user["content"]]
+        self.assertIn("text", types)
+        self.assertIn("image_url", types)
+        image_part = next(part for part in user["content"] if part.get("type") == "image_url")
+        self.assertEqual(image_part["image_url"]["url"], img)
+
+    def test_image_message_forces_vision_model(self) -> None:
+        img = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+        req = build_deepseek_request(
+            {
+                "apiKey": "k",
+                "model": "deepseek-v4-flash",
+                "messages": [{"role": "user", "content": "看图", "attachments": [{"kind": "image", "imageData": img}]}],
+            },
+            stream=False,
+        )
+        self.assertEqual(req.body["model"], "deepseek-v4-pro")
+
+    def test_image_attachment_without_base64_stays_text_only(self) -> None:
+        req = build_deepseek_request(
+            {
+                "apiKey": "k",
+                "model": "deepseek-v4-flash",
+                "messages": [{"role": "user", "content": "历史图", "attachments": [{"kind": "image", "name": "old.png"}]}],
+            },
+            stream=False,
+        )
+        user = next(m for m in req.body["messages"] if m["role"] == "user")
+        self.assertIsInstance(user["content"], str)
+        self.assertEqual(req.body["model"], "deepseek-v4-flash")
+
     def test_stream_deepseek_error_event_includes_code(self) -> None:
         events: list[dict[str, object]] = []
 

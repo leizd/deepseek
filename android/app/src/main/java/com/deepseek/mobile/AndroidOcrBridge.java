@@ -23,8 +23,8 @@ import java.util.concurrent.atomic.AtomicReference;
 
 public final class AndroidOcrBridge {
     private static final long OCR_TIMEOUT_SECONDS = 60;
-    private static final int PDF_RENDER_SCALE = 2;
-    private static final int MAX_PDF_BITMAP_PIXELS = 4_000_000;
+    private static final int PDF_RENDER_SCALE = 3;
+    private static final int MAX_PDF_BITMAP_PIXELS = 6_000_000;
 
     private static Context appContext;
     private static TextRecognizer recognizer;

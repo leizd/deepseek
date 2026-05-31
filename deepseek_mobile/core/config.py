@@ -44,11 +44,11 @@ ROOT = _runtime_root()
 
 @dataclass(frozen=True, slots=True)
 class SearchSettings:
-    result_limit: int = 5
+    result_limit: int = 15
     round_limit: int = 3
     content_chars: int = 1200
     raw_content_chars: int = 3500
-    context_result_limit: int = 8
+    context_result_limit: int = 24
     cache_max_age_seconds: int = 1800
 
     @property
@@ -96,6 +96,11 @@ class AuthSettings:
 @dataclass(frozen=True, slots=True)
 class OCRSettings:
     enabled: bool = False
+    mode: str = "balanced"
+    pdf_dpi: int = 300
+    max_image_pixels: int = 16_000_000
+    formula_cmd: str = ""
+    formula_timeout_seconds: int = 120
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,6 +206,7 @@ class Settings:
         runtime_root = _runtime_root() if root is None else root
         auth_token = os.environ.get("AUTH_TOKEN", "").strip()
         file_defaults = FileSettings()
+        ocr_defaults = OCRSettings()
         return cls(
             root=runtime_root,
             deepseek_timeout_seconds=_env_int("DEEPSEEK_TIMEOUT_SECONDS", 180),
@@ -221,7 +227,19 @@ class Settings:
                 upload_file_max_bytes=_env_int("UPLOAD_FILE_MAX_BYTES", file_defaults.upload_file_max_bytes),
                 upload_max_bytes=_env_int("UPLOAD_MAX_BYTES", file_defaults.upload_max_bytes),
             ),
-            ocr=OCRSettings(enabled=_env_bool("OCR_ENABLED", False)),
+            ocr=OCRSettings(
+                enabled=_env_bool("OCR_ENABLED", False),
+                mode=_env_choice("OCR_MODE", {"fast", "balanced", "quality"}, ocr_defaults.mode),
+                pdf_dpi=_env_int_clamped("OCR_PDF_DPI", ocr_defaults.pdf_dpi, 150, 450),
+                max_image_pixels=_env_int_min("OCR_MAX_IMAGE_PIXELS", ocr_defaults.max_image_pixels, 1),
+                formula_cmd=os.environ.get("OCR_FORMULA_CMD", "").strip(),
+                formula_timeout_seconds=_env_int_clamped(
+                    "OCR_FORMULA_TIMEOUT_SECONDS",
+                    ocr_defaults.formula_timeout_seconds,
+                    5,
+                    600,
+                ),
+            ),
         )
 
 
@@ -256,6 +274,19 @@ def _env_int(name: str, default: int) -> int:
         return int(raw)
     except ValueError:
         return default
+
+
+def _env_int_clamped(name: str, default: int, minimum: int, maximum: int) -> int:
+    return min(maximum, max(minimum, _env_int(name, default)))
+
+
+def _env_int_min(name: str, default: int, minimum: int) -> int:
+    return max(minimum, _env_int(name, default))
+
+
+def _env_choice(name: str, choices: set[str], default: str) -> str:
+    raw = os.environ.get(name, "").strip().lower()
+    return raw if raw in choices else default
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -314,6 +345,11 @@ SUPPORTED_MODELS = settings.supported_models
 MODEL_ROUTES = settings.model_routes
 MODEL_ALIASES = settings.model_aliases
 AGENT_MODELS = settings.agent_models
+OCR_MODE = settings.ocr.mode
+OCR_PDF_DPI = settings.ocr.pdf_dpi
+OCR_MAX_IMAGE_PIXELS = settings.ocr.max_image_pixels
+OCR_FORMULA_CMD = settings.ocr.formula_cmd
+OCR_FORMULA_TIMEOUT_SECONDS = settings.ocr.formula_timeout_seconds
 
 SEARCH_RESULT_LIMIT = settings.search.result_limit
 SEARCH_ROUND_LIMIT = settings.search.round_limit

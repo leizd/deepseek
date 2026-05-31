@@ -54,6 +54,11 @@ class ConfigTests(unittest.TestCase):
                 "AUTH_TOKEN": "fixed-token",
                 "AUTH_ALLOWED_HOSTS": "phone.local, 192.168.1.10",
                 "OCR_ENABLED": "1",
+                "OCR_MODE": "quality",
+                "OCR_PDF_DPI": "999",
+                "OCR_MAX_IMAGE_PIXELS": "12345",
+                "OCR_FORMULA_CMD": 'pix2tex "{image}"',
+                "OCR_FORMULA_TIMEOUT_SECONDS": "999",
                 "DEEPSEEK_TIMEOUT_SECONDS": "222",
                 "MULTI_AGENT_TIMEOUT_SECONDS": "333",
                 "TAVILY_TIMEOUT_SECONDS": "33",
@@ -70,11 +75,34 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(loaded.auth.token, "fixed-token")
         self.assertEqual(loaded.auth.allowed_hosts, ("phone.local", "192.168.1.10"))
         self.assertTrue(loaded.ocr.enabled)
+        self.assertEqual(loaded.ocr.mode, "quality")
+        self.assertEqual(loaded.ocr.pdf_dpi, 450)
+        self.assertEqual(loaded.ocr.max_image_pixels, 12345)
+        self.assertEqual(loaded.ocr.formula_cmd, 'pix2tex "{image}"')
+        self.assertEqual(loaded.ocr.formula_timeout_seconds, 600)
         self.assertEqual(loaded.deepseek_timeout_seconds, 222)
         self.assertEqual(loaded.multi_agent_timeout_seconds, 333)
         self.assertEqual(loaded.tavily_timeout_seconds, 33)
         self.assertEqual(loaded.files.upload_file_max_bytes, 123456)
         self.assertEqual(loaded.files.upload_max_bytes, 234567)
+
+    def test_ocr_env_values_default_and_clamp(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "OCR_MODE": "nope",
+                "OCR_PDF_DPI": "12",
+                "OCR_MAX_IMAGE_PIXELS": "-5",
+                "OCR_FORMULA_TIMEOUT_SECONDS": "1",
+            },
+            clear=True,
+        ):
+            loaded = Settings.from_env()
+
+        self.assertEqual(loaded.ocr.mode, "balanced")
+        self.assertEqual(loaded.ocr.pdf_dpi, 150)
+        self.assertEqual(loaded.ocr.max_image_pixels, 1)
+        self.assertEqual(loaded.ocr.formula_timeout_seconds, 5)
 
     def test_invalid_timeout_env_values_fall_back_to_defaults(self) -> None:
         with patch.dict(

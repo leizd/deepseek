@@ -189,6 +189,11 @@ gradle :app:assembleDebug
 - `AUTH_TOKEN=...`：使用固定 token，便于本地测试。
 - `AUTH_ALLOWED_HOSTS=host1,host2`：追加允许的 Host 头名称。
 - `OCR_ENABLED=1`：默认允许 OCR；未开启时也可在上传失败后点击 OCR 重试。
+- `OCR_MODE=fast|balanced|quality`：本地 OCR 增强档位，默认 `balanced`；`quality` 会多跑候选图像和版面模式，速度更慢但对小字、倾斜截图更稳。
+- `OCR_PDF_DPI=300`：扫描 PDF 渲染 DPI，限制在 `150..450`，默认 `300`。
+- `OCR_MAX_IMAGE_PIXELS=16000000`：OCR 前允许处理的最大图片像素数，超出会等比缩小，降低内存占用。
+- `OCR_FORMULA_CMD='pix2tex "{image}"'`：可选的本地公式 OCR 命令。命令从 stdout 输出 LaTeX/文本，`{image}` 会替换为临时图片路径；未设置时会自动尝试已在 PATH 中的 `pix2tex` 或 `latexocr`。
+- `OCR_FORMULA_TIMEOUT_SECONDS=120`：公式 OCR 命令超时，限制在 `5..600` 秒。
 - `DEEPSEEK_TIMEOUT_SECONDS`：DeepSeek 同步、流式和上下文压缩请求的 socket idle 超时，默认 `180`。
 - `MULTI_AGENT_TIMEOUT_SECONDS`：多 Agent Coder / Reasoner 并行层级超时，默认 `3900`；长任务建议与 `DEEPSEEK_TIMEOUT_SECONDS` 一起调高。
 - `TAVILY_TIMEOUT_SECONDS`：Tavily 搜索请求超时，默认 `45`。
@@ -214,7 +219,11 @@ gradle :app:assembleDebug
 python -m pip install -r requirements-ocr.txt
 ```
 
-桌面端图片 OCR 会优先使用已安装的 Tesseract；如果 Tesseract / Python OCR 依赖不可用，或 Tesseract 在实际识别时失败，Windows 本地应用会自动尝试系统自带 `Windows.Media.Ocr` 作为兜底。桌面端扫描 PDF OCR 仍需要 Poppler / `pdftoppm` 在 `PATH` 中；Android APK 内置 ML Kit OCR 桥接，图片和扫描 PDF OCR 不需要额外安装 Tesseract / Poppler。OCR 不可用时，上传会返回 `ocr_unavailable` 和安装提示。
+桌面端图片 OCR 会优先使用已安装的 Tesseract；如果 Tesseract / Python OCR 依赖不可用，或 Tesseract 在实际识别时失败，Windows 本地应用会自动尝试系统自带 `Windows.Media.Ocr` 作为兜底。桌面端扫描 PDF OCR 仍需要 Poppler / `pdftoppm` 在 `PATH` 中；Android APK 内置 ML Kit OCR 桥接，图片和扫描 PDF OCR 不需要额外安装 Tesseract / Poppler。
+
+桌面 Tesseract 路线会按 `OCR_MODE` 生成本地轻量候选：灰度、小图放大、保边去噪、Otsu 二值化、深色背景反相；`balanced`/`quality` 还会尝试自适应阈值和弱光增强，`quality` 再做轻量倾斜校正。Tesseract 会按多个 `psm` 版面模式重试并用可读字符评分选择结果，其中包括更适合公式截图的单行/原始行模式和 `preserve_interword_spaces=1`；如果本机 Tesseract 安装了 `equ` 公式语言包，也会自动并入识别语言。
+
+公式截图如果仍然很差，建议安装本地公式 OCR 工具并通过 `OCR_FORMULA_CMD` 接入，例如 `pix2tex "{image}"`。后端会把公式 OCR 输出的 LaTeX 与 Tesseract/Windows OCR 结果一起评分择优；命令输出可以是纯文本、Markdown 代码围栏或包含 `latex`/`text`/`result` 字段的 JSON。扫描 PDF 会逐页处理，某页 Tesseract 为空或失败时可继续用 Windows OCR 或公式命令兜底。OCR 文本会做基础结构整理，保留疑似表格列、键值对、数学符号行、上下标符号和换行。当前仍是本机“图片文字识别”，不会描述没有文字的画面，也不会把原始图片发给 DeepSeek 或云端服务。OCR 不可用时，上传会返回 `ocr_unavailable` 和安装提示。
 
 ## 功能
 

@@ -290,6 +290,11 @@ class DeepSeekMobileHandler(SimpleHTTPRequestHandler):
                     "requestMaxBytes": MAX_UPLOAD_BYTES,
                     "maxFiles": MAX_MULTIPART_FILES,
                 },
+                "ocr": {
+                    "enabled": settings.ocr.enabled,
+                    "mode": settings.ocr.mode,
+                    "localOnly": True,
+                },
                 "computerUrl": computer_url,
                 "phoneUrl": phone_url,
             }
@@ -359,7 +364,8 @@ class DeepSeekMobileHandler(SimpleHTTPRequestHandler):
         self.write_json({"memories": load_memories()})
 
     def handle_chat(self) -> None:
-        payload = self.read_json_body()
+        # 视觉对话会把图片 base64 放进消息体，放宽到 16 MB（普通文本对话远小于此上限）
+        payload = self.read_json_body(max_bytes=16_000_000)
         if payload.get("stream"):
             preflight_deepseek_payload(payload)
             self.send_response(200)
@@ -482,11 +488,11 @@ class DeepSeekMobileHandler(SimpleHTTPRequestHandler):
         finally:
             self.close_connection = True
 
-    def read_json_body(self) -> dict[str, Any]:
+    def read_json_body(self, max_bytes: int = 2_000_000) -> dict[str, Any]:
         content_length = parse_content_length(self.headers.get("Content-Length", "0"))
         if content_length <= 0:
             raise AppError("Request body is empty", code=ErrorCode.INVALID_PAYLOAD)
-        if content_length > 2_000_000:
+        if content_length > max_bytes:
             raise AppError("Request body is too large", code=ErrorCode.UPLOAD_TOO_LARGE, status=413)
         raw = self.rfile.read(content_length)
         try:
@@ -1051,4 +1057,3 @@ def redact_sensitive_query(value: str) -> str:
     for placeholder, redacted in placeholders:
         value = value.replace(placeholder, redacted)
     return value
-

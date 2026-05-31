@@ -2426,32 +2426,53 @@ async function deleteSeek(id) {
   }
 }
 
-function messageForApi(message) {
+function messageForApi(message, includeImages = false) {
   const apiMessage = { role: message.role, content: messageContentForApi(message) };
   if (message.projectId) apiMessage.projectId = message.projectId;
   if (message.seekId) apiMessage.seekId = message.seekId;
-  const attachments = attachmentsForApi(message);
+  const attachments = attachmentsForApi(message, includeImages);
   if (attachments.length) {
     apiMessage.attachments = attachments;
   }
   return apiMessage;
 }
 
-function attachmentsForApi(message) {
+// 组装发往 /api/chat 的消息序列。只给最后一条 user 消息（本轮提问）的图片附件注入
+// base64，后端据此把它组装成多模态视觉请求；历史图片不带 base64，退回 OCR 文字，
+// 既省 token 又保持长历史的 prompt cache 前缀稳定。
+function buildApiMessages(messages) {
+  const nonStreaming = (Array.isArray(messages) ? messages : []).filter((message) => !message.streaming);
+  const lastUserId = [...nonStreaming].reverse().find((message) => message.role === "user")?.id || "";
+  return nonStreaming.map((message) =>
+    messageForApi(message, Boolean(lastUserId) && message.role === "user" && message.id === lastUserId)
+  );
+}
+
+function attachmentsForApi(message, includeImages = false) {
   const attachments = combinedAttachmentsForMessage(message);
   return attachments
-    .map((attachment) => ({
-      fileId: attachment.fileId || "",
-      projectId: attachment.projectId || "",
-      name: attachment.name || "附件",
-      type: attachment.type || "",
-      size: Number(attachment.size) || 0,
-      kind: attachment.kind || "text",
-      charCount: Number(attachment.charCount) || 0,
-      chunkCount: Number(attachment.chunkCount) || 0,
-      text: attachment.fileId ? "" : String(attachment.text || ""),
-    }))
-    .filter((attachment) => attachment.fileId || attachment.text);
+    .map((attachment) => {
+      const apiAttachment = {
+        fileId: attachment.fileId || "",
+        projectId: attachment.projectId || "",
+        name: attachment.name || "附件",
+        type: attachment.type || "",
+        size: Number(attachment.size) || 0,
+        kind: attachment.kind || "text",
+        charCount: Number(attachment.charCount) || 0,
+        chunkCount: Number(attachment.chunkCount) || 0,
+        text: attachment.fileId ? "" : String(attachment.text || ""),
+      };
+      // 仅本轮（includeImages）的图片附件带上 base64，交给后端组装多模态视觉请求。
+      if (includeImages && attachment.kind === "image") {
+        const imageData = attachment.imagePreview || attachment.thumbnail || "";
+        if (typeof imageData === "string" && imageData.startsWith("data:image/")) {
+          apiAttachment.imageData = imageData;
+        }
+      }
+      return apiAttachment;
+    })
+    .filter((attachment) => attachment.fileId || attachment.text || attachment.imageData);
 }
 
 function messageContentForApi(message) {
@@ -3522,9 +3543,7 @@ async function onSubmit(event) {
 
   prepareAssistantRequest(assistantMessage, false);
   try {
-    const requestMessages = state.messages
-      .filter((message) => !message.streaming)
-      .map(messageForApi);
+    const requestMessages = buildApiMessages(state.messages);
     const compressedParts = await buildCompressedRequestParts(apiKey, requestMessages, assistantMessage);
 
     const requestPayload = requestPayloadFromParts(apiKey, assistantMessage, compressedParts, {
@@ -3987,9 +4006,7 @@ async function submitMessageEdit(messageId, content) {
   render();
 
   try {
-    const requestMessages = state.messages
-      .filter((message) => !message.streaming)
-      .map(messageForApi);
+    const requestMessages = buildApiMessages(state.messages);
     const compressedParts = await buildCompressedRequestParts(apiKey, requestMessages, assistantMessage);
 
     const response = await apiFetch("/api/chat", {
@@ -4145,9 +4162,7 @@ function markAssistantInterrupted(message) {
 
 function messagesForContinuation(assistantMessage) {
   const index = state.messages.findIndex((message) => message.id === assistantMessage.id);
-  const previousMessages = (index >= 0 ? state.messages.slice(0, index) : state.messages)
-    .filter((message) => !message.streaming)
-    .map(messageForApi)
+  const previousMessages = buildApiMessages(index >= 0 ? state.messages.slice(0, index) : state.messages)
     .filter((message) => message.content);
 
   const partialContent = String(assistantMessage.content || "").trim();
@@ -4161,9 +4176,7 @@ function messagesForContinuation(assistantMessage) {
 
 function messagesBeforeAssistant(assistantMessage) {
   const index = state.messages.findIndex((message) => message.id === assistantMessage.id);
-  return (index >= 0 ? state.messages.slice(0, index) : state.messages)
-    .filter((message) => !message.streaming)
-    .map(messageForApi)
+  return buildApiMessages(index >= 0 ? state.messages.slice(0, index) : state.messages)
     .filter((message) => message.content);
 }
 
@@ -5075,7 +5088,8 @@ async function onSeekReferenceInputChange(event) {
         },
         () => {
           updateSeekReferenceUploadItems(uploadItems, { status: "processing", progress: 100 });
-        }
+        },
+        { ocrEnabled: true }
       );
       applySeekReferenceUploadResult(uploadItems, result);
     } catch (error) {
@@ -5437,7 +5451,8 @@ async function uploadPendingAttachmentFiles(files, { emptyMessage = "没有选�
       },
       () => {
         updateUploadItems(uploadItems, { status: "processing", progress: 100 });
-      }
+      },
+      { ocrEnabled: true }
     );
     applyBatchUploadResult(uploadItems, result);
   } catch (error) {
@@ -5624,10 +5639,16 @@ function markUploadFailed(uploadId, error) {
 }
 
 function friendlyUploadError(message) {
-  if (/No OCR engine|OCR dependencies|Tesseract|ocr_unavailable/i.test(String(message || ""))) {
-    return "OCR 不可用：Windows 自带 OCR 或 Tesseract 都未能启动。请重启应用后再试；扫描 PDF 仍需要 pdftoppm。";
-  }
   const text = String(message || "文件识别失败");
+  // OCR_REQUIRED：开关没勾。优先识别，给出明确的勾选指引（这条比 OCR_UNAVAILABLE 更具体）
+  if (/ocr_required|OCR to be enabled|OCR_ENABLED=1/i.test(text)) {
+    return "图片需要 OCR 才能识别文字。请在启动器勾选「开启 OCR 图像光学字符识别支持 (OCR_ENABLED)」，重启服务后重试。";
+  }
+  // OCR_UNAVAILABLE：引擎启动或运行失败。保留后端真实细节，方便用户自助诊断
+  if (/No OCR engine|OCR dependencies|Tesseract|ocr_unavailable/i.test(text)) {
+    const detail = text.length > 260 ? text.slice(0, 260) + "…" : text;
+    return `OCR 不可用：${detail}（请确认 Tesseract 在 PATH 且服务进程能 import pytesseract；扫描 PDF 还需要 pdftoppm。重启服务后重试。）`;
+  }
   if (/image OCR|image text|in image|图片|图像/i.test(text)) {
     return "这张图片需要 OCR 才能识别文字。请安装 requirements-ocr.txt 和 Tesseract，然后点击 OCR 重试。";
   }
@@ -8862,42 +8883,49 @@ async function onChatLogClick(event) {
     return;
   }
 
+  if (await handleContentBlockClick(clickTarget)) return;
+}
+
+// 公式 / 表格图表 / 代码块这些"内容块级"按钮，主聊天区（onChatLogClick）和右侧
+// Activity 面板（onActivityPanelClick）都会出现。抽成共享处理，避免 Activity 面板
+// 漏接导致点"复制 LaTeX""复制代码"完全静默无反应。返回 true 表示已消费该点击。
+async function handleContentBlockClick(clickTarget) {
   const mathButton = clickTarget?.closest("button[data-math-action]");
   if (mathButton) {
     const source = mathButton.closest(".math-block-wrap")?.querySelector(".math-source")?.value || "";
     const copied = await copyText(source);
     showToast(copied ? "已复制 LaTeX" : "复制失败，请长按公式手动复制");
-    return;
+    return true;
   }
 
   const chartButton = clickTarget?.closest("button[data-chart-action]");
   if (chartButton) {
     renderTableChart(chartButton.closest(".table-wrap"), chartButton.dataset.chartAction || "bar");
-    return;
+    return true;
   }
 
   const actionButton = clickTarget?.closest("button[data-code-action]");
-  if (!actionButton) return;
+  if (!actionButton) return false;
 
   const card = actionButton.closest(".code-card, .mermaid-card");
   const code = card?.querySelector(".code-source")?.value || card?.querySelector("code")?.textContent || "";
-  if (!code) return;
+  if (!code) return true;
 
   if (actionButton.dataset.codeAction === "toggle-collapse") {
     card.classList.toggle("expanded");
     const label = actionButton.querySelector("span");
     if (label) label.textContent = card.classList.contains("expanded") ? "折叠" : "展开";
-    return;
+    return true;
   }
 
   if (actionButton.dataset.codeAction === "vscode") {
     const path = actionButton.dataset.codePath || "";
     if (!path) {
       showToast("没有检测到可打开的本地文件路径");
-      return;
+      return true;
     }
     window.location.href = vscodeUriForPath(path);
-    return;
+    return true;
   }
 
   if (actionButton.dataset.codeAction === "copy") {
@@ -8909,13 +8937,14 @@ async function onChatLogClick(event) {
     } else {
       showToast("复制失败，请长按代码手动复制", { tone: "error" });
     }
-    return;
+    return true;
   }
 
   if (actionButton.dataset.codeAction === "download") {
     const lang = card.dataset.codeLang || "txt";
     downloadTextFile(code, `deepseek-code.${extensionForLanguage(lang)}`);
   }
+  return true;
 }
 
 async function onActivityPanelClick(event) {
@@ -8948,7 +8977,11 @@ async function onActivityPanelClick(event) {
   const citationButton = clickTarget?.closest("button[data-citation]");
   if (citationButton) {
     await openCitationForMessage(state.activeActivityMessageId, citationButton.dataset.citation || "");
+    return;
   }
+
+  // Activity 面板里同样会渲染公式 / 代码块 / 表格图表，共用主聊天区的块级按钮处理。
+  await handleContentBlockClick(clickTarget);
 }
 
 function renderTableChart(tableWrap, type) {
@@ -8973,7 +9006,7 @@ async function copyText(value) {
   const text = String(value || "");
   if (!text) return false;
 
-  if (window.isSecureContext && navigator.clipboard?.writeText) {
+  if (navigator.clipboard?.writeText) {
     try {
       await navigator.clipboard.writeText(text);
       return true;
