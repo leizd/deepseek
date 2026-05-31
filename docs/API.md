@@ -1,6 +1,6 @@
 ﻿# HTTP API
 
-适用版本：v1.6.6。
+适用版本：v1.7.0。
 
 默认情况下，所有 `/api/*` 路由都需要本地 token 鉴权。客户端可以发送 `Authorization: Bearer <token>`，也可以使用打开 `/?token=<token>` 后写入的 `auth_token` Cookie。未设置 `AUTH_TOKEN` 时，服务端会把自动生成的 token 保存到本地 `.auth-token`，重启后继续复用。
 
@@ -345,6 +345,12 @@ GET /api/share-target?id=<share-id>
 ```json
 {"file": {"name": "notes.pdf", "projectId": "proj-abc123"}, "chunk": {"index": 1, "text": "..."}}
 ```
+
+## GET `/api/download?id=<fileId>`
+
+下载本地生成文件。目前用于 `create_pptx` 工具生成的 PowerPoint 文件；请求仍走普通 API 鉴权。`id` 只接受 32 位十六进制字符串，服务端只会解析 `.generated/<id>.pptx`，过期或不存在返回 `404`。
+
+PPT 生成由 `/api/chat` 的 function calling 链路触发：用户要求“做 PPT / 幻灯片 / 演示文稿”时，后端会强制 `tool_choice=create_pptx`；如果上游模型只输出大纲没有工具调用，后端会基于最终文本兜底生成 `.pptx`，并在回复中追加 Markdown 下载链接。
 
 ## POST `/api/reminders`
 

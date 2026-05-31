@@ -2,7 +2,7 @@
 
 本项目使用类似 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的分组方式维护变更记录。未发布内容记录在 `[Unreleased]`，正式发版时迁移到具体版本。
 
-## [Unreleased]
+## [1.7.0]
 
 ### 新增
 
@@ -11,11 +11,16 @@
 
 ### 优化
 
+- **PPT 生成接入 `slides` skill**：当用户要求制作 PPT / 幻灯片 / 演示文稿时，后端会在本轮动态上下文注入用户提供的 `slides` skill 参考（PowerPoint-style presentations，包含 pptxgenjs / artifact tool 路线），并把 `create_pptx` 工具说明标记为该 skill 的本地执行入口；普通聊天不注入这段上下文，保持 prompt cache 友好。
 - **搜索上限大幅放宽**：非 Agent 单轮对话 `web_search` 次数上限 5→15；多 Agent 每个 worker 搜索上限 5→15、整次任务总搜索预算 12→36；Tavily 单次返回结果数 5→15、注入模型上下文的结果数 8→24。复杂问题可检索更多来源，代价是 Tavily 调用量与 input token 同步上升。
 - **本地轻量 OCR 增强**：新增 `OCR_MODE=fast|balanced|quality`、`OCR_PDF_DPI`、`OCR_MAX_IMAGE_PIXELS`、`OCR_FORMULA_CMD`、`OCR_FORMULA_TIMEOUT_SECONDS`。Tesseract 会生成多种 OpenCV 预处理候选（Otsu、自适应阈值、弱光增强、quality 倾斜校正），按多个 `psm` 重试并用可读字符评分选最佳结果；公式截图会额外受益于单行/原始行模式、保留词间距、可选 `equ` 公式语言包、数学符号友好的噪声过滤和评分。若本机安装 `pix2tex` / `latexocr` 或配置 `OCR_FORMULA_CMD`，后端会把公式 OCR 输出的 LaTeX 与 Tesseract/Windows OCR 一起评分择优；扫描 PDF 改为逐页处理，Tesseract 某页为空或失败时可继续用 Windows OCR 或公式命令兜底；Android ML Kit PDF 渲染 scale 提升到 3 并保留像素上限保护。OCR 结果会做基础结构整理，仍保持本机文字识别，不接入云端视觉。
 
 ### 修复
 
+- 修复流式调用本地工具时 Activity 标题计时停顿的问题：运行中的耗时不再被 `reasoningEndedAt` 截断，工具调用、搜索和 Agent 工作阶段都会继续按整轮活跃时间刷新。
+- 修复正文已经开始输出时仍显示“思考中”的问题：前端新增 `streamPhase` 状态，流式阶段会显示“思考中 / 调用工具中 / 搜索中 / Agent 工作中 / 生成中”，正文区占位文案也同步切换。
+- 修复模型在“做 PPT / 幻灯片 / 演示文稿”请求中绕过 `create_pptx` 工具、只输出 Markdown 大纲或声称无法生成 `.pptx` 的问题：PPT 意图会强制 `tool_choice=create_pptx`，工具调用后自动解除强制以便模型正常总结；若上游仍漏调工具，后端会基于最终文本大纲本地兜底生成 `.pptx` 并追加下载链接。
+- 修复 PPT 下载链接在 WebView 中被解析到 DeepSeek 官网的问题：后端会按当前本地服务地址重写 `/api/download` 链接，前端点击时也只提取 32 位文件 id 并请求本地下载 / 保存接口。
 - 桌面 WebView 启动器打开 token 链接时增加 `desktop=1` 握手；服务端验证 token 后直接返回首页并写入 `auth_token` Cookie，避免内嵌 WebView 在 302 跳转中丢 Cookie 后显示 `Auth required`。
 - 选区引用提问不再要求 selection 的 anchor/focus 都落在同一条助手回复内；只要选区实际命中单条聊天消息气泡即可引用，并支持用户消息和助手消息。触屏 `touchstart` 不再阻断后续 click。
 - DeepSeek 请求尾部 dynamic context 新增当前本地时间和 UTC 时间，支持相对日期和当前时间问题，同时保持稳定 system prompt 与长历史前缀的 cache 友好性。

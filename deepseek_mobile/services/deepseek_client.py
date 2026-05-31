@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import threading
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable
+from urllib.parse import urlsplit, urlunsplit
 
 from deepseek_mobile.core.config import (
     DEEPSEEK_TIMEOUT_SECONDS,
@@ -22,6 +24,8 @@ from deepseek_mobile.services.chat_payload import count_payload_attachments, exp
 from deepseek_mobile.services.context_compressor import format_context_summary_context
 from deepseek_mobile.core.errors import AppError, ErrorCode
 from deepseek_mobile.services.memory import empty_memory_state, format_memory_notice, memory_scope_from_payload, prepare_memory_state
+from deepseek_mobile.services.presentations import create_presentation_from_text
+from deepseek_mobile.services.slides_skill import format_slides_skill_context
 from deepseek_mobile.services.search import (
     aggregate_search_rounds,
     compact_search_tool_result,
@@ -41,7 +45,11 @@ logger = logging.getLogger("deepseek_mobile.deepseek")
 
 MESSAGE_HARD_LIMIT = 40
 REASONING_EFFORTS = {"minimal", "low", "medium", "high", "max"}
-TOOL_PARALLEL_SYSTEM_HINT = "当需要多个独立信息时（如查询多个不同 URL、多个不同文件），请在同一回复中并行发起多个工具调用，而不是一轮一个。"
+TOOL_PARALLEL_SYSTEM_HINT = (
+    "当需要多个独立信息时（如查询多个不同 URL、多个不同文件），请在同一回复中并行发起多个工具调用，而不是一轮一个。"
+    "当某个本地工具能直接产出用户想要的成果时，必须调用该工具，不要用文本或 Markdown 自行模拟其结果——"
+    "用户要求制作 PPT / 幻灯片 / 演示文稿时调用 create_pptx 生成可下载文件，不要输出 Marp / Markdown 幻灯片大纲来代替；需要图表时调用 generate_chart。"
+)
 WEB_SEARCH_SYSTEM_HINT = (
     "If web search is available, decide whether to call web_search before answering. "
     "For current facts, prices, releases, documentation, citations, product comparisons, or uncertain external claims, search first. "
@@ -56,6 +64,9 @@ TOOL_BUDGET_EXHAUSTED_PROMPT = (
     "本轮可用的本地工具调用次数已经用完。请不要再调用任何工具，"
     "直接基于已经获得的信息和对话上下文给出最终回答；如信息不足，请明确说明。"
 )
+PRESENTATION_KEYWORDS_RE = re.compile(r"\b(?:ppt|powerpoint|presentation)\b|幻灯片|演示文稿", re.IGNORECASE)
+PRESENTATION_CREATE_RE = re.compile(r"做|制作|生成|创建|帮我|给我|出一[份套]|设计|create|make|generate|build", re.IGNORECASE)
+PRESENTATION_REFUSAL_RE = re.compile(r"(?:无法|不能|没有.*能力|不能直接|无法直接).{0,40}(?:pptx|PPT|幻灯片|演示文稿|文件)", re.IGNORECASE)
 
 
 CURRENT_TIME_CONTEXT_HEADER = "[Current time]"
@@ -230,8 +241,12 @@ def build_deepseek_request(
 
     request_body: dict[str, Any] = {"model": model, "messages": api_messages, "stream": stream}
     if tools_enabled:
-        request_body["tools"] = tools_for_payload(payload)
-        request_body["tool_choice"] = "auto"
+        request_tools = tools_for_payload(payload)
+        request_body["tools"] = request_tools
+        if should_force_create_pptx(payload) and has_create_pptx_tool(request_tools):
+            request_body["tool_choice"] = {"type": "function", "function": {"name": "create_pptx"}}
+        else:
+            request_body["tool_choice"] = "auto"
 
     if model == "deepseek-v4-flash":
         temperature = payload.get("temperature", 1.0)
@@ -297,6 +312,26 @@ def tools_for_payload(payload: dict[str, Any]) -> list[dict[str, Any]]:
     if search_tool_enabled(payload):
         return tools
     return [tool for tool in tools if tool.get("function", {}).get("name") not in {"web_search", "compare_search_results"}]
+
+
+def presentation_intent_requested(payload: dict[str, Any]) -> bool:
+    query = latest_user_query(payload)
+    if not query or not PRESENTATION_KEYWORDS_RE.search(query):
+        return False
+    return bool(PRESENTATION_CREATE_RE.search(query))
+
+
+def should_force_create_pptx(payload: dict[str, Any]) -> bool:
+    if payload.get("toolsEnabled") is False:
+        return False
+    allowed = payload.get("allowedTools")
+    if isinstance(allowed, list) and "create_pptx" not in {str(item) for item in allowed}:
+        return False
+    return presentation_intent_requested(payload)
+
+
+def has_create_pptx_tool(tools: list[dict[str, Any]]) -> bool:
+    return any(str(tool.get("function", {}).get("name") or "") == "create_pptx" for tool in tools)
 
 
 def normalize_reasoning_effort(value: Any) -> str:
@@ -445,6 +480,9 @@ def build_dynamic_turn_context(payload: dict[str, Any], memory_state: dict[str, 
     # 从“搜索关”切到“搜索开”不会让系统提示后的整段历史全部 cache miss。
     if tools_enabled and search_tool_enabled(payload):
         dynamic_parts.append(WEB_SEARCH_SYSTEM_HINT)
+
+    if tools_enabled and presentation_intent_requested(payload):
+        dynamic_parts.append(format_slides_skill_context())
 
     search_context = str(payload.get("searchContext") or "").strip()
     if search_context:
@@ -717,6 +755,118 @@ def diagnostics_with_tools(diagnostics: dict[str, Any], *, count: int, names: li
     return result
 
 
+def pptx_result_from_messages(body: dict[str, Any]) -> dict[str, Any] | None:
+    for message in reversed(list(body.get("messages") or [])):
+        if not isinstance(message, dict) or message.get("role") != "tool":
+            continue
+        if str(message.get("name") or "") != "create_pptx":
+            continue
+        try:
+            data = json.loads(str(message.get("content") or ""))
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(data, dict) or data.get("ok") is not True:
+            continue
+        result = data.get("result")
+        if isinstance(result, dict) and download_url_has_pptx_id(str(result.get("downloadUrl") or "")):
+            return result
+    return None
+
+
+def response_has_pptx_link(content: str) -> bool:
+    return download_url_has_pptx_id(str(content or ""))
+
+
+def pptx_link_text(result: dict[str, Any], *, base_url: str = "") -> str:
+    url = absolute_download_url(str(result.get("downloadUrl") or ""), base_url=base_url)
+    filename = str(result.get("filename") or "presentation.pptx")
+    try:
+        slide_count = int(result.get("slideCount") or 0)
+    except (TypeError, ValueError):
+        slide_count = 0
+    count_text = f"共 {slide_count} 页，" if slide_count else ""
+    return f"已生成可下载 PPT：[{filename}]({url})。{count_text}下载链接 6 小时内有效。"
+
+
+def download_url_has_pptx_id(value: str) -> bool:
+    return bool(re.search(r"(?:https?://[^)\s]+)?/api/download\?[^)\s#]*\bid=[0-9a-f]{32}", str(value or ""), flags=re.IGNORECASE))
+
+
+def pptx_download_base_url(payload: dict[str, Any]) -> str:
+    raw = str(payload.get("localBaseUrl") or "").strip()
+    if not raw:
+        return ""
+    try:
+        parsed = urlsplit(raw)
+    except ValueError:
+        return ""
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return ""
+    return urlunsplit((parsed.scheme, parsed.netloc, "", "", ""))
+
+
+def absolute_download_url(value: str, *, base_url: str = "") -> str:
+    raw = str(value or "").strip()
+    base = str(base_url or "").rstrip("/")
+    if raw.startswith("/api/download?"):
+        return f"{base}{raw}" if base else raw
+    if raw.startswith("http://") or raw.startswith("https://"):
+        try:
+            parsed = urlsplit(raw)
+        except ValueError:
+            return raw
+        if parsed.path == "/api/download" and parsed.query:
+            local_path = urlunsplit(("", "", parsed.path, parsed.query, ""))
+            return f"{base}{local_path}" if base else local_path
+    return raw
+
+
+def absolutize_pptx_links(content: str, *, base_url: str = "") -> str:
+    if not base_url:
+        return str(content or "")
+
+    def replace(match: re.Match[str]) -> str:
+        return absolute_download_url(match.group(0), base_url=base_url)
+
+    return re.sub(
+        r"(?:https?://[^)\s]+)?/api/download\?[^)\s#]*\bid=[0-9a-f]{32}",
+        replace,
+        str(content or ""),
+        flags=re.IGNORECASE,
+    )
+
+
+def remove_pptx_refusal_lines(content: str) -> str:
+    lines = []
+    for line in str(content or "").splitlines():
+        if PRESENTATION_REFUSAL_RE.search(line):
+            continue
+        lines.append(line)
+    return "\n".join(lines).strip()
+
+
+def ensure_pptx_response(payload: dict[str, Any], content: str, body: dict[str, Any], *, strip_refusal: bool = True) -> tuple[str, bool]:
+    base_url = pptx_download_base_url(payload)
+    if not presentation_intent_requested(payload):
+        return absolutize_pptx_links(content, base_url=base_url), False
+    if response_has_pptx_link(content):
+        return absolutize_pptx_links(content, base_url=base_url), False
+
+    result = pptx_result_from_messages(body)
+    created = False
+    if result is None:
+        try:
+            result = create_presentation_from_text(latest_user_query(payload), content)
+            created = True
+        except AppError:
+            return content, False
+
+    base = remove_pptx_refusal_lines(content) if created and strip_refusal else str(content or "").strip()
+    if not base:
+        base = "已根据你的要求生成 PPT。"
+    return f"{base.rstrip()}\n\n{pptx_link_text(result, base_url=base_url)}", created
+
+
 def append_tool_exchange(
     body: dict[str, Any],
     assistant_message: dict[str, Any],
@@ -748,7 +898,10 @@ def append_tool_exchange(
         )
     )
     raise_if_cancelled(cancel_event)
-    return {**body, "messages": messages}
+    next_body = {**body, "messages": messages}
+    if isinstance(next_body.get("tool_choice"), dict):
+        next_body["tool_choice"] = "auto"
+    return next_body
 
 
 def merge_stream_tool_call_deltas(accumulator: dict[int, dict[str, Any]], deltas: Any) -> None:
@@ -840,11 +993,15 @@ def call_deepseek(
         )
     usage = usage_totals or response_json.get("usage") or {}
     search_data = current_search_data()
+    final_content, fallback_created = ensure_pptx_response(payload, str(answer.get("content") or ""), body)
+    if fallback_created:
+        tool_call_count += 1
+        seen_tool_names.append("create_pptx")
     diagnostics = diagnostics_with_tools(prepared.diagnostics, count=tool_call_count, names=seen_tool_names)
     result = {
         "id": response_json.get("id"),
         "model": response_json.get("model", body["model"]),
-        "content": answer.get("content") or "",
+        "content": final_content,
         "reasoning": answer.get("reasoning_content") or "",
         "usage": usage,
         "diagnostics": diagnostics_with_usage(diagnostics_with_search(diagnostics, search_data), usage),
@@ -1001,6 +1158,14 @@ def stream_deepseek(
         raise_if_cancelled(cancel_event)
         search_data = current_search_data()
         search_for_response = search_for_client(search_data) if search_data else search_for_response
+        final_content, fallback_created = ensure_pptx_response(payload, content, body, strip_refusal=False)
+        if final_content != content:
+            delta = final_content[len(content) :] if final_content.startswith(content) else f"\n\n{final_content}"
+            content = final_content
+            emit_checked({"type": "content", "text": delta})
+        if fallback_created:
+            tool_call_count += 1
+            seen_tool_names.append("create_pptx")
         emit_checked({
             "type": "done",
             "id": response_id,

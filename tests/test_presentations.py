@@ -1,9 +1,18 @@
 from __future__ import annotations
 
 import unittest
+import tempfile
+from pathlib import Path
 
 from deepseek_mobile.core.errors import AppError, ErrorCode
-from deepseek_mobile.services.presentations import create_presentation, resolve_generated_file
+from deepseek_mobile.services import presentations
+from deepseek_mobile.services.presentations import (
+    create_presentation,
+    infer_presentation_title,
+    resolve_generated_file,
+    save_generated_file_to_downloads,
+    slides_from_outline_text,
+)
 from deepseek_mobile.services.tools import available_tool_definitions
 
 
@@ -37,6 +46,17 @@ class PresentationTests(unittest.TestCase):
         self.assertIsNone(resolve_generated_file(""))
         self.assertIsNone(resolve_generated_file("0" * 31))  # 长度不足 32
 
+    def test_save_generated_file_to_downloads_returns_exact_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            generated_dir = Path(tmp) / ".generated"
+            downloads_dir = Path(tmp) / "Downloads"
+            with unittest.mock.patch.object(presentations, "GENERATED_DIR", generated_dir):
+                result = create_presentation("路径测试", [{"title": "页", "bullets": ["内容"]}])
+                saved = save_generated_file_to_downloads(result["fileId"], filename="路径测试.pptx", downloads_dir=downloads_dir)
+
+            self.assertTrue(Path(saved["path"]).is_file())
+            self.assertEqual(Path(saved["path"]).name, "路径测试.pptx")
+
     def test_create_presentation_requires_title_and_slides(self) -> None:
         with self.assertRaises(AppError) as cm:
             create_presentation("", [{"title": "x", "bullets": ["a"]}])
@@ -45,8 +65,36 @@ class PresentationTests(unittest.TestCase):
             create_presentation("有标题", [])
 
     def test_create_pptx_registered_as_tool(self) -> None:
-        names = [tool["function"]["name"] for tool in available_tool_definitions()]
+        tools = available_tool_definitions()
+        names = [tool["function"]["name"] for tool in tools]
         self.assertIn("create_pptx", names)
+        create_pptx = next(tool for tool in tools if tool["function"]["name"] == "create_pptx")
+        self.assertIn("slides", create_pptx["function"]["description"])
+        self.assertIn("PowerPoint-style presentations", create_pptx["function"]["description"])
+
+    def test_text_fallback_marks_slides_skill_route(self) -> None:
+        with unittest.mock.patch.object(presentations, "create_presentation", return_value={"ok": True}) as mocked:
+            result = presentations.create_presentation_from_text("帮我做一个 Git PPT", "1. 封面 - Git\n2. 工作流")
+
+        self.assertEqual(result, {"ok": True})
+        self.assertIn("slides skill", mocked.call_args.kwargs["subtitle"])
+
+    def test_outline_text_can_seed_presentation_slides(self) -> None:
+        title = infer_presentation_title("帮我做一个介绍 git 的 PPT")
+        slides = slides_from_outline_text(
+            """
+            关于 Git 的 PPT 大纲：
+            1. 封面 - Git 介绍
+            2. 什么是版本控制？
+            3. Git 的核心概念
+            4. 常用命令
+            """,
+            topic=title,
+        )
+
+        self.assertEqual(title, "Git 介绍")
+        self.assertEqual(slides[0]["title"], "什么是版本控制？")
+        self.assertGreaterEqual(len(slides), 3)
 
 
 if __name__ == "__main__":

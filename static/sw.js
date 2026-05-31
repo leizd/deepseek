@@ -1,5 +1,5 @@
 const CACHE_PREFIX = "deepseek-mobile-";
-const CACHE_NAME = "deepseek-mobile-v166";
+const CACHE_NAME = "deepseek-mobile-v170";
 const APP_SHELL = [
   "/",
   "/index.html",

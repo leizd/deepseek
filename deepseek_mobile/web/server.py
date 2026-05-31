@@ -54,7 +54,7 @@ from deepseek_mobile.services.memory import (
     normalize_memory_scope,
     upsert_memory,
 )
-from deepseek_mobile.services.presentations import resolve_generated_file
+from deepseek_mobile.services.presentations import resolve_generated_file, save_generated_file_to_downloads
 from deepseek_mobile.services.projects import add_project_files, create_project, delete_project, list_projects
 from deepseek_mobile.services.reminders import create_reminder, delete_reminder, due_reminders, load_reminders
 from deepseek_mobile.services.title_generator import generate_title_payload
@@ -80,6 +80,7 @@ POST_ROUTES: dict[str, tuple[str, str]] = {
     "/share-target": ("Share target error", "handle_share_target_post"),
     "/api/auth/logout": ("Auth error", "handle_auth_logout"),
     "/api/conversations/search": ("Conversation search error", "handle_conversation_search"),
+    "/api/download-save": ("Download error", "handle_download_save"),
     "/api/file-text": ("File parse error", "handle_file_text"),
     "/api/file-chunk": ("File chunk error", "handle_file_chunk"),
     "/api/fetch-url": ("URL fetch error", "handle_fetch_url"),
@@ -380,9 +381,15 @@ class DeepSeekMobileHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def handle_download_save(self) -> None:
+        payload = self.read_json_body()
+        result = save_generated_file_to_downloads(str(payload.get("id") or ""), filename=str(payload.get("filename") or ""))
+        self.write_json(result)
+
     def handle_chat(self) -> None:
         # 视觉对话会把图片 base64 放进消息体，放宽到 16 MB（普通文本对话远小于此上限）
         payload = self.read_json_body(max_bytes=16_000_000)
+        payload = {**payload, "localBaseUrl": request_base_url(self)}
         if payload.get("stream"):
             preflight_deepseek_payload(payload)
             self.send_response(200)
@@ -992,6 +999,14 @@ def host_without_port(value: str) -> str:
     if host.startswith("["):
         return host.split("]", 1)[0].lstrip("[").lower()
     return host.split(":", 1)[0].lower()
+
+
+def request_base_url(handler: DeepSeekMobileHandler) -> str:
+    host_header = str(handler.headers.get("Host") or "").split(",", 1)[0].strip()
+    if host_header and "/" not in host_header and "\\" not in host_header and host_without_port(host_header) in allowed_auth_hosts():
+        return f"http://{host_header}"
+    port = server_port(handler.server.server_address)
+    return f"http://127.0.0.1:{port}" if port else "http://127.0.0.1"
 
 
 def allowed_auth_hosts() -> set[str]:

@@ -216,7 +216,12 @@ export function renderInline(value) {
   text = escapeHtml(text);
   // text is already HTML-escaped above, so href/label are safe in attribute/content context.
   // Re-escaping href would double-encode "&" in query strings (&amp; -> &amp;amp;) and break the link.
-  text = text.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, (_, label, href) => {
+  text = text.replace(/\[([^\]]+)\]\(((?:https?:\/\/|\/api\/download\?id=)[^)\s]+)\)/g, (_, label, href) => {
+    const downloadId = generatedDownloadIdFromHref(href);
+    if (downloadId) {
+      const localHref = `/api/download?id=${downloadId}`;
+      return `<a href="${localHref}" class="download-link" data-download-id="${downloadId}" download>${label}</a>`;
+    }
     return `<a href="${href}" target="_blank" rel="noopener noreferrer">${label}</a>`;
   });
   text = text.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
@@ -604,5 +609,18 @@ export function escapeHtml(value) {
 
 export function escapeAttribute(value) {
   return escapeHtml(value).replaceAll("`", "&#096;");
+}
+
+function generatedDownloadIdFromHref(href) {
+  const raw = String(href || "").replaceAll("&amp;", "&");
+  try {
+    const parsed = new URL(raw, "http://127.0.0.1");
+    if (parsed.pathname !== "/api/download") return "";
+    const id = parsed.searchParams.get("id") || "";
+    return /^[0-9a-f]{32}$/i.test(id) ? id : "";
+  } catch {
+    const match = raw.match(/(?:^|\/)api\/download\?[^#\s]*\bid=([0-9a-f]{32})(?:[&#\s]|$)/i);
+    return match ? match[1] : "";
+  }
 }
 

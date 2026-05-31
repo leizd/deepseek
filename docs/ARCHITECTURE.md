@@ -1,6 +1,6 @@
 ﻿# 架构说明
 
-适用版本：v1.6.6。
+适用版本：v1.7.0。
 
 DeepSeek Mobile 是一个本地优先的 AI 客户端：桌面端可通过内嵌 WebView 的本地应用窗口运行，手机端可通过 APK WebView 运行；Python HTTP 后端负责模型调用、搜索、长期记忆、文件解析、OCR、鉴权和静态资源服务。
 
@@ -20,7 +20,9 @@ DeepSeek Mobile 是一个本地优先的 AI 客户端：桌面端可通过内嵌
 | `deepseek_mobile/services/reminders.py` | 本地提醒队列、到期查询和轻量中文提醒解析。 |
 | `deepseek_mobile/services/projects.py` | 持久项目空间、项目元数据、项目文档库写入和删除。 |
 | `deepseek_mobile/services/search.py` | 搜索触发、多轮 Tavily 查询、结果聚合、缓存和 Prompt 格式化。 |
-| `deepseek_mobile/services/tools.py` | DeepSeek function calling 本地工具：受限数学计算、缓存文件搜索、公共网页二次精读、提醒、记忆、项目文件、数据转换、图表规格、多查询搜索对比和长期记忆建议。 |
+| `deepseek_mobile/services/tools.py` | DeepSeek function calling 本地工具：受限数学计算、缓存文件搜索、公共网页二次精读、提醒、记忆、项目文件、数据转换、图表规格、PPT 生成、多查询搜索对比和长期记忆建议。 |
+| `deepseek_mobile/services/presentations.py` | 本地 `.pptx` 生成与下载文件解析：`create_pptx` 工具用 `python-pptx` 生成真实 PowerPoint 文件，普通模型漏调工具时可从文本大纲兜底生成。 |
+| `deepseek_mobile/services/slides_skill.py` | 用户提供的 `slides` skill 参考文本与运行时路由提示，只在 PPT/幻灯片意图命中时注入本轮上下文。 |
 | `deepseek_mobile/services/files.py` | 文件文本抽取、分块、缓存和附件上下文检索。 |
 | `deepseek_mobile/services/ocr.py` | 可选的本地 OCR：Android 走 ML Kit，Windows 桌面可用系统 OCR 兜底，其它桌面环境走 Tesseract（按 `OCR_MODE` 生成 OpenCV 预处理候选、多 `psm` 重试、逐页 PDF 兜底）；支持扫描 PDF 转图识别和图片文字识别。 |
 | `deepseek_mobile/core/config.py` | 不可变设置、环境变量解析、兼容常量和 JSON 日志。 |
@@ -39,7 +41,7 @@ v0.8.4 的动效层仍由原生 CSS 和少量 DOM 状态完成：`static/styles.
 
 v0.8.5 继续保持前端本地状态边界：思考摘要只根据当前消息对象的 `streaming`、`content` 和完成时间渲染，不新增协议字段；“引用所选”在按钮按下阶段缓存最近有效的消息选区，避免浏览器焦点切换清空 selection 后丢失片段。v1.6.6 通过 `scheduleSelectionRefresh()` 在 `mouseup`、`keyup` 和 `touchend` 后延迟刷新选区，并让触屏 `touchstart` 不再阻断后续 click。
 
-v0.8.6 为前端消息对象增加可选 `reasoningEndedAt` 字段：首个正文 `content` 流事件到达时记录，用于把“思考用时”固定在思考阶段结束时；旧消息没有该字段时回退到 `completedAt`。`state.busy` 只表示有模型请求在途，发送、重生成、分叉和编辑仍会被拦截，但输入框、附件准备、语音输入、朗读和引用所选保持可用。
+v0.8.6 为前端消息对象增加可选 `reasoningEndedAt` 字段：首个正文 `content` 流事件到达时记录，用于把“思考用时”固定在思考阶段结束时；旧消息没有该字段时回退到 `completedAt`。v1.7.0 在运行中的消息上改用 `streamPhase` 区分思考、工具调用、搜索、Agent 工作和正文输出，并在请求启动时开启 Activity 标题刷新；流式期间标题显示整轮活跃耗时，完成后再回到固定的思考耗时。`state.busy` 只表示有模型请求在途，发送、重生成、分叉和编辑仍会被拦截，但输入框、附件准备、语音输入、朗读和引用所选保持可用。
 
 v0.9.0 的侧边栏重构仍保持零 JS 迁移：所有按钮 id 不变，只在 `index.html` 中移动入口位置，并通过 `styles.css` 把历史面板改为 header / list / footer 三段式 flex 布局。历史列表独立滚动，底栏固定在面板底部，历史项隐藏时间 meta 行以接近单行标题列表。
 
@@ -110,7 +112,7 @@ v0.7.1 增加持久项目空间。项目元数据写入 `.projects/{projectId}/p
 
 ## 本地工具调用
 
-v0.7.2 在 DeepSeek 请求层接入 function calling；v0.7.3 增加 `suggest_memory`。`build_deepseek_request()` 默认把 `python_eval`、`search_files`、`fetch_url`、`web_search`、`suggest_memory` 以及 v0.9.6 的提醒、记忆、项目文件、数据转换、图表和多查询搜索对比工具定义加入请求体；如果前端传入 `toolsEnabled: false`，则不发送工具定义。
+v0.7.2 在 DeepSeek 请求层接入 function calling；v0.7.3 增加 `suggest_memory`。`build_deepseek_request()` 默认把 `python_eval`、`search_files`、`fetch_url`、`web_search`、`suggest_memory` 以及 v0.9.6 的提醒、记忆、项目文件、数据转换、图表、PPT 生成和多查询搜索对比工具定义加入请求体；如果前端传入 `toolsEnabled: false`，则不发送工具定义。用户请求“做 PPT / 幻灯片 / 演示文稿”时，普通聊天会把本轮动态上下文标记为 `slides` skill（PowerPoint-style presentations，可参考 pptxgenjs / artifact tool 路线），并把 `tool_choice` 强制为 `create_pptx`；若上游最终仍未返回工具调用，`ensure_pptx_response()` 会把模型文本大纲交给 `presentations.create_presentation_from_text()` 兜底生成文件，并在最终回复追加下载链接。`web.server.handle_chat()` 会注入 `localBaseUrl`，最终回复里的 `/api/download` 会重写成当前本地服务地址，避免 WebView 把相对链接解析到外部站点。
 
 同步调用由 `call_deepseek()` 驱动工具循环：当 DeepSeek 返回 `tool_calls` 时，后端调用 `services.tools.execute_tool_calls()`，把结果作为 `role=tool` 消息追加到请求，再向 DeepSeek 发起下一轮请求。流式调用会在 SSE delta 中拼接 `tool_calls` 参数，执行工具后通过 `system_note` 告知前端，然后继续下一轮流式请求。v1.6.1 起，后端会在追加工具交换前把上游随机 `tool_call_id` 改为稳定 ID、规范化工具参数 JSON，并用稳定 JSON 序列化模型侧工具结果；`web_search` 单轮工具查询也会复用 `.search-cache`，减少工具结果后的 DeepSeek prompt cache 提前分叉。v1.6.0 起普通工具循环会把每次上游请求返回的 usage 累加后再生成最终 `usage` 与 cache diagnostics，避免最后一次强制最终回答请求覆盖前面工具回合的 cache hit 数据。`web_search` 工具会把 Tavily 单轮搜索结果压缩后返回给模型，并把搜索 rounds 作为前端进度事件持续更新。同一回合重复 query 会复用缓存结果。v0.9.6 起，安全的相邻工具调用会并行执行并按原顺序回填结果；`create_reminder`、`forget_memory`、`suggest_memory` 和共享搜索 timeline 的工具保持串行。两种模式都最多允许 5 轮工具调用，避免模型陷入无限循环。
 

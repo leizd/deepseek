@@ -1,10 +1,18 @@
 ﻿# DeepSeek Mobile
 
-![版本](https://img.shields.io/badge/version-1.6.6-blue)
+![版本](https://img.shields.io/badge/version-1.7.0-blue)
 ![Python](https://img.shields.io/badge/python-3.10%2B-green)
 ![许可证](https://img.shields.io/badge/license-MIT-black)
 
-DeepSeek Mobile 是一个手机优先、本地优先的 AI 客户端。桌面端可打包成双击即用的本地应用窗口，手机端可打包成 APK；本机 Python 后端负责转发 DeepSeek API、搜索、文件解析、OCR、长期记忆、持久项目文档库、本地工具调用和静态资源。v1.6.6 把前端换上 Gemini 风格的新皮肤，并修复桌面 WebView 启动鉴权、选区引用提问、当前时间上下文、多 Agent 历史回放丢答案、Markdown 链接和饼图渲染等问题；v1.6.5 强化多 Agent 模式：新增 token 预算护栏、Critic 自动修订环和动态 DAG 编排；v1.6.3 起 Windows exe 默认入口为内嵌 WebView 的本地桌面应用，不再需要跳转外部浏览器。
+DeepSeek Mobile 是一个手机优先、本地优先的 AI 客户端。桌面端可打包成双击即用的本地应用窗口，手机端可打包成 APK；本机 Python 后端负责转发 DeepSeek API、搜索、文件解析、OCR、长期记忆、持久项目文档库、本地工具调用和静态资源。v1.7.0 强化图片视觉理解、PPT 生成与本地下载，并修复流式调用工具/输出正文时 Activity 状态文案和计时不准的问题；v1.6.6 把前端换上 Gemini 风格的新皮肤，并修复桌面 WebView 启动鉴权、选区引用提问、当前时间上下文、多 Agent 历史回放丢答案、Markdown 链接和饼图渲染等问题；v1.6.3 起 Windows exe 默认入口为内嵌 WebView 的本地桌面应用，不再需要跳转外部浏览器。
+
+## v1.7.0 更新
+
+- 图片上传默认交给 `deepseek-v4-pro` 多模态理解，公式、图表和截图题不再只依赖 OCR 文字抽取；OCR 保留为本地降级路径。
+- PPT 请求接入 `slides` skill 与本地 `create_pptx` 工具，模型漏调工具时后端会基于大纲兜底生成 `.pptx`，下载链接会保存到系统下载目录。
+- 修复流式工具调用期间 Activity 标题计时停顿：运行中计时改为整轮活跃耗时，调用工具、搜索和 Agent 工作阶段都继续刷新。
+- 修复正文已经开始输出时仍显示“思考中”：流式状态会按阶段显示“思考中 / 调用工具中 / 搜索中 / Agent 工作中 / 生成中”。
+- Service Worker 缓存版本更新到 `deepseek-mobile-v170`，确保新的前端状态逻辑刷新后生效。
 
 ## v1.6.6 更新
 
@@ -255,7 +263,8 @@ python -m pip install -r requirements-ocr.txt
 - 支持选取用户或助手消息片段后直接“引用提问”，自动把所选片段带入下一条用户消息。
 - 支持项目空间 / 文档库：每个项目可以长期保存一组参考文档，进入项目对话后会自动参与附件检索，不受临时 `.file-cache` 清理策略影响。
 - 支持回答引用回链：模型使用 `[^F1-2]` 这类引用标记时，前端会渲染为可点击 pin，并打开对应文件片段预览。
-- 支持 DeepSeek function calling：模型可调用本地 `python_eval`、`search_files`、`fetch_url`、`web_search`、`suggest_memory`、提醒、记忆、项目文件、数据转换、图表和多查询对比工具，完成小型数学计算、跨临时附件/项目文档搜索、模型驱动联网搜索、搜索结果来源二次精读、Markdown 图表表格生成，以及受用户确认或作用域限制控制的本地记忆/提醒操作。
+- 支持 DeepSeek function calling：模型可调用本地 `python_eval`、`search_files`、`fetch_url`、`web_search`、`suggest_memory`、提醒、记忆、项目文件、数据转换、图表、PPT 生成和多查询对比工具，完成小型数学计算、跨临时附件/项目文档搜索、模型驱动联网搜索、搜索结果来源二次精读、Markdown 图表表格生成、真实 `.pptx` 文件生成，以及受用户确认或作用域限制控制的本地记忆/提醒操作。
+- 用户要求“做 PPT / 幻灯片 / 演示文稿”时，后端会把本轮标记为 `slides` skill（PowerPoint-style presentations，可参考 pptxgenjs / artifact tool 路线），并强制走本地 `create_pptx` 工具；如果上游模型只返回大纲没有调用工具，后端也会用该大纲兜底生成 `.pptx` 并追加下载链接。下载链接会重写到当前本地服务地址，前端点击时保存到系统下载目录。
 - 支持关闭 / 自动 / 强制三档联网搜索；自动模式由模型决定本轮是否联网，Tavily Key 可来自服务端环境变量，也可来自页面设置中的本轮请求。
 - 支持 Seek 助手：创建本地自定义助手，保存名称、简介、专属指令、开场提示和参考文件，并在对话中自动注入对应系统指令。
 - Seek 助手参考文件会随消息快照保存；继续生成、重新生成、编辑后重发和导出 Markdown 时都会使用消息当时的 Seek 和参考资料，而不是当前面板里选中的 Seek。

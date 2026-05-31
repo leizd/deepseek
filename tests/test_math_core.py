@@ -212,6 +212,29 @@ $$`, { streaming: true });
             """
         )
 
+    def test_local_download_links_render_as_clickable_anchors(self) -> None:
+        run_markdown_renderer(
+            r"""
+            const html = context.formatContent("[点击下载 PPT](/api/download?id=96c1bd73a3f9e6d462808416d0ae3e56)");
+            assert.ok(html.includes('<a href="/api/download?id=96c1bd73a3f9e6d462808416d0ae3e56"'));
+            assert.ok(html.includes('class="download-link"'));
+            assert.ok(html.includes('data-download-id="96c1bd73a3f9e6d462808416d0ae3e56"'));
+            assert.ok(html.includes('download>点击下载 PPT</a>'));
+            assert.ok(!html.includes('[/api/download'));
+            """
+        )
+
+    def test_absolute_download_links_render_as_local_download_anchors(self) -> None:
+        run_markdown_renderer(
+            r"""
+            const html = context.formatContent("[下载](https://chat.deepseek.com/api/download?id=96c1bd73a3f9e6d462808416d0ae3e56)");
+            assert.ok(html.includes('<a href="/api/download?id=96c1bd73a3f9e6d462808416d0ae3e56"'));
+            assert.ok(html.includes('class="download-link"'));
+            assert.ok(html.includes('data-download-id="96c1bd73a3f9e6d462808416d0ae3e56"'));
+            assert.ok(!html.includes('chat.deepseek.com/api/download'));
+            """
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -110,6 +110,39 @@ class ServerIntegrationTests(unittest.TestCase):
         self.assertIn("auth_token=", cookie)
         self.assertIn("Max-Age=0", cookie)
 
+    def test_download_serves_generated_pptx(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            deck = Path(tmp) / "deck.pptx"
+            deck.write_bytes(b"pptx-bytes")
+            with patch.object(server_module, "resolve_generated_file", return_value=deck):
+                status, data, response = self.request("GET", "/api/download?id=" + "a" * 32)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(data, b"pptx-bytes")
+        self.assertEqual(response.getheader("Content-Type"), "application/vnd.openxmlformats-officedocument.presentationml.presentation")
+        self.assertIn("presentation.pptx", response.getheader("Content-Disposition") or "")
+
+    def test_download_save_returns_local_path(self) -> None:
+        expected = {"ok": True, "filename": "deck.pptx", "path": r"C:\Users\me\Downloads\deck.pptx"}
+        with patch.object(server_module, "save_generated_file_to_downloads", return_value=expected) as save_file:
+            status, payload = self.request_json(
+                "POST",
+                "/api/download-save",
+                body={"id": "a" * 32, "filename": "deck.pptx"},
+            )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["path"], expected["path"])
+        save_file.assert_called_once_with("a" * 32, filename="deck.pptx")
+
+    def test_chat_injects_local_base_url_for_download_links(self) -> None:
+        with patch.object(server_module, "call_deepseek", return_value={"content": "ok"}) as mocked:
+            status, payload = self.request_json("POST", "/api/chat", body={"apiKey": "k", "messages": [{"role": "user", "content": "hi"}]})
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["content"], "ok")
+        self.assertEqual(mocked.call_args.args[0]["localBaseUrl"], f"http://127.0.0.1:{self.running_server.server_address[1]}")
+
     def test_memory_add_reports_conflict_and_can_replace(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             memory_dir = Path(tmp) / ".memory"

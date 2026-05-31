@@ -172,6 +172,7 @@ const initialConversationId = null;
 // Tracks streaming messages whose Activity panel was manually dismissed.
 const activityAutoDismissedMessageIds = new Set();
 const fallbackReasoningStepKey = "reasoning-fallback";
+const streamPhases = new Set(["thinking", "tool", "searching", "agent", "answering"]);
 
 const state = {
   conversations: initialConversations,
@@ -459,6 +460,7 @@ function setupEvents() {
   });
   window.addEventListener("beforeunload", stopSpeechPlayback);
   document.addEventListener("selectionchange", onSelectionChange);
+  document.addEventListener("click", onGeneratedDownloadDocumentClick, true);
   document.addEventListener("pointerup", scheduleSelectionRefresh, { passive: true });
   document.addEventListener("mouseup", scheduleSelectionRefresh, { passive: true });
   document.addEventListener("keyup", scheduleSelectionRefresh, { passive: true });
@@ -3649,6 +3651,7 @@ async function startAgentRunForMessage(assistantMessage, requestPayload) {
   assistantMessage.agentRunStatus = run.status || "created";
   assistantMessage.agentRunLastEventIndex = -1;
   assistantMessage.agentPreset = options.agentPreset;
+  setAssistantStreamPhase(assistantMessage, "agent");
   updateStreamingMessage(assistantMessage);
   persistMessages();
   await attachAgentRunStream(assistantMessage);
@@ -4109,6 +4112,8 @@ function prepareAssistantRequest(message, continuing) {
   message._continuing = Boolean(continuing);
   message._requestContentStart = String(message.content || "").length;
   message._requestReasoningStart = String(message.reasoning || "").length;
+  setAssistantStreamPhase(message, message.agentMode || message.agentRunId ? "agent" : message.content ? "answering" : "thinking");
+  startReasoningTick();
   state.abortController = new AbortController();
   state.interruptRequested = false;
   state.activeAssistantId = message.id;
@@ -4136,6 +4141,7 @@ function clearAssistantRequestMarkers(message) {
   delete message._continuing;
   delete message._requestContentStart;
   delete message._requestReasoningStart;
+  clearAssistantStreamPhase(message);
 }
 
 function interruptGeneration() {
@@ -6020,6 +6026,7 @@ function handleStreamEvent(event, assistantMessage) {
 
   if (event.type === "run_status") {
     assistantMessage.agentRunStatus = event.status || assistantMessage.agentRunStatus || "";
+    setAssistantStreamPhase(assistantMessage, event.status === "done" ? inferAssistantStreamPhase(assistantMessage) : "agent");
     if (event.status === "awaiting_plan" && !assistantMessage.content) {
       assistantMessage.content = "Agent 计划已生成，等待确认执行。";
     }
@@ -6031,6 +6038,7 @@ function handleStreamEvent(event, assistantMessage) {
   if (event.type === "agent_plan") {
     assistantMessage.agentRunPlan = Array.isArray(event.plan) ? event.plan : [];
     assistantMessage.agentAutoPlanLabel = event.label || "";
+    setAssistantStreamPhase(assistantMessage, "agent");
     updateStreamingMessage(assistantMessage);
     persistMessages();
     return;
@@ -6061,6 +6069,7 @@ function handleStreamEvent(event, assistantMessage) {
 
   if (event.type === "reasoning") {
     const text = event.text || "";
+    setAssistantStreamPhase(assistantMessage, "thinking");
     assistantMessage.reasoning += text;
     // 多 Agent 模式里 reasoning/content 会交错（Planner 输出 JSON → worker 又开始思考 → ...），
     // 第一次 content 就钉死的 reasoningEndedAt 不能反映"还在继续思考"。流式状态下收到新的
@@ -6076,6 +6085,7 @@ function handleStreamEvent(event, assistantMessage) {
   if (event.type === "system_note") {
     const text = String(event.text || "").trim();
     if (text) {
+      setAssistantStreamPhase(assistantMessage, streamPhaseForSystemNote(text, assistantMessage));
       if (!Array.isArray(assistantMessage.systemNotes)) {
         assistantMessage.systemNotes = [];
       }
@@ -6086,7 +6096,7 @@ function handleStreamEvent(event, assistantMessage) {
   }
 
   if (event.type === "content") {
-    markReasoningEnded(assistantMessage);
+    markAnswerStarted(assistantMessage);
     assistantMessage.content += event.text || "";
     updateStreamingMessage(assistantMessage);
     return;
@@ -6094,12 +6104,14 @@ function handleStreamEvent(event, assistantMessage) {
 
   if (event.type === "search") {
     assistantMessage.search = event.search || null;
+    setAssistantStreamPhase(assistantMessage, streamPhaseForSearch(event.search, assistantMessage));
     mergeSearchIntoTimeline(assistantMessage, assistantMessage.search);
     updateStreamingMessage(assistantMessage);
     return;
   }
 
   if (event.type === "agent") {
+    setAssistantStreamPhase(assistantMessage, "agent");
     appendTimelineAgent(assistantMessage, event);
     updateStreamingMessage(assistantMessage);
     return;
@@ -6111,6 +6123,7 @@ function handleStreamEvent(event, assistantMessage) {
     if (assistantMessage.streaming && assistantMessage.reasoningEndedAt) {
       delete assistantMessage.reasoningEndedAt;
     }
+    setAssistantStreamPhase(assistantMessage, "agent");
     appendTimelineAgentDelta(assistantMessage, event);
     updateStreamingMessage(assistantMessage);
     return;
@@ -6121,12 +6134,14 @@ function handleStreamEvent(event, assistantMessage) {
     if (assistantMessage.streaming && assistantMessage.reasoningEndedAt) {
       delete assistantMessage.reasoningEndedAt;
     }
+    setAssistantStreamPhase(assistantMessage, "agent");
     appendTimelineAgentReasoning(assistantMessage, event);
     updateStreamingMessage(assistantMessage);
     return;
   }
 
   if (event.type === "agent_note") {
+    setAssistantStreamPhase(assistantMessage, "agent");
     appendTimelineAgentNote(assistantMessage, event);
     updateStreamingMessage(assistantMessage);
     return;
@@ -6134,6 +6149,7 @@ function handleStreamEvent(event, assistantMessage) {
 
   if (event.type === "agent_search") {
     // v1.2.4：worker 阶段的搜索带 phase 转成 agent_search，避免不同 Agent 的 round 1/2 互相覆盖
+    setAssistantStreamPhase(assistantMessage, "searching");
     mergeAgentSearchIntoTimeline(assistantMessage, event);
     updateStreamingMessage(assistantMessage);
     return;
@@ -6162,7 +6178,7 @@ function handleStreamEvent(event, assistantMessage) {
       assistantMessage.reasoning = event.reasoning ?? assistantMessage.reasoning;
     }
     if (!hadContentBeforeDone && String(assistantMessage.content || "").trim()) {
-      markReasoningEnded(assistantMessage);
+      markAnswerStarted(assistantMessage);
     }
     assistantMessage.usage = event.usage || {};
     assistantMessage.search = event.search ?? assistantMessage.search;
@@ -6180,6 +6196,43 @@ function markReasoningEnded(message) {
   if (message && !message.reasoningEndedAt) {
     message.reasoningEndedAt = Date.now();
   }
+}
+
+function markAnswerStarted(message) {
+  setAssistantStreamPhase(message, "answering");
+  markReasoningEnded(message);
+}
+
+function setAssistantStreamPhase(message, phase) {
+  if (!message?.streaming || !streamPhases.has(phase)) return;
+  message.streamPhase = phase;
+}
+
+function clearAssistantStreamPhase(message) {
+  if (message) delete message.streamPhase;
+}
+
+function streamPhaseForSystemNote(text, message) {
+  if (/正在调用本地工具|正在调用.*工具|调用本地工具/.test(text)) return "tool";
+  if (/本地工具调用完成|工具调用次数已达上限/.test(text)) {
+    return String(message?.content || "").trim() ? "answering" : "thinking";
+  }
+  if (/搜索|检索/.test(text) && !/完成|失败/.test(text)) return "searching";
+  return inferAssistantStreamPhase(message);
+}
+
+function streamPhaseForSearch(search, message) {
+  if (search?.status === "searching" || searchRounds(search).some((round) => round.status === "searching")) return "searching";
+  return inferAssistantStreamPhase(message);
+}
+
+function inferAssistantStreamPhase(message) {
+  if (!message?.streaming) return "";
+  const phase = String(message.streamPhase || "");
+  if (streamPhases.has(phase)) return phase;
+  if (String(message.content || "").trim()) return "answering";
+  if (message.agentMode || message.agentRunId) return "agent";
+  return "thinking";
 }
 
 function updateStreamingMessage(message, { immediate = false } = {}) {
@@ -6405,9 +6458,9 @@ function syncLegacyReasoning(body, message) {
       if (!placeholder) {
         placeholder = document.createElement("div");
         placeholder.className = "reasoning-legacy-placeholder muted";
-        placeholder.textContent = "等待模型返回推理内容...";
         body.append(placeholder);
       }
+      placeholder.textContent = streamingActivityPlaceholder(message);
     } else {
       body.querySelector(":scope > .reasoning-legacy-placeholder")?.remove();
     }
@@ -6815,8 +6868,8 @@ function reasoningBodyHtml(message) {
     : "";
   if (message.reasoning) return `${noteHtml}${formatContent(message.reasoning, { streaming: message.streaming })}`;
   if (message.interrupted) return `${noteHtml}${formatContent("生成已中断。点击“继续生成”可以从当前位置接着完成回答。")}`;
-  if (noteHtml) return `${noteHtml}${message.streaming ? formatContent("等待模型返回推理内容...") : ""}`;
-  return formatContent("等待模型返回推理内容...");
+  if (noteHtml) return `${noteHtml}${message.streaming ? formatContent(streamingActivityPlaceholder(message)) : ""}`;
+  return formatContent(message.streaming ? streamingActivityPlaceholder(message) : "等待模型返回推理内容...");
 }
 
 function systemNotesForMessage(message) {
@@ -6829,7 +6882,8 @@ function reasoningSummaryText(message) {
   if (message.interrupted) return "已停止";
   const seconds = reasoningElapsedSeconds(message);
   if (message.streaming) {
-    return seconds > 0 ? `思考中 ${formatReasoningDuration(seconds)}` : "思考中";
+    const label = streamingSummaryLabel(message);
+    return seconds > 0 ? `${label} ${formatReasoningDuration(seconds)}` : label;
   }
   const searchCount = timelineSearchCount(message);
   const searchSuffix = searchCount ? ` · 搜索 ${searchCount} 次` : "";
@@ -6847,15 +6901,34 @@ function formatReasoningDuration(seconds) {
 
 function reasoningElapsedSeconds(message) {
   const startedAt = Number(message.createdAt) || 0;
+  // 流式期间展示的是整轮活跃耗时，不能被 reasoningEndedAt 截断；否则模型调用工具、
+  // 搜索或已经开始输出正文时，Activity 标题会停在开始输出前的秒数。
+  if (message.streaming && startedAt) {
+    return Math.max(0, Math.round((Date.now() - startedAt) / 1000));
+  }
   const endedAt = Number(message.reasoningEndedAt) || Number(message.completedAt) || 0;
   if (startedAt && endedAt && endedAt >= startedAt) {
     return Math.max(1, Math.round((endedAt - startedAt) / 1000));
   }
-  // 流式状态：返回从消息创建到现在的累计秒数
-  if (message.streaming && startedAt) {
-    return Math.max(0, Math.round((Date.now() - startedAt) / 1000));
-  }
   return 0;
+}
+
+function streamingSummaryLabel(message) {
+  const phase = inferAssistantStreamPhase(message);
+  if (phase === "tool") return "调用工具中";
+  if (phase === "searching") return "搜索中";
+  if (phase === "agent") return "Agent 工作中";
+  if (phase === "answering") return "生成中";
+  return "思考中";
+}
+
+function streamingActivityPlaceholder(message) {
+  const phase = inferAssistantStreamPhase(message);
+  if (phase === "tool") return "正在调用本地工具...";
+  if (phase === "searching") return "正在搜索资料...";
+  if (phase === "agent") return "Agent 正在工作...";
+  if (phase === "answering") return "正在输出正文...";
+  return "等待模型返回推理内容...";
 }
 
 function timelineSearchCount(message) {
@@ -8745,6 +8818,8 @@ function rerenderAgentPlanWorkbench(message) {
 
 async function onChatLogClick(event) {
   const clickTarget = event.target instanceof Element ? event.target : event.target?.parentElement;
+  if (await handleGeneratedDownloadClick(clickTarget, event)) return;
+
   const activityButton = clickTarget?.closest("button[data-activity-message]");
   if (activityButton) {
     openActivityPanel(activityButton.dataset.activityMessage || "");
@@ -8886,6 +8961,115 @@ async function onChatLogClick(event) {
   if (await handleContentBlockClick(clickTarget)) return;
 }
 
+function onGeneratedDownloadDocumentClick(event) {
+  const clickTarget = event.target instanceof Element ? event.target : event.target?.parentElement;
+  const link = generatedDownloadLinkForTarget(clickTarget);
+  if (!link) return;
+  event.preventDefault();
+  event.stopPropagation();
+  downloadGeneratedFile(link);
+}
+
+async function handleGeneratedDownloadClick(clickTarget, event) {
+  const link = generatedDownloadLinkForTarget(clickTarget);
+  if (!link) return false;
+  event?.preventDefault?.();
+  event?.stopPropagation?.();
+  await downloadGeneratedFile(link);
+  return true;
+}
+
+async function downloadGeneratedFile(link) {
+  const id = generatedDownloadIdFromHref(link.getAttribute("href") || "") || link.dataset.downloadId || "";
+  if (!/^[0-9a-f]{32}$/i.test(id)) {
+    showToast("下载链接无效或已损坏", { tone: "error" });
+    return;
+  }
+  const filename = pptxFilename(link.textContent || "presentation");
+  const saved = await saveGeneratedFileToDownloads(id, filename);
+  if (saved) return;
+
+  // Fallback for non-desktop browsers or locked-down filesystems.
+  try {
+    showToast("正在准备下载 PPT...");
+    const response = await apiFetch(generatedDownloadApiPath(id));
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(apiErrorMessage(response, data, `下载失败：${response.status}`));
+    }
+    const blob = await response.blob();
+    const filename = filenameFromContentDisposition(response.headers.get("Content-Disposition")) || "presentation.pptx";
+    downloadBlob(blob, filename);
+    showToast("PPT 下载已开始", { tone: "success" });
+  } catch (error) {
+    showToast(error.message || "下载失败，请重新生成 PPT", { tone: "error" });
+  }
+}
+
+async function saveGeneratedFileToDownloads(id, filename) {
+  try {
+    const response = await apiFetch("/api/download-save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, filename }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      if (response.status === 404) {
+        showToast("PPT 链接已过期，请重新生成", { tone: "error" });
+        return true;
+      }
+      throw new Error(apiErrorMessage(response, data, `保存失败：${response.status}`));
+    }
+    const path = data.path || data.filename || "下载目录";
+    showToast(`PPT 已保存到：${path}`, { tone: "success" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function generatedDownloadLinkForTarget(clickTarget) {
+  const link = clickTarget?.closest?.('a.download-link, a[href*="/api/download?"]');
+  if (!link) return null;
+  return generatedDownloadIdFromHref(link.getAttribute("href") || "") || link.dataset.downloadId ? link : null;
+}
+
+function generatedDownloadIdFromHref(href) {
+  const raw = String(href || "").replaceAll("&amp;", "&");
+  try {
+    const parsed = new URL(raw, window.location.origin);
+    if (parsed.pathname !== "/api/download") return "";
+    return /^[0-9a-f]{32}$/i.test(parsed.searchParams.get("id") || "") ? parsed.searchParams.get("id") : "";
+  } catch {
+    const match = raw.match(/(?:^|\/)api\/download\?[^#\s]*\bid=([0-9a-f]{32})(?:[&#\s]|$)/i);
+    return match ? match[1] : "";
+  }
+}
+
+function generatedDownloadApiPath(id) {
+  return `/api/download?id=${encodeURIComponent(id)}`;
+}
+
+function filenameFromContentDisposition(value) {
+  const header = String(value || "");
+  const encoded = header.match(/filename\*=UTF-8''([^;]+)/i);
+  if (encoded) {
+    try {
+      return pptxFilename(decodeURIComponent(encoded[1]));
+    } catch {
+      return pptxFilename(encoded[1]);
+    }
+  }
+  const plain = header.match(/filename="?([^";]+)"?/i);
+  return plain ? pptxFilename(plain[1]) : "";
+}
+
+function pptxFilename(value) {
+  const name = safeFilename(String(value || "").replace(/\.pptx$/i, "")) || "presentation";
+  return `${name}.pptx`;
+}
+
 // 公式 / 表格图表 / 代码块这些"内容块级"按钮，主聊天区（onChatLogClick）和右侧
 // Activity 面板（onActivityPanelClick）都会出现。抽成共享处理，避免 Activity 面板
 // 漏接导致点"复制 LaTeX""复制代码"完全静默无反应。返回 true 表示已消费该点击。
@@ -8949,6 +9133,7 @@ async function handleContentBlockClick(clickTarget) {
 
 async function onActivityPanelClick(event) {
   const clickTarget = event.target instanceof Element ? event.target : event.target?.parentElement;
+  if (await handleGeneratedDownloadClick(clickTarget, event)) return;
 
   const searchButton = clickTarget?.closest("button[data-search-results]");
   if (searchButton) {
@@ -9069,6 +9254,10 @@ function copyTextWithTextarea(text) {
 
 function downloadTextFile(text, filename, type = "text/plain;charset=utf-8") {
   const blob = new Blob([text], { type });
+  downloadBlob(blob, filename);
+}
+
+function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -9215,6 +9404,7 @@ function normalizeMessage(value) {
 
 function messageForStorage(message) {
   const stored = { ...message, search: cloneJsonSafe(message.search), streaming: false, timeline: normalizeTimeline(message.timeline) };
+  delete stored.streamPhase;
   settleStuckSearchSteps(stored, "搜索未完成（页面刷新或请求中断）");
   return stored;
 }

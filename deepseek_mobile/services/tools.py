@@ -30,6 +30,7 @@ from deepseek_mobile.services.memory import build_memory_suggestion, delete_memo
 from deepseek_mobile.services.presentations import create_presentation
 from deepseek_mobile.services.projects import list_projects, read_project
 from deepseek_mobile.services.reminders import create_reminder as create_local_reminder, load_reminders
+from deepseek_mobile.services.slides_skill import SLIDES_SKILL_DESCRIPTION, SLIDES_SKILL_NAME
 
 MAX_TOOL_CALLS_PER_RESPONSE = 6
 MAX_TOOL_ROUNDS = 3
@@ -454,16 +455,20 @@ def additional_tool_definitions() -> list[dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "create_pptx",
+                "strict": True,
                 "description": (
-                    "生成一个可下载的 PowerPoint (.pptx) 演示文稿。当用户要求做 PPT / 幻灯片 / 演示文稿时调用。"
-                    "传入标题和分页大纲；返回的 result 含 downloadUrl，你必须在最终回复里用 Markdown 链接"
+                    f"这是 DeepSeek Mobile 的 `{SLIDES_SKILL_NAME}` skill 本地执行入口：{SLIDES_SKILL_DESCRIPTION} "
+                    "生成一个可下载的 PowerPoint (.pptx) 演示文稿。只要用户要求做 PPT / 幻灯片 / 演示文稿，"
+                    "就必须调用本工具生成真实文件，绝不要用 Marp / Markdown 幻灯片大纲文本来代替。"
+                    "传入标题和分页大纲；按 `slides` skill 组织页面标题、要点和视觉辅助内容。"
+                    "返回的 result 含 downloadUrl，你必须在最终回复里用 Markdown 链接"
                     "（例如 [下载 PPT](downloadUrl)）把它交给用户，并简述每页内容。"
                 ),
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "title": {"type": "string", "description": "演示文稿主标题（用于封面页）。"},
-                        "subtitle": {"type": "string", "description": "封面副标题，可选。"},
+                        "subtitle": {"type": "string", "description": "封面副标题；没有就传空字符串。"},
                         "slides": {
                             "type": "array",
                             "description": "内容页大纲，按顺序排列。",
@@ -478,10 +483,12 @@ def additional_tool_definitions() -> list[dict[str, Any]]:
                                     },
                                 },
                                 "required": ["title", "bullets"],
+                                "additionalProperties": False,
                             },
                         },
                     },
-                    "required": ["title", "slides"],
+                    "required": ["title", "subtitle", "slides"],
+                    "additionalProperties": False,
                 },
             },
         },

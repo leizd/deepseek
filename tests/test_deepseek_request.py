@@ -48,6 +48,35 @@ class DeepSeekRequestTests(unittest.TestCase):
         )
         self.assertEqual(req.body["model"], "deepseek-v4-pro")
 
+    def test_ppt_request_forces_create_pptx_tool(self) -> None:
+        req = build_deepseek_request(
+            {
+                "apiKey": "k",
+                "model": "deepseek-v4-pro",
+                "messages": [{"role": "user", "content": "帮我做一个介绍 Git 的 PPT"}],
+            },
+            stream=True,
+        )
+
+        self.assertEqual(req.body["tool_choice"], {"type": "function", "function": {"name": "create_pptx"}})
+        self.assertIn("create_pptx", [tool["function"]["name"] for tool in req.body["tools"]])
+        dynamic_context = req.body["messages"][-1]["content"]
+        self.assertIn("[Skill: slides]", dynamic_context)
+        self.assertIn("pptxgenjs", dynamic_context)
+        self.assertIn("create_pptx", dynamic_context)
+
+    def test_non_ppt_request_does_not_include_slides_skill_context(self) -> None:
+        req = build_deepseek_request(
+            {
+                "apiKey": "k",
+                "model": "deepseek-v4-pro",
+                "messages": [{"role": "user", "content": "帮我总结这段话"}],
+            },
+            stream=False,
+        )
+
+        self.assertNotIn("[Skill: slides]", req.body["messages"][-1]["content"])
+
     def test_image_attachment_without_base64_stays_text_only(self) -> None:
         req = build_deepseek_request(
             {
@@ -546,6 +575,100 @@ class DeepSeekRequestTests(unittest.TestCase):
         self.assertEqual(result["diagnostics"]["toolNames"], ["python_eval"])
         self.assertEqual(assistant_messages[-1]["reasoning_content"], "Need exact factorial.")
         self.assertIn("120", tool_messages[0]["content"])
+
+    def test_call_deepseek_falls_back_to_local_pptx_when_model_skips_tool(self) -> None:
+        response = {
+            "id": "final-response",
+            "model": "deepseek-v4-pro",
+            "choices": [{"message": {"content": "我无法直接生成 .pptx 文件。\n\n1. 封面 - Git 介绍\n2. 什么是版本控制？"}}],
+            "usage": {},
+        }
+        ppt_result = {
+            "fileId": "a" * 32,
+            "filename": "Git介绍.pptx",
+            "slideCount": 3,
+            "downloadUrl": "/api/download?id=" + "a" * 32,
+        }
+        with (
+            patch("urllib.request.urlopen", return_value=FakeResponse(json.dumps(response).encode("utf-8"))),
+            patch.object(deepseek_client, "create_presentation_from_text", return_value=ppt_result),
+        ):
+            result = call_deepseek({"apiKey": "test", "model": "expert", "messages": [{"role": "user", "content": "帮我做一个介绍 Git 的 PPT"}]})
+
+        self.assertIn("[Git介绍.pptx](/api/download?id=", result["content"])
+        self.assertNotIn("无法直接生成", result["content"])
+        self.assertEqual(result["diagnostics"]["toolNames"], ["create_pptx"])
+
+    def test_ensure_pptx_response_surfaces_existing_tool_download(self) -> None:
+        body = {
+            "messages": [
+                {
+                    "role": "tool",
+                    "name": "create_pptx",
+                    "content": json.dumps(
+                        {
+                            "ok": True,
+                            "tool": "create_pptx",
+                            "result": {
+                                "filename": "deck.pptx",
+                                "slideCount": 5,
+                                "downloadUrl": "/api/download?id=" + "b" * 32,
+                            },
+                        }
+                    ),
+                }
+            ]
+        }
+
+        content, created = deepseek_client.ensure_pptx_response(
+            {"messages": [{"role": "user", "content": "请制作 PPT"}]},
+            "已经完成。",
+            body,
+        )
+
+        self.assertFalse(created)
+        self.assertIn("[deck.pptx](/api/download?id=", content)
+
+    def test_ensure_pptx_response_uses_local_absolute_download_url(self) -> None:
+        body = {
+            "messages": [
+                {
+                    "role": "tool",
+                    "name": "create_pptx",
+                    "content": json.dumps(
+                        {
+                            "ok": True,
+                            "tool": "create_pptx",
+                            "result": {
+                                "filename": "deck.pptx",
+                                "slideCount": 5,
+                                "downloadUrl": "/api/download?id=" + "c" * 32,
+                            },
+                        }
+                    ),
+                }
+            ]
+        }
+
+        content, created = deepseek_client.ensure_pptx_response(
+            {"localBaseUrl": "http://127.0.0.1:8000", "messages": [{"role": "user", "content": "请制作 PPT"}]},
+            "已经完成。",
+            body,
+        )
+
+        self.assertFalse(created)
+        self.assertIn("[deck.pptx](http://127.0.0.1:8000/api/download?id=", content)
+
+    def test_existing_official_domain_pptx_link_is_rewritten_local(self) -> None:
+        content, created = deepseek_client.ensure_pptx_response(
+            {"localBaseUrl": "http://127.0.0.1:8000", "messages": [{"role": "user", "content": "请制作 PPT"}]},
+            "下载：[deck.pptx](https://chat.deepseek.com/api/download?id=" + "d" * 32 + ")",
+            {"messages": []},
+        )
+
+        self.assertFalse(created)
+        self.assertIn("http://127.0.0.1:8000/api/download?id=" + "d" * 32, content)
+        self.assertNotIn("chat.deepseek.com/api/download", content)
 
     def test_call_deepseek_stabilizes_web_search_tool_exchange_for_cache(self) -> None:
         tool_response = {
