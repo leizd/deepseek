@@ -174,6 +174,10 @@ class Settings:
         return self.root / ".file-cache"
 
     @property
+    def generated_dir(self) -> Path:
+        return self.root / ".generated"
+
+    @property
     def memory_dir(self) -> Path:
         return self.root / ".memory"
 
@@ -363,6 +367,7 @@ SEARCH_CACHE_MAX_AGE_SECONDS = settings.search.cache_max_age_seconds
 MAX_UPLOAD_FILE_BYTES = settings.files.upload_file_max_bytes
 MAX_UPLOAD_BYTES = settings.files.upload_max_bytes
 FILE_CACHE_DIR = settings.file_cache_dir
+GENERATED_DIR = settings.generated_dir
 FILE_CHUNK_CHARS = settings.files.chunk_chars
 FILE_CHUNK_OVERLAP = settings.files.chunk_overlap
 FILE_FULL_CONTEXT_LIMIT = settings.files.full_context_limit

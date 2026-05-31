@@ -54,6 +54,7 @@ from deepseek_mobile.services.memory import (
     normalize_memory_scope,
     upsert_memory,
 )
+from deepseek_mobile.services.presentations import resolve_generated_file
 from deepseek_mobile.services.projects import add_project_files, create_project, delete_project, list_projects
 from deepseek_mobile.services.reminders import create_reminder, delete_reminder, due_reminders, load_reminders
 from deepseek_mobile.services.title_generator import generate_title_payload
@@ -74,7 +75,7 @@ SHARE_TARGET_TTL_SECONDS = 30 * 60
 MAX_SHARE_FIELD_CHARS = 12_000
 _SHARE_TARGET_LOCK = threading.RLock()
 _SHARE_TARGETS: dict[str, tuple[float, dict[str, Any]]] = {}
-GET_ROUTES: dict[str, str] = {"/api/config": "handle_config", "/api/memory": "handle_memory_list", "/api/share-target": "handle_share_target"}
+GET_ROUTES: dict[str, str] = {"/api/config": "handle_config", "/api/memory": "handle_memory_list", "/api/share-target": "handle_share_target", "/api/download": "handle_download"}
 POST_ROUTES: dict[str, tuple[str, str]] = {
     "/share-target": ("Share target error", "handle_share_target_post"),
     "/api/auth/logout": ("Auth error", "handle_auth_logout"),
@@ -362,6 +363,22 @@ class DeepSeekMobileHandler(SimpleHTTPRequestHandler):
 
     def handle_memory_list(self) -> None:
         self.write_json({"memories": load_memories()})
+
+    def handle_download(self) -> None:
+        # serve 由 create_pptx 工具生成的 .pptx。已过 require_api_auth（GET_ROUTES 分支统一鉴权）；
+        # id 经 resolve_generated_file 校验为 32 位十六进制，杜绝路径遍历。
+        file_id = parse_qs(urlsplit(self.path).query).get("id", [""])[0]
+        path = resolve_generated_file(file_id)
+        if path is None:
+            raise AppError("文件不存在或已过期", code=ErrorCode.NOT_FOUND, status=404)
+        data = path.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/vnd.openxmlformats-officedocument.presentationml.presentation")
+        self.send_header("Content-Disposition", 'attachment; filename="presentation.pptx"')
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(data)
 
     def handle_chat(self) -> None:
         # 视觉对话会把图片 base64 放进消息体，放宽到 16 MB（普通文本对话远小于此上限）

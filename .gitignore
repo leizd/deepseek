@@ -2,6 +2,7 @@
 .launcher-config.json
 .launcher-config.json.tmp
 .file-cache/
+.generated/
 .agent-runs/
 .memory/
 .projects/

@@ -7,6 +7,7 @@
 ### 新增
 
 - **图片视觉理解（多模态）**：上传图片后默认直接交给 `deepseek-v4-pro` 视觉模型理解（读图、看图答题、识别公式 / 图表），不再只靠 OCR 提取纯文字。前端只给本轮最新提问的图片附上 base64，后端在消息组装层（`normalize_chat_messages`）把它转成 OpenAI 兼容的多模态 `content`（`text` + `image_url`）并强制走 v4-pro；普通对话和多 Agent worker 共用同一组装路径，两者都能读图。历史轮的图片退回 OCR 文字摘要，省 token 且保持长历史的 prompt cache 前缀稳定。OCR（Tesseract + OpenCV 预处理）保留为视觉不可用 / 纯文字提取时的降级路径。`/api/chat` 请求体上限相应放宽到 16 MB。
+- **生成 PPT（`create_pptx` 工具）**：新增 function-calling 工具，模型识别“做 PPT / 幻灯片 / 演示文稿”意图时调用，按传入的标题 + 分页大纲用 `python-pptx` 渲染真实 `.pptx`，存入 `.generated/`，通过新增的 `GET /api/download?id=...`（沿用 `require_api_auth` 鉴权、32 位十六进制 id 防路径遍历、6 小时 TTL 清理）交付，模型在回复里以 Markdown 链接给出下载地址——无需任何前端改动。新增依赖 `python-pptx`。
 
 ### 优化
 

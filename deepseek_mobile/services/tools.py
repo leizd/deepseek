@@ -27,6 +27,7 @@ from deepseek_mobile.core.errors import AppError, ErrorCode
 from deepseek_mobile.core.utils import query_tokens, score_chunk
 from deepseek_mobile.services.files import cosine_similarity, extract_html_text, load_cached_file, local_text_vector
 from deepseek_mobile.services.memory import build_memory_suggestion, delete_memories_by_query, normalize_memory_scope, retrieve_memories
+from deepseek_mobile.services.presentations import create_presentation
 from deepseek_mobile.services.projects import list_projects, read_project
 from deepseek_mobile.services.reminders import create_reminder as create_local_reminder, load_reminders
 
@@ -449,6 +450,41 @@ def additional_tool_definitions() -> list[dict[str, Any]]:
                 },
             },
         },
+        {
+            "type": "function",
+            "function": {
+                "name": "create_pptx",
+                "description": (
+                    "生成一个可下载的 PowerPoint (.pptx) 演示文稿。当用户要求做 PPT / 幻灯片 / 演示文稿时调用。"
+                    "传入标题和分页大纲；返回的 result 含 downloadUrl，你必须在最终回复里用 Markdown 链接"
+                    "（例如 [下载 PPT](downloadUrl)）把它交给用户，并简述每页内容。"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string", "description": "演示文稿主标题（用于封面页）。"},
+                        "subtitle": {"type": "string", "description": "封面副标题，可选。"},
+                        "slides": {
+                            "type": "array",
+                            "description": "内容页大纲，按顺序排列。",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "title": {"type": "string", "description": "本页标题。"},
+                                    "bullets": {
+                                        "type": "array",
+                                        "items": {"type": "string"},
+                                        "description": "本页要点列表，每个元素一条要点。",
+                                    },
+                                },
+                                "required": ["title", "bullets"],
+                            },
+                        },
+                    },
+                    "required": ["title", "slides"],
+                },
+            },
+        },
     ]
 
 
@@ -512,6 +548,12 @@ def execute_tool_call(
             )
         elif name == "generate_chart":
             result = generate_chart(str(arguments.get("type") or "bar"), str(arguments.get("title") or ""), arguments.get("data"))
+        elif name == "create_pptx":
+            result = create_presentation(
+                str(arguments.get("title") or ""),
+                arguments.get("slides"),
+                subtitle=str(arguments.get("subtitle") or ""),
+            )
         else:
             raise AppError(f"Unsupported tool: {name}", code=ErrorCode.INVALID_PAYLOAD)
         return {"ok": True, "tool": name, "result": result}
