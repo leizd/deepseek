@@ -59,6 +59,7 @@ def add_project_files(
     files: list[dict[str, Any]],
     *,
     ocr_enabled: bool | None = None,
+    ocr_api_key: str | None = None,
 ) -> list[dict[str, Any]]:
     project = require_project(project_id)
     documents = list(project.get("documents") or [])
@@ -73,6 +74,7 @@ def add_project_files(
             str(file_info.get("content_type") or "application/octet-stream"),
             raw_data if isinstance(raw_data, bytes) else b"",
             ocr_enabled=ocr_enabled,
+            ocr_api_key=ocr_api_key,
             project_id=str(project["id"]),
         )
         document = project_document_from_extracted(extracted)
@@ -95,7 +97,9 @@ def project_document_from_extracted(extracted: dict[str, Any]) -> dict[str, Any]
         "kind": str(extracted.get("kind") or "text"),
         "fileId": str(extracted.get("fileId") or ""),
         "projectId": str(extracted.get("projectId") or ""),
+        "sourceAvailable": bool(extracted.get("sourceAvailable")),
         "preview": str(extracted.get("preview") or "")[:1800],
+        "pageCount": int(extracted.get("pageCount") or 0),
         "charCount": int(extracted.get("charCount") or 0),
         "chunkCount": int(extracted.get("chunkCount") or 0),
         "chunked": bool(extracted.get("chunked")),
@@ -172,7 +176,9 @@ def normalize_documents(value: Any) -> list[dict[str, Any]]:
                 "kind": str(item.get("kind") or "text"),
                 "fileId": file_id,
                 "projectId": project_id,
+                "sourceAvailable": bool(item.get("sourceAvailable")),
                 "preview": str(item.get("preview") or "")[:1800],
+                "pageCount": int(item.get("pageCount") or 0),
                 "charCount": int(item.get("charCount") or 0),
                 "chunkCount": int(item.get("chunkCount") or 0),
                 "chunked": bool(item.get("chunked")),

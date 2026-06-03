@@ -25,8 +25,10 @@ from urllib.parse import urljoin, urlsplit, urlunsplit
 from deepseek_mobile.core.config import FILE_CACHE_DIR, PROJECTS_DIR, SEARCH_CACHE_DIR, SEARCH_CACHE_MAX_AGE_SECONDS, TAVILY_TIMEOUT_SECONDS
 from deepseek_mobile.core.errors import AppError, ErrorCode
 from deepseek_mobile.core.utils import query_tokens, score_chunk
+from deepseek_mobile.services.documents import create_document
 from deepseek_mobile.services.files import cosine_similarity, extract_html_text, load_cached_file, local_text_vector
 from deepseek_mobile.services.memory import build_memory_suggestion, delete_memories_by_query, normalize_memory_scope, retrieve_memories
+from deepseek_mobile.services.mindmaps import create_mindmap
 from deepseek_mobile.services.presentations import create_presentation
 from deepseek_mobile.services.projects import list_projects, read_project
 from deepseek_mobile.services.reminders import create_reminder as create_local_reminder, load_reminders
@@ -154,6 +156,27 @@ class PublicUrlTarget:
     host_header: str
     request_target: str
     address: str
+
+
+def mindmap_node_schema(depth: int = 0, max_depth: int = 4) -> dict[str, Any]:
+    child_items: dict[str, Any]
+    if depth >= max_depth:
+        child_items = {"type": "object", "properties": {}, "additionalProperties": False}
+    else:
+        child_items = mindmap_node_schema(depth + 1, max_depth)
+    return {
+        "type": "object",
+        "properties": {
+            "label": {"type": "string", "description": "Node label."},
+            "children": {
+                "type": "array",
+                "items": child_items,
+                "description": "Child nodes. Use an empty array when there are no children.",
+            },
+        },
+        "required": ["label", "children"],
+        "additionalProperties": False,
+    }
 
 
 def available_tool_definitions() -> list[dict[str, Any]]:
@@ -437,6 +460,39 @@ def additional_tool_definitions() -> list[dict[str, Any]]:
         {
             "type": "function",
             "function": {
+                "name": "create_mindmap",
+                "strict": True,
+                "description": (
+                    "Generate a downloadable SVG diagram (a clustered top-down flowchart) from a structured node tree. "
+                    "Use when the user asks to draw, create, make, organize, or export a mind map, concept map, "
+                    "comparison diagram, or grouped flowchart. "
+                    "STRUCTURE controls the look: each TOP-LEVEL node becomes a titled, colored group container "
+                    "(its label is the container title); that node's nested children are laid out top-to-bottom inside the "
+                    "container and connected by downward arrows (parent → child). So make each major group / option / "
+                    "category / phase a top-level node, and put its steps, details, or sub-points as nested children to show flow. "
+                    "Aim for 2-6 groups; nest children as deep as the content needs. "
+                    "Do not answer with only Mermaid or plain Markdown when the user asks for a real diagram file. "
+                    "The result contains downloadUrl; include it as a Markdown image (![](downloadUrl)) or link in the final answer."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string", "description": "Diagram title, rendered as a centered header above the groups."},
+                        "subtitle": {"type": "string", "description": "Optional short subtitle; pass an empty string when absent."},
+                        "nodes": {
+                            "type": "array",
+                            "description": "Top-level groups; each becomes a titled container, and its nested children flow top-down with arrows inside it.",
+                            "items": mindmap_node_schema(),
+                        },
+                    },
+                    "required": ["title", "subtitle", "nodes"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "compare_search_results",
                 "strict": True,
                 "description": "Run up to two related web_search queries, deduplicate URLs, and return citation-ready comparison results.",
@@ -461,6 +517,8 @@ def additional_tool_definitions() -> list[dict[str, Any]]:
                     "生成一个可下载的 PowerPoint (.pptx) 演示文稿。只要用户要求做 PPT / 幻灯片 / 演示文稿，"
                     "就必须调用本工具生成真实文件，绝不要用 Marp / Markdown 幻灯片大纲文本来代替。"
                     "传入标题和分页大纲；按 `slides` skill 组织页面标题、要点和视觉辅助内容。"
+                    "优先生成 6-10 页、每页 3-6 个短要点，并为关键页面选择 layout（cards/process/comparison/summary 等），"
+                    "避免只做单调 bullet 列表。"
                     "返回的 result 含 downloadUrl，你必须在最终回复里用 Markdown 链接"
                     "（例如 [下载 PPT](downloadUrl)）把它交给用户，并简述每页内容。"
                 ),
@@ -481,13 +539,91 @@ def additional_tool_definitions() -> list[dict[str, Any]]:
                                         "items": {"type": "string"},
                                         "description": "本页要点列表，每个元素一条要点。",
                                     },
+                                    "layout": {
+                                        "type": "string",
+                                        "enum": ["auto", "cards", "process", "timeline", "comparison", "quote", "summary", "bullets"],
+                                        "description": "可选视觉版式。优先用 cards/process/comparison/summary 等丰富页面；不确定传 auto。",
+                                    },
                                 },
-                                "required": ["title", "bullets"],
+                                "required": ["title", "bullets", "layout"],
                                 "additionalProperties": False,
                             },
                         },
                     },
                     "required": ["title", "subtitle", "slides"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "create_document",
+                "strict": True,
+                "description": (
+                    "生成一个可下载的精排文档：Word (.docx) 或 PDF。"
+                    "当用户要求写 / 做 / 生成 Word、Word 文档、.docx、PDF、PDF 文档、报告、说明书、方案、"
+                    "信函、简历、论文、合同、手册等成文文件时，必须调用本工具生成真实文件，"
+                    "不要只在聊天里贴正文或用 Markdown 代替。"
+                    "用 format 选择格式：用户说 Word 用 docx，说 PDF 用 pdf；没指定时正式文档/报告优先 docx。"
+                    "把内容组织成有层级的章节：每个 section 一个 heading，配 body 正文段落、bullets 要点列表，"
+                    "以及可选的 table 表格（适合放对比、指标、清单等结构化数据，能显著提升美观度）。"
+                    "优先写成结构清晰、段落充实的正文，而不是只有零散要点。"
+                    "返回的 result 含 downloadUrl，你必须在最终回复里用 Markdown 链接"
+                    "（例如 [下载文档](downloadUrl)）把它交给用户，并简述文档的标题与章节结构。"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "format": {
+                            "type": "string",
+                            "enum": ["docx", "pdf"],
+                            "description": "文档格式：docx = Word 文档，pdf = PDF 文档。",
+                        },
+                        "title": {"type": "string", "description": "文档主标题（用于标题块和文件名）。"},
+                        "subtitle": {"type": "string", "description": "副标题 / 署名 / 日期等；没有就传空字符串。"},
+                        "sections": {
+                            "type": "array",
+                            "description": "正文章节，按顺序排列。",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "heading": {"type": "string", "description": "本章节标题。"},
+                                    "body": {
+                                        "type": "array",
+                                        "items": {"type": "string"},
+                                        "description": "正文段落，每个元素一段；不需要就传空数组。",
+                                    },
+                                    "bullets": {
+                                        "type": "array",
+                                        "items": {"type": "string"},
+                                        "description": "要点列表，每个元素一条；不需要就传空数组。",
+                                    },
+                                    "table": {
+                                        "type": "object",
+                                        "description": "可选表格；不需要时 headers 和 rows 都传空数组。",
+                                        "properties": {
+                                            "headers": {
+                                                "type": "array",
+                                                "items": {"type": "string"},
+                                                "description": "表头单元格文本；没有表格就传空数组。",
+                                            },
+                                            "rows": {
+                                                "type": "array",
+                                                "items": {"type": "array", "items": {"type": "string"}},
+                                                "description": "数据行，每行是一组单元格文本；没有表格就传空数组。",
+                                            },
+                                        },
+                                        "required": ["headers", "rows"],
+                                        "additionalProperties": False,
+                                    },
+                                },
+                                "required": ["heading", "body", "bullets", "table"],
+                                "additionalProperties": False,
+                            },
+                        },
+                    },
+                    "required": ["format", "title", "subtitle", "sections"],
                     "additionalProperties": False,
                 },
             },
@@ -555,10 +691,23 @@ def execute_tool_call(
             )
         elif name == "generate_chart":
             result = generate_chart(str(arguments.get("type") or "bar"), str(arguments.get("title") or ""), arguments.get("data"))
+        elif name == "create_mindmap":
+            result = create_mindmap(
+                str(arguments.get("title") or ""),
+                arguments.get("nodes"),
+                subtitle=str(arguments.get("subtitle") or ""),
+            )
         elif name == "create_pptx":
             result = create_presentation(
                 str(arguments.get("title") or ""),
                 arguments.get("slides"),
+                subtitle=str(arguments.get("subtitle") or ""),
+            )
+        elif name == "create_document":
+            result = create_document(
+                str(arguments.get("format") or "docx"),
+                str(arguments.get("title") or ""),
+                arguments.get("sections"),
                 subtitle=str(arguments.get("subtitle") or ""),
             )
         else:
@@ -665,9 +814,76 @@ def tool_result_message(tool_call: dict[str, Any], output: dict[str, Any]) -> di
 
 def stable_tool_output_for_model(output: dict[str, Any]) -> dict[str, Any]:
     tool_name = str(output.get("tool") or "")
-    if tool_name not in {"web_search", "compare_search_results"}:
+    if tool_name in {"web_search", "compare_search_results"}:
+        return strip_volatile_tool_fields(output)
+    if tool_name in {"create_pptx", "create_document", "create_mindmap"}:
+        return compact_artifact_tool_output(output)
+    return output
+
+
+def compact_artifact_tool_output(output: dict[str, Any]) -> dict[str, Any]:
+    if output.get("ok") is not True:
         return output
-    return strip_volatile_tool_fields(output)
+    result = output.get("result")
+    if not isinstance(result, dict):
+        return output
+    tool_name = str(output.get("tool") or "")
+    compact: dict[str, Any] = {}
+    for key in ("fileId", "filename", "downloadUrl", "title"):
+        if result.get(key) not in (None, ""):
+            compact[key] = result[key]
+    if tool_name == "create_pptx":
+        if result.get("slideCount") not in (None, ""):
+            compact["slideCount"] = result["slideCount"]
+        outline = result.get("outline")
+        if isinstance(outline, list):
+            compact["outline"] = [
+                {
+                    key: item[key]
+                    for key in ("page", "title", "layout")
+                    if isinstance(item, dict) and item.get(key) not in (None, "")
+                }
+                for item in outline[:20]
+                if isinstance(item, dict)
+            ]
+    elif tool_name == "create_document":
+        for key in ("format", "sectionCount"):
+            if result.get(key) not in (None, ""):
+                compact[key] = result[key]
+        outline = result.get("outline")
+        if isinstance(outline, list):
+            compact["outline"] = [
+                {
+                    key: item[key]
+                    for key in ("index", "heading", "hasTable")
+                    if isinstance(item, dict) and item.get(key) not in (None, "")
+                }
+                for item in outline[:40]
+                if isinstance(item, dict)
+            ]
+    elif tool_name == "create_mindmap":
+        for key in ("format", "nodeCount"):
+            if result.get(key) not in (None, ""):
+                compact[key] = result[key]
+        outline = result.get("outline")
+        if isinstance(outline, list):
+            compact["outline"] = _compact_mindmap_outline(outline)
+    return {"ok": True, "tool": tool_name, "result": compact}
+
+
+def _compact_mindmap_outline(nodes: list[Any], *, depth: int = 0) -> list[dict[str, Any]]:
+    if depth >= 4:
+        return []
+    result: list[dict[str, Any]] = []
+    for item in nodes[:30]:
+        if not isinstance(item, dict):
+            continue
+        entry = {"label": str(item.get("label") or "")[:80]}
+        children = item.get("children")
+        if isinstance(children, list) and children:
+            entry["children"] = _compact_mindmap_outline(children, depth=depth + 1)
+        result.append(entry)
+    return result
 
 
 def strip_volatile_tool_fields(value: Any) -> Any:
@@ -815,6 +1031,7 @@ def project_document_for_tool(document: dict[str, Any]) -> dict[str, Any]:
         "fileId": str(document.get("fileId") or ""),
         "projectId": str(document.get("projectId") or ""),
         "kind": str(document.get("kind") or "text"),
+        "pageCount": int(document.get("pageCount") or 0),
         "charCount": int(document.get("charCount") or 0),
         "chunkCount": int(document.get("chunkCount") or 0),
         "preview": str(document.get("preview") or "")[:500],

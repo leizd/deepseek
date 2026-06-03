@@ -44,6 +44,16 @@ PPTX_EXTENSION = ".pptx"
 HTML_EXTENSIONS = {".html", ".htm"}
 VECTOR_DIMENSIONS = 64
 MAX_ZIP_COMPRESSION_RATIO = 100
+FILE_READER_DEFAULT_CHUNKS = 6
+FILE_READER_MAX_CHUNKS = 12
+FILE_SOURCE_SUFFIX = ".source"
+FILE_PAGE_TEXT_CHARS = 40_000
+FILE_PAGE_IMAGE_DEFAULT_SCALE = 1.6
+FILE_PAGE_IMAGE_MIN_SCALE = 0.3
+FILE_PAGE_IMAGE_MAX_SCALE = 3.0
+FILE_PAGE_LAYOUT_MAX_WORDS = 6_000
+FILE_PAGE_SEARCH_MAX_RESULTS = 200
+FILE_PAGE_SEARCH_SNIPPET_CHARS = 90
 
 
 def build_attachment_context(attachments: list[Any], query: str) -> str:
@@ -272,6 +282,7 @@ def extract_uploaded_file(
     data: bytes,
     *,
     ocr_enabled: bool | None = None,
+    ocr_api_key: str | None = None,
     project_id: str | None = None,
 ) -> dict[str, Any]:
     extension = Path(filename.lower()).suffix
@@ -291,10 +302,10 @@ def extract_uploaded_file(
         text = extract_epub_text(data)
         kind = "epub"
     elif extension == ".pdf":
-        text = extract_pdf_text(data, ocr_enabled=ocr_enabled)
+        text = extract_pdf_text(data, ocr_enabled=ocr_enabled, ocr_api_key=ocr_api_key)
         kind = "pdf"
     elif is_image_file(extension, content_type):
-        text = extract_image_text(data, ocr_enabled=ocr_enabled)
+        text = extract_image_text(data, ocr_enabled=ocr_enabled, ocr_api_key=ocr_api_key)
         kind = "image"
     elif is_text_file(extension, content_type, data):
         text = extract_html_text(data) if extension in HTML_EXTENSIONS else decode_text_file(data)
@@ -311,7 +322,20 @@ def extract_uploaded_file(
         raise AppError("No readable text found in this file", status=422)
 
     chunks = chunk_text(text)
-    file_id = cache_file_chunks(filename, content_type, len(data), kind, text, chunks, source_bytes=data, project_id=project_id)
+    page_count = infer_original_page_count(kind, data)
+    page_texts = page_texts_for_cache(kind, data, text, page_count=page_count)
+    file_id = cache_file_chunks(
+        filename,
+        content_type,
+        len(data),
+        kind,
+        text,
+        chunks,
+        source_bytes=data,
+        project_id=project_id,
+        page_count=page_count,
+        page_texts=page_texts,
+    )
 
     return {
         "name": filename,
@@ -320,8 +344,10 @@ def extract_uploaded_file(
         "kind": kind,
         "fileId": file_id,
         "projectId": project_id or "",
+        "sourceAvailable": True,
         "text": text[:FILE_PREVIEW_CHARS].rstrip(),
         "preview": text[:FILE_PREVIEW_CHARS].rstrip(),
+        "pageCount": page_count,
         "charCount": len(text),
         "chunkCount": len(chunks),
         "chunked": len(chunks) > 1,
@@ -334,7 +360,55 @@ def is_image_file(extension: str, content_type: str) -> bool:
     return extension in IMAGE_EXTENSIONS or normalized_type.startswith("image/")
 
 
-def extract_image_text(data: bytes, *, ocr_enabled: bool | None = None) -> str:
+def infer_original_page_count(kind: str, data: bytes) -> int:
+    normalized_kind = str(kind or "").lower()
+    if normalized_kind == "pdf":
+        return count_pdf_pages(data)
+    if normalized_kind == "image":
+        return 1
+    return 0
+
+
+def count_pdf_pages(data: bytes) -> int:
+    if not data:
+        return 0
+    matches = re.findall(rb"/Type\s*/Page\b", data)
+    if matches:
+        return len(matches)
+    return 1 if data.lstrip().startswith(b"%PDF") else 0
+
+
+def page_texts_for_cache(kind: str, data: bytes, text: str, *, page_count: int = 0) -> list[dict[str, Any]]:
+    if str(kind or "").lower() == "pdf":
+        try:
+            return extract_pdf_page_texts_native(data)
+        except AppError:
+            return fallback_page_texts_from_text(text, page_count=page_count)
+    if str(kind or "").lower() == "image":
+        return [{"page": 1, "text": str(text or "").strip()}] if str(text or "").strip() else []
+    return []
+
+
+def fallback_page_texts_from_text(text: str, *, page_count: int = 0) -> list[dict[str, Any]]:
+    normalized = normalize_extracted_text(str(text or ""))
+    if not normalized:
+        return []
+    count = max(1, int(page_count or 1))
+    if count <= 1:
+        return [{"page": 1, "text": normalized}]
+    length = len(normalized)
+    per_page = max(1, length // count)
+    pages = []
+    for index in range(count):
+        start = index * per_page
+        end = length if index == count - 1 else min(length, (index + 1) * per_page)
+        page_text = normalized[start:end].strip()
+        if page_text:
+            pages.append({"page": index + 1, "text": page_text})
+    return pages
+
+
+def extract_image_text(data: bytes, *, ocr_enabled: bool | None = None, ocr_api_key: str | None = None) -> str:
     enabled = settings.ocr.enabled if ocr_enabled is None else ocr_enabled
     if not enabled:
         raise AppError(
@@ -342,7 +416,7 @@ def extract_image_text(data: bytes, *, ocr_enabled: bool | None = None) -> str:
             code=ErrorCode.OCR_REQUIRED,
             status=415,
         )
-    return extract_image_ocr(data)
+    return extract_image_ocr(data, api_key=ocr_api_key)
 
 
 def chunk_text(text: str) -> list[dict[str, Any]]:
@@ -387,6 +461,8 @@ def cache_file_chunks(
     *,
     source_bytes: bytes,
     project_id: str | None = None,
+    page_count: int = 0,
+    page_texts: list[dict[str, Any]] | None = None,
 ) -> str:
     target_dir = project_file_cache_dir(project_id) if project_id else FILE_CACHE_DIR
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -403,12 +479,19 @@ def cache_file_chunks(
         "type": content_type,
         "size": size,
         "kind": kind,
+        "sourceAvailable": True,
+        "pageCount": int(page_count or 0),
+        "pageTexts": normalized_page_texts(page_texts),
         "charCount": len(text),
         "chunkCount": len(chunks),
         "chunks": chunks,
     }
     final_path = target_dir / f"{file_id}.json"
     temp_path = target_dir / f"{file_id}.tmp"
+    source_path = target_dir / f"{file_id}{FILE_SOURCE_SUFFIX}"
+    temp_source_path = target_dir / f"{file_id}{FILE_SOURCE_SUFFIX}.tmp"
+    temp_source_path.write_bytes(source_bytes)
+    temp_source_path.replace(source_path)
     temp_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     temp_path.replace(final_path)
     return file_id
@@ -431,14 +514,27 @@ def cleanup_file_cache() -> None:
         except OSError:
             continue
 
+        source_path = path.with_suffix(FILE_SOURCE_SUFFIX)
+        source_size = 0
+        if source_path.exists():
+            try:
+                source_size = source_path.stat().st_size
+            except OSError:
+                source_size = 0
+
         age_days = (now - stat.st_mtime) / 86400
-        if age_days > FILE_CACHE_MAX_AGE_DAYS or total + stat.st_size > FILE_CACHE_MAX_BYTES:
+        entry_size = stat.st_size + source_size
+        if age_days > FILE_CACHE_MAX_AGE_DAYS or total + entry_size > FILE_CACHE_MAX_BYTES:
             try:
                 path.unlink()
             except OSError:
                 pass
+            try:
+                source_path.unlink()
+            except OSError:
+                pass
             continue
-        total += stat.st_size
+        total += entry_size
 
 
 def load_cached_file(file_id: str, project_id: str | None = None) -> dict[str, Any]:
@@ -474,6 +570,444 @@ def _load_cached_file_impl_from_path(path: Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise AppError("Uploaded file index is invalid", code=ErrorCode.INTERNAL, status=500)
     return data
+
+
+def cached_file_source(file_id: str, project_id: str | None = None) -> tuple[dict[str, Any], Path]:
+    cached = load_cached_file(file_id, project_id=project_id)
+    source_path = (project_file_cache_dir(project_id) if project_id else FILE_CACHE_DIR) / f"{file_id}{FILE_SOURCE_SUFFIX}"
+    if not source_path.exists():
+        raise AppError("Original uploaded file has expired or is missing", code=ErrorCode.FILE_INDEX_EXPIRED, status=410)
+    return cached, source_path
+
+
+def file_reader_window(
+    file_id: str,
+    project_id: str | None = None,
+    *,
+    chunk_start: Any = 1,
+    chunk_count: Any = FILE_READER_DEFAULT_CHUNKS,
+) -> dict[str, Any]:
+    cached = load_cached_file(file_id, project_id=project_id)
+    requested_start = _reader_positive_int(chunk_start, "Invalid reader start", default=1)
+    requested_count = min(
+        FILE_READER_MAX_CHUNKS,
+        _reader_positive_int(chunk_count, "Invalid reader count", default=FILE_READER_DEFAULT_CHUNKS),
+    )
+    raw_chunks = cached.get("chunks")
+    chunks: list[Any] = raw_chunks if isinstance(raw_chunks, list) else []
+    total_chunks = len(chunks)
+    if total_chunks <= 0:
+        return {
+            "ok": True,
+            "file": _reader_file_payload(cached, file_id, project_id, total_chunks),
+            "window": {
+                "chunkStart": 0,
+                "chunkEnd": 0,
+                "chunkCount": 0,
+                "totalChunks": 0,
+                "hasPrevious": False,
+                "hasNext": False,
+            },
+            "chunks": [],
+        }
+
+    start_index = min(max(requested_start - 1, 0), total_chunks - 1)
+    window_chunks = chunks[start_index : start_index + requested_count]
+    normalized_chunks = [
+        _reader_chunk_payload(chunk, fallback_index=start_index + offset)
+        for offset, chunk in enumerate(window_chunks)
+        if isinstance(chunk, dict)
+    ]
+    end_index = start_index + len(normalized_chunks)
+    return {
+        "ok": True,
+        "file": _reader_file_payload(cached, file_id, project_id, total_chunks),
+        "window": {
+            "chunkStart": start_index + 1,
+            "chunkEnd": end_index,
+            "chunkCount": len(normalized_chunks),
+            "totalChunks": total_chunks,
+            "hasPrevious": start_index > 0,
+            "hasNext": end_index < total_chunks,
+        },
+        "chunks": normalized_chunks,
+    }
+
+
+def file_page_text(
+    file_id: str,
+    project_id: str | None = None,
+    *,
+    page: Any = 1,
+) -> dict[str, Any]:
+    cached = load_cached_file(file_id, project_id=project_id)
+    requested_page = _reader_positive_int(page, "Invalid page", default=1)
+    page_count = int(cached.get("pageCount") or 0)
+    page_texts = normalized_page_texts(cached.get("pageTexts") if isinstance(cached.get("pageTexts"), list) else [])
+    if page_texts:
+        page_count = max(page_count, max(int(item.get("page") or 0) for item in page_texts))
+    page_count = max(1, page_count)
+    requested_page = min(requested_page, page_count)
+    page_text = page_text_for_index(page_texts, requested_page)
+    if not page_text:
+        page_text = page_text_from_cached_chunks(cached, requested_page=requested_page, page_count=page_count)
+    return {
+        "ok": True,
+        "file": _reader_file_payload(cached, file_id, project_id, len(cached.get("chunks") if isinstance(cached.get("chunks"), list) else [])),
+        "page": {
+            "index": requested_page,
+            "pageCount": page_count,
+            "text": page_text[:FILE_PAGE_TEXT_CHARS],
+            "hasText": bool(page_text.strip()),
+        },
+    }
+
+
+def file_page_image(
+    file_id: str,
+    project_id: str | None = None,
+    *,
+    page: Any = 1,
+    scale: Any = FILE_PAGE_IMAGE_DEFAULT_SCALE,
+) -> tuple[dict[str, Any], bytes, int, int]:
+    cached, source_path = cached_file_source(file_id, project_id=project_id)
+    kind = str(cached.get("kind") or "").lower()
+    media_type = str(cached.get("type") or "").split(";", 1)[0].strip().lower()
+    if kind != "pdf" and media_type != "application/pdf":
+        raise AppError("Page image preview is only available for PDF files", code=ErrorCode.UNSUPPORTED_FILE, status=415)
+
+    requested_page = _reader_positive_int(page, "Invalid page", default=1)
+    requested_scale = _reader_scale_float(scale, "Invalid scale", default=FILE_PAGE_IMAGE_DEFAULT_SCALE)
+    cached_page_count = int(cached.get("pageCount") or 0)
+    page_count = max(1, cached_page_count)
+    if cached_page_count > 0:
+        requested_page = min(requested_page, page_count)
+    scale_key = int(round(requested_scale * 100))
+    cache_path = source_path.with_name(f"{file_id}.page-{requested_page}-{scale_key}.png")
+
+    try:
+        source_mtime_ns = source_path.stat().st_mtime_ns
+        if cache_path.exists() and cache_path.stat().st_mtime_ns >= source_mtime_ns:
+            return cached, cache_path.read_bytes(), requested_page, page_count
+    except OSError:
+        pass
+
+    data = source_path.read_bytes()
+    png, rendered_page, rendered_page_count = render_pdf_page_png(data, requested_page, requested_scale)
+    page_count = max(page_count, rendered_page_count or 0, rendered_page)
+    if rendered_page != requested_page:
+        requested_page = rendered_page
+        cache_path = source_path.with_name(f"{file_id}.page-{requested_page}-{scale_key}.png")
+    try:
+        cache_path.write_bytes(png)
+    except OSError:
+        pass
+    return cached, png, requested_page, page_count
+
+
+def file_page_layout(
+    file_id: str,
+    project_id: str | None = None,
+    *,
+    page: Any = 1,
+) -> dict[str, Any]:
+    cached, source_path = cached_file_source(file_id, project_id=project_id)
+    kind = str(cached.get("kind") or "").lower()
+    media_type = str(cached.get("type") or "").split(";", 1)[0].strip().lower()
+    if kind != "pdf" and media_type != "application/pdf":
+        raise AppError("Page text layout is only available for PDF files", code=ErrorCode.UNSUPPORTED_FILE, status=415)
+
+    requested_page = _reader_positive_int(page, "Invalid page", default=1)
+    cached_page_count = int(cached.get("pageCount") or 0)
+    if cached_page_count > 0:
+        requested_page = min(requested_page, cached_page_count)
+    layout = render_pdf_page_layout(source_path.read_bytes(), requested_page)
+    page_count = max(cached_page_count, int(layout.get("pageCount") or 0), int(layout.get("index") or 0), 1)
+    return {
+        "ok": True,
+        "file": _reader_file_payload(cached, file_id, project_id, len(cached.get("chunks") if isinstance(cached.get("chunks"), list) else [])),
+        "page": {
+            **layout,
+            "pageCount": page_count,
+            "words": list(layout.get("words") or [])[:FILE_PAGE_LAYOUT_MAX_WORDS],
+        },
+    }
+
+
+def file_page_search(
+    file_id: str,
+    project_id: str | None = None,
+    *,
+    query: Any = "",
+) -> dict[str, Any]:
+    cached = load_cached_file(file_id, project_id=project_id)
+    search_query = normalize_extracted_text(str(query or "")).strip()
+    if not search_query:
+        raise AppError("Search query is required", code=ErrorCode.INVALID_PAYLOAD, status=400)
+    if len(search_query) > 200:
+        search_query = search_query[:200]
+
+    page_count = max(1, int(cached.get("pageCount") or 0))
+    page_texts = normalized_page_texts(cached.get("pageTexts") if isinstance(cached.get("pageTexts"), list) else [])
+    if page_texts:
+        page_count = max(page_count, max(int(item.get("page") or 0) for item in page_texts))
+    if not page_texts:
+        page_texts = fallback_page_texts_from_text(page_text_from_cached_chunks(cached, requested_page=1, page_count=1), page_count=page_count)
+
+    matches = []
+    needle = search_query.casefold()
+    for page_item in page_texts:
+        page_number = int(page_item.get("page") or 0)
+        haystack = str(page_item.get("text") or "")
+        folded = haystack.casefold()
+        start = 0
+        while len(matches) < FILE_PAGE_SEARCH_MAX_RESULTS:
+            index = folded.find(needle, start)
+            if index < 0:
+                break
+            snippet_start = max(0, index - FILE_PAGE_SEARCH_SNIPPET_CHARS // 2)
+            snippet_end = min(len(haystack), index + len(search_query) + FILE_PAGE_SEARCH_SNIPPET_CHARS // 2)
+            prefix = "..." if snippet_start > 0 else ""
+            suffix = "..." if snippet_end < len(haystack) else ""
+            matches.append(
+                {
+                    "index": len(matches),
+                    "page": page_number or 1,
+                    "start": index,
+                    "end": index + len(search_query),
+                    "text": haystack[index : index + len(search_query)],
+                    "snippet": f"{prefix}{haystack[snippet_start:snippet_end].strip()}{suffix}",
+                }
+            )
+            start = index + max(1, len(needle))
+        if len(matches) >= FILE_PAGE_SEARCH_MAX_RESULTS:
+            break
+
+    return {
+        "ok": True,
+        "file": _reader_file_payload(cached, file_id, project_id, len(cached.get("chunks") if isinstance(cached.get("chunks"), list) else [])),
+        "query": search_query,
+        "pageCount": page_count,
+        "matches": matches,
+        "truncated": len(matches) >= FILE_PAGE_SEARCH_MAX_RESULTS,
+    }
+
+
+def render_pdf_page_layout(data: bytes, page: int) -> dict[str, Any]:
+    try:
+        return _render_pdf_page_layout_pymupdf(data, page)
+    except AppError:
+        raise
+    except Exception as exc:
+        raise AppError(
+            f"PDF page text layout is unavailable: {exc}",
+            code=ErrorCode.UNSUPPORTED_FILE,
+            status=415,
+        ) from exc
+
+
+def _render_pdf_page_layout_pymupdf(data: bytes, page: int) -> dict[str, Any]:
+    import fitz  # type: ignore[import-untyped]
+
+    document = fitz.open(stream=data, filetype="pdf")
+    try:
+        page_count = int(getattr(document, "page_count", 0) or len(document))
+        if page_count <= 0:
+            raise AppError("PDF has no pages", code=ErrorCode.UNSUPPORTED_FILE, status=415)
+        rendered_page = min(max(1, int(page)), page_count)
+        pdf_page = document.load_page(rendered_page - 1)
+        rect = pdf_page.rect
+        width = max(float(rect.width), 1.0)
+        height = max(float(rect.height), 1.0)
+        raw_words = pdf_page.get_text("words") or []
+        words = []
+        line_parts: dict[tuple[int, int], list[tuple[int, str]]] = {}
+        for index, item in enumerate(raw_words[:FILE_PAGE_LAYOUT_MAX_WORDS]):
+            try:
+                x0, y0, x1, y1, text, block_no, line_no, word_no = item[:8]
+            except (TypeError, ValueError):
+                continue
+            clean_text = str(text or "").strip()
+            if not clean_text:
+                continue
+            block = int(block_no)
+            line = int(line_no)
+            word = int(word_no)
+            left = max(0.0, min(100.0, (float(x0) / width) * 100.0))
+            top = max(0.0, min(100.0, (float(y0) / height) * 100.0))
+            right = max(left, min(100.0, (float(x1) / width) * 100.0))
+            bottom = max(top, min(100.0, (float(y1) / height) * 100.0))
+            words.append(
+                {
+                    "index": index,
+                    "text": clean_text,
+                    "left": round(left, 4),
+                    "top": round(top, 4),
+                    "width": round(max(0.01, right - left), 4),
+                    "height": round(max(0.01, bottom - top), 4),
+                    "block": block,
+                    "line": line,
+                    "word": word,
+                }
+            )
+            line_parts.setdefault((block, line), []).append((word, clean_text))
+        lines = [" ".join(text for _, text in sorted(parts)) for _, parts in sorted(line_parts.items())]
+        return {
+            "index": rendered_page,
+            "pageCount": page_count,
+            "width": round(width, 2),
+            "height": round(height, 2),
+            "text": "\n".join(line for line in lines if line).strip()[:FILE_PAGE_TEXT_CHARS],
+            "words": words,
+            "hasText": bool(words),
+        }
+    finally:
+        close = getattr(document, "close", None)
+        if callable(close):
+            close()
+
+
+def render_pdf_page_png(data: bytes, page: int, scale: float) -> tuple[bytes, int, int]:
+    errors = []
+    try:
+        return _render_pdf_page_png_pymupdf(data, page, scale)
+    except Exception as exc:  # pragma: no cover - exercised when optional renderer is unavailable
+        errors.append(exc)
+    try:
+        return _render_pdf_page_png_pdf2image(data, page, scale)
+    except Exception as exc:  # pragma: no cover - exercised when optional renderer is unavailable
+        errors.append(exc)
+    detail = f": {errors[-1]}" if errors else ""
+    raise AppError(
+        f"PDF page rendering is unavailable{detail}",
+        code=ErrorCode.UNSUPPORTED_FILE,
+        status=415,
+    )
+
+
+def _render_pdf_page_png_pymupdf(data: bytes, page: int, scale: float) -> tuple[bytes, int, int]:
+    import fitz  # type: ignore[import-untyped]
+
+    document = fitz.open(stream=data, filetype="pdf")
+    try:
+        page_count = int(getattr(document, "page_count", 0) or len(document))
+        if page_count <= 0:
+            raise AppError("PDF has no pages", code=ErrorCode.UNSUPPORTED_FILE, status=415)
+        rendered_page = min(max(1, int(page)), page_count)
+        pdf_page = document.load_page(rendered_page - 1)
+        matrix = fitz.Matrix(float(scale), float(scale))
+        pixmap = pdf_page.get_pixmap(matrix=matrix, alpha=False)
+        return pixmap.tobytes("png"), rendered_page, page_count
+    finally:
+        close = getattr(document, "close", None)
+        if callable(close):
+            close()
+
+
+def _render_pdf_page_png_pdf2image(data: bytes, page: int, scale: float) -> tuple[bytes, int, int]:
+    import pdf2image  # type: ignore[import-untyped]
+
+    rendered_page = max(1, int(page))
+    dpi = max(72, min(288, int(round(96 * float(scale)))))
+    images = pdf2image.convert_from_bytes(data, dpi=dpi, fmt="png", first_page=rendered_page, last_page=rendered_page)
+    if not images:
+        raise AppError("PDF page could not be rendered", code=ErrorCode.UNSUPPORTED_FILE, status=415)
+    output = io.BytesIO()
+    images[0].save(output, format="PNG")
+    return output.getvalue(), rendered_page, 0
+
+
+def normalized_page_texts(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    pages = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        try:
+            page = int(item.get("page") or 0)
+        except (TypeError, ValueError):
+            continue
+        text = normalize_extracted_text(str(item.get("text") or ""))
+        if page <= 0 or not text:
+            continue
+        pages.append({"page": page, "text": text[:FILE_PAGE_TEXT_CHARS]})
+    return pages
+
+
+def page_text_for_index(page_texts: list[dict[str, Any]], requested_page: int) -> str:
+    for item in page_texts:
+        if int(item.get("page") or 0) == requested_page:
+            return str(item.get("text") or "")
+    return ""
+
+
+def page_text_from_cached_chunks(cached: dict[str, Any], *, requested_page: int, page_count: int) -> str:
+    raw_chunks = cached.get("chunks")
+    chunks = raw_chunks if isinstance(raw_chunks, list) else []
+    text = "\n\n".join(str(chunk.get("text") or "") for chunk in chunks if isinstance(chunk, dict)).strip()
+    if not text:
+        return ""
+    if page_count <= 1:
+        return text
+    length = len(text)
+    per_page = max(1, length // page_count)
+    start = (requested_page - 1) * per_page
+    end = length if requested_page >= page_count else min(length, requested_page * per_page)
+    return text[start:end].strip()
+
+
+def _reader_positive_int(value: Any, message: str, *, default: int) -> int:
+    if value in (None, ""):
+        return default
+    try:
+        number = int(value)
+    except (TypeError, ValueError) as exc:
+        raise AppError(message, code=ErrorCode.INVALID_PAYLOAD, status=400) from exc
+    return max(1, number)
+
+
+def _reader_scale_float(value: Any, message: str, *, default: float) -> float:
+    if value in (None, ""):
+        return default
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise AppError(message, code=ErrorCode.INVALID_PAYLOAD, status=400) from exc
+    if number <= 0:
+        raise AppError(message, code=ErrorCode.INVALID_PAYLOAD, status=400)
+    return max(FILE_PAGE_IMAGE_MIN_SCALE, min(FILE_PAGE_IMAGE_MAX_SCALE, number))
+
+
+def _reader_file_payload(cached: dict[str, Any], file_id: str, project_id: str | None, total_chunks: int) -> dict[str, Any]:
+    return {
+        "name": cached.get("name") or "文件",
+        "kind": cached.get("kind") or "text",
+        "type": cached.get("type") or "",
+        "size": int(cached.get("size") or 0),
+        "charCount": int(cached.get("charCount") or 0),
+        "chunkCount": int(cached.get("chunkCount") or total_chunks),
+        "pageCount": int(cached.get("pageCount") or 0),
+        "fileId": file_id,
+        "projectId": project_id or "",
+        "sourceAvailable": bool(cached.get("sourceAvailable")),
+    }
+
+
+def _reader_chunk_payload(chunk: dict[str, Any], *, fallback_index: int) -> dict[str, Any]:
+    raw_index = chunk.get("index")
+    try:
+        display_index = int(raw_index) + 1
+    except (TypeError, ValueError):
+        display_index = fallback_index + 1
+    return {
+        "index": display_index,
+        "start": int(chunk.get("start") or 0),
+        "end": int(chunk.get("end") or 0),
+        "lineStart": int(chunk.get("lineStart") or 0),
+        "lineEnd": int(chunk.get("lineEnd") or 0),
+        "text": str(chunk.get("text") or ""),
+    }
 
 
 def project_file_cache_dir(project_id: str | None) -> Path:
@@ -811,7 +1345,7 @@ def read_xlsx_sheet(xml_bytes: bytes, shared_strings: list[str]) -> str:
     return "\n".join(rows)
 
 
-def extract_pdf_text(data: bytes, *, ocr_enabled: bool | None = None) -> str:
+def extract_pdf_text(data: bytes, *, ocr_enabled: bool | None = None, ocr_api_key: str | None = None) -> str:
     try:
         return _extract_pdf_text_native(data)
     except AppError as exc:
@@ -825,10 +1359,14 @@ def extract_pdf_text(data: bytes, *, ocr_enabled: bool | None = None) -> str:
             code=ErrorCode.OCR_REQUIRED,
             status=422,
         )
-    return extract_pdf_ocr(data)
+    return extract_pdf_ocr(data, api_key=ocr_api_key)
 
 
 def _extract_pdf_text_native(data: bytes) -> str:
+    return "\n\n".join(f"[PDF page {int(item.get('page') or 0)}]\n{str(item.get('text') or '').strip()}" for item in extract_pdf_page_texts_native(data))
+
+
+def extract_pdf_page_texts_native(data: bytes) -> list[dict[str, Any]]:
     no_text_error: AppError | None = None
     parse_error: Exception | None = None
     for module_name in ("pypdf", "PyPDF2"):
@@ -839,9 +1377,9 @@ def _extract_pdf_text_native(data: bytes) -> str:
             for page_index, page in enumerate(reader.pages, start=1):
                 page_text = page.extract_text() or ""
                 if page_text.strip():
-                    pages.append(f"[PDF 第 {page_index} 页]\n{page_text.strip()}")
+                    pages.append({"page": page_index, "text": normalize_extracted_text(page_text)})
             if pages:
-                return "\n\n".join(pages)
+                return pages
             raise AppError(
                 "No selectable text found in this PDF. It may be a scanned/image-only PDF and needs OCR.",
                 code=ErrorCode.PDF_NO_SELECTABLE_TEXT,

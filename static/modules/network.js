@@ -20,6 +20,9 @@ export function createNetworkClient(storageKeys) {
       if (options.ocrEnabled) {
         formData.append("ocrEnabled", "1");
       }
+      if (options.apiKey) {
+        formData.append("apiKey", options.apiKey);
+      }
 
       xhr.open("POST", "/api/file-text");
 

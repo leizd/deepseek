@@ -617,7 +617,18 @@
           </svg>
         </button>
       </div>
-      <pre id="filePreviewText"></pre>
+      <div class="file-reader-toolbar" id="fileReaderToolbar" hidden>
+        <div class="file-reader-nav">
+          <button class="secondary-button file-reader-nav-button" id="fileReaderPrevButton" type="button">上一段</button>
+          <span id="fileReaderPageIndicator">-</span>
+          <button class="secondary-button file-reader-nav-button" id="fileReaderNextButton" type="button">下一段</button>
+        </div>
+        <div class="file-reader-actions">
+          <button class="secondary-button file-reader-action" id="fileReaderQuoteButton" type="button">引用所选</button>
+          <button class="primary-button file-reader-action" id="fileReaderSummarizeButton" type="button">总结全文</button>
+        </div>
+      </div>
+      <div id="filePreviewText" class="file-preview-text" tabindex="0"></div>
     </aside>
 
     <aside class="memory-panel" id="memoryPanel" aria-label="长期记忆" aria-hidden="true">

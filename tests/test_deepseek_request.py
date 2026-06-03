@@ -65,6 +65,19 @@ class DeepSeekRequestTests(unittest.TestCase):
         self.assertIn("pptxgenjs", dynamic_context)
         self.assertIn("create_pptx", dynamic_context)
 
+    def test_mindmap_request_forces_create_mindmap_tool(self) -> None:
+        req = build_deepseek_request(
+            {
+                "apiKey": "k",
+                "model": "deepseek-v4-pro",
+                "messages": [{"role": "user", "content": "帮我画一个产品发布思维导图"}],
+            },
+            stream=True,
+        )
+
+        self.assertEqual(req.body["tool_choice"], {"type": "function", "function": {"name": "create_mindmap"}})
+        self.assertIn("create_mindmap", [tool["function"]["name"] for tool in req.body["tools"]])
+
     def test_non_ppt_request_does_not_include_slides_skill_context(self) -> None:
         req = build_deepseek_request(
             {
@@ -573,8 +586,104 @@ class DeepSeekRequestTests(unittest.TestCase):
         self.assertEqual(result["content"], "120")
         self.assertEqual(result["diagnostics"]["toolCallCount"], 1)
         self.assertEqual(result["diagnostics"]["toolNames"], ["python_eval"])
+        # V4-Pro thinking 模式要求带 tool_calls 的 assistant 消息回填 reasoning_content，
+        # 缺失会让上游报错（“must be passed back to the API”），这里确认它被原样带回下一轮。
         self.assertEqual(assistant_messages[-1]["reasoning_content"], "Need exact factorial.")
         self.assertIn("120", tool_messages[0]["content"])
+
+    def test_tool_loop_preserves_prompt_prefix_for_cache(self) -> None:
+        # DeepSeek prompt cache 按字面前缀命中。带工具调用的回合，第二次请求的 messages
+        # 必须是第一次请求 messages 的“严格前缀延伸”：只在末尾追加 assistant 工具调用 +
+        # 工具结果，绝不改写已有消息或在中间插入易变内容，否则后半段历史会整段 cache miss。
+        long_reasoning = "长篇推理" * 200
+        tool_response = {
+            "id": "tool-response",
+            "model": "deepseek-v4-pro",
+            "choices": [
+                {
+                    "message": {
+                        "content": "",
+                        "reasoning_content": long_reasoning,
+                        "tool_calls": [
+                            {
+                                "id": "call_1",
+                                "type": "function",
+                                "function": {"name": "python_eval", "arguments": json.dumps({"expression": "factorial(5)"})},
+                            }
+                        ],
+                    }
+                }
+            ],
+            "usage": {},
+        }
+        final_response = {
+            "id": "final-response",
+            "model": "deepseek-v4-pro",
+            "choices": [{"message": {"content": "120"}}],
+            "usage": {},
+        }
+        with patch(
+            "urllib.request.urlopen",
+            side_effect=[FakeResponse(json.dumps(tool_response).encode("utf-8")), FakeResponse(json.dumps(final_response).encode("utf-8"))],
+        ) as mocked:
+            call_deepseek({"apiKey": "test", "model": "expert", "messages": [{"role": "user", "content": "5!"}]})
+
+        first_messages = json.loads(mocked.call_args_list[0].args[0].data.decode("utf-8"))["messages"]
+        second_messages = json.loads(mocked.call_args_list[1].args[0].data.decode("utf-8"))["messages"]
+        # 第二次请求 = 第一次请求的严格前缀 + 追加的工具交换
+        self.assertEqual(second_messages[: len(first_messages)], first_messages)
+        self.assertGreater(len(second_messages), len(first_messages))
+        # 追加的 assistant 工具调用消息必须保留 reasoning_content（V4-Pro thinking 模式硬性要求）。
+        appended_assistant = next(m for m in second_messages[len(first_messages):] if m.get("role") == "assistant")
+        self.assertEqual(appended_assistant["reasoning_content"], long_reasoning)
+
+    def test_tool_round_limit_keeps_tools_prefix_stable_for_cache(self) -> None:
+        # 工具轮次达上限、改为直接作答时，体量最大的收尾请求仍要保留 tools 前缀：tools 位于
+        # prompt 前缀最前端（数千 token），删掉会让这次请求整段 cache miss。这里端到端验证：
+        # 三次上游请求的 tools 数组都在且字面一致，收尾请求用 tool_choice="none" 禁用工具。
+        tool_response = {
+            "id": "tool-response",
+            "model": "deepseek-v4-pro",
+            "choices": [
+                {
+                    "message": {
+                        "content": "",
+                        "reasoning_content": "need a tool",
+                        "tool_calls": [
+                            {
+                                "id": "call_1",
+                                "type": "function",
+                                "function": {"name": "python_eval", "arguments": json.dumps({"expression": "factorial(5)"})},
+                            }
+                        ],
+                    }
+                }
+            ],
+            "usage": {},
+        }
+        final_response = {
+            "id": "final-response",
+            "model": "deepseek-v4-pro",
+            "choices": [{"message": {"content": "done"}}],
+            "usage": {},
+        }
+        with patch(
+            "urllib.request.urlopen",
+            side_effect=[
+                FakeResponse(json.dumps(tool_response).encode("utf-8")),
+                FakeResponse(json.dumps(tool_response).encode("utf-8")),
+                FakeResponse(json.dumps(final_response).encode("utf-8")),
+            ],
+        ) as mocked:
+            call_deepseek({"apiKey": "test", "model": "expert", "messages": [{"role": "user", "content": "5!"}]}, max_tool_rounds=1)
+
+        bodies = [json.loads(call.args[0].data.decode("utf-8")) for call in mocked.call_args_list]
+        self.assertEqual(len(bodies), 3)
+        for body in bodies:
+            self.assertIn("tools", body)
+            self.assertEqual(body["tools"], bodies[0]["tools"])
+        self.assertEqual(bodies[-1]["tool_choice"], "none")
+        self.assertIn("工具调用次数已经用完", bodies[-1]["messages"][-1]["content"])
 
     def test_call_deepseek_falls_back_to_local_pptx_when_model_skips_tool(self) -> None:
         response = {
@@ -598,6 +707,153 @@ class DeepSeekRequestTests(unittest.TestCase):
         self.assertIn("[Git介绍.pptx](/api/download?id=", result["content"])
         self.assertNotIn("无法直接生成", result["content"])
         self.assertEqual(result["diagnostics"]["toolNames"], ["create_pptx"])
+
+    def test_call_deepseek_returns_artifact_link_without_second_upstream_request(self) -> None:
+        tool_response = {
+            "id": "tool-response",
+            "model": "deepseek-v4-pro",
+            "choices": [
+                {
+                    "message": {
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "id": "call_artifact",
+                                "type": "function",
+                                "function": {
+                                    "name": "create_pptx",
+                                    "arguments": json.dumps(
+                                        {
+                                            "title": "Roadmap",
+                                            "subtitle": "",
+                                            "slides": [{"title": "Intro", "bullets": ["A"], "layout": "quote"}],
+                                        }
+                                    ),
+                                },
+                            }
+                        ],
+                    }
+                }
+            ],
+            "usage": {"prompt_tokens": 100, "prompt_cache_hit_tokens": 80, "prompt_cache_miss_tokens": 20},
+        }
+        ppt_result = {
+            "fileId": "e" * 32,
+            "filename": "Roadmap.pptx",
+            "slideCount": 2,
+            "downloadUrl": "/api/download?id=" + "e" * 32,
+            "outline": [{"page": 1, "title": "Intro", "layout": "quote", "bullets": ["A"]}],
+        }
+        with (
+            patch("urllib.request.urlopen", return_value=FakeResponse(json.dumps(tool_response).encode("utf-8"))) as mocked,
+            patch("deepseek_mobile.services.tools.create_presentation", return_value=ppt_result),
+        ):
+            result = call_deepseek({"apiKey": "test", "model": "expert", "messages": [{"role": "user", "content": "帮我做一个 Roadmap PPT"}]})
+
+        self.assertEqual(mocked.call_count, 1)
+        self.assertIn("[Roadmap.pptx](/api/download?id=", result["content"])
+        self.assertEqual(result["diagnostics"]["toolNames"], ["create_pptx"])
+        self.assertEqual(result["diagnostics"]["cacheHitRate"], 80.0)
+
+    def test_call_deepseek_returns_document_link_without_second_upstream_request(self) -> None:
+        tool_response = {
+            "id": "tool-response",
+            "model": "deepseek-v4-pro",
+            "choices": [
+                {
+                    "message": {
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "id": "call_doc",
+                                "type": "function",
+                                "function": {
+                                    "name": "create_document",
+                                    "arguments": json.dumps(
+                                        {
+                                            "format": "docx",
+                                            "title": "Plan",
+                                            "subtitle": "",
+                                            "sections": [
+                                                {"heading": "Overview", "body": ["Text"], "bullets": [], "table": {"headers": [], "rows": []}}
+                                            ],
+                                        }
+                                    ),
+                                },
+                            }
+                        ],
+                    }
+                }
+            ],
+            "usage": {"prompt_tokens": 100, "prompt_cache_hit_tokens": 70, "prompt_cache_miss_tokens": 30},
+        }
+        doc_result = {
+            "fileId": "f" * 32,
+            "filename": "Plan.docx",
+            "format": "docx",
+            "sectionCount": 1,
+            "downloadUrl": "/api/download?id=" + "f" * 32,
+            "outline": [{"index": 1, "heading": "Overview", "hasTable": False}],
+        }
+        with (
+            patch("urllib.request.urlopen", return_value=FakeResponse(json.dumps(tool_response).encode("utf-8"))) as mocked,
+            patch("deepseek_mobile.services.tools.create_document", return_value=doc_result),
+        ):
+            result = call_deepseek({"apiKey": "test", "model": "expert", "messages": [{"role": "user", "content": "帮我做一个 Word 方案"}]})
+
+        self.assertEqual(mocked.call_count, 1)
+        self.assertIn("[Plan.docx](/api/download?id=", result["content"])
+        self.assertEqual(result["diagnostics"]["toolNames"], ["create_document"])
+        self.assertEqual(result["diagnostics"]["cacheHitRate"], 70.0)
+
+    def test_call_deepseek_returns_mindmap_link_without_second_upstream_request(self) -> None:
+        tool_response = {
+            "id": "tool-response",
+            "model": "deepseek-v4-pro",
+            "choices": [
+                {
+                    "message": {
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "id": "call_map",
+                                "type": "function",
+                                "function": {
+                                    "name": "create_mindmap",
+                                    "arguments": json.dumps(
+                                        {
+                                            "title": "Launch",
+                                            "subtitle": "",
+                                            "nodes": [{"label": "Market", "children": []}],
+                                        }
+                                    ),
+                                },
+                            }
+                        ],
+                    }
+                }
+            ],
+            "usage": {"prompt_tokens": 100, "prompt_cache_hit_tokens": 85, "prompt_cache_miss_tokens": 15},
+        }
+        map_result = {
+            "fileId": "2" * 32,
+            "filename": "Launch.svg",
+            "format": "svg",
+            "nodeCount": 2,
+            "downloadUrl": "/api/download?id=" + "2" * 32,
+            "outline": [{"label": "Market", "children": []}],
+        }
+        with (
+            patch("urllib.request.urlopen", return_value=FakeResponse(json.dumps(tool_response).encode("utf-8"))) as mocked,
+            patch("deepseek_mobile.services.tools.create_mindmap", return_value=map_result),
+        ):
+            result = call_deepseek({"apiKey": "test", "model": "expert", "messages": [{"role": "user", "content": "帮我画一个 Launch 思维导图"}]})
+
+        self.assertEqual(mocked.call_count, 1)
+        self.assertIn("![Launch.svg](/api/download?id=", result["content"])
+        self.assertIn("[Launch.svg](/api/download?id=", result["content"])
+        self.assertEqual(result["diagnostics"]["toolNames"], ["create_mindmap"])
+        self.assertEqual(result["diagnostics"]["cacheHitRate"], 85.0)
 
     def test_ensure_pptx_response_surfaces_existing_tool_download(self) -> None:
         body = {
@@ -670,7 +926,8 @@ class DeepSeekRequestTests(unittest.TestCase):
         self.assertIn("http://127.0.0.1:8000/api/download?id=" + "d" * 32, content)
         self.assertNotIn("chat.deepseek.com/api/download", content)
 
-    def test_call_deepseek_stabilizes_web_search_tool_exchange_for_cache(self) -> None:
+    def test_call_deepseek_preserves_upstream_tool_calls_for_cache(self) -> None:
+        upstream_arguments = json.dumps({"query": "latest docs", "intent": "fresh"})
         tool_response = {
             "id": "tool-response",
             "model": "deepseek-v4-pro",
@@ -684,7 +941,7 @@ class DeepSeekRequestTests(unittest.TestCase):
                                 "type": "function",
                                 "function": {
                                     "name": "web_search",
-                                    "arguments": json.dumps({"query": "latest docs", "intent": "fresh"}),
+                                    "arguments": upstream_arguments,
                                 },
                             }
                         ],
@@ -742,9 +999,9 @@ class DeepSeekRequestTests(unittest.TestCase):
         tool_messages = [message for message in second_body["messages"] if message.get("role") == "tool"]
         tool_call = assistant_messages[-1]["tool_calls"][0]
         self.assertEqual(result["content"], "answer")
-        self.assertEqual(tool_call["id"], "call_1_web_search")
-        self.assertEqual(tool_call["function"]["arguments"], '{"intent":"fresh","query":"latest docs"}')
-        self.assertEqual(tool_messages[-1]["tool_call_id"], "call_1_web_search")
+        self.assertEqual(tool_call["id"], "random-upstream-id")
+        self.assertEqual(tool_call["function"]["arguments"], upstream_arguments)
+        self.assertEqual(tool_messages[-1]["tool_call_id"], "random-upstream-id")
         self.assertNotIn('"cached"', tool_messages[-1]["content"])
 
     def test_call_deepseek_aggregates_usage_across_tool_rounds(self) -> None:
@@ -875,6 +1132,7 @@ class DeepSeekRequestTests(unittest.TestCase):
         diagnostics = done["diagnostics"]
         assert isinstance(diagnostics, dict)
         self.assertEqual(assistant_messages[-1]["content"], "Working. ")
+        # V4-Pro thinking 模式要求回填 reasoning_content，缺失会让上游报错。
         self.assertEqual(assistant_messages[-1]["reasoning_content"], "Need exact factorial.")
         self.assertTrue(any("python_eval" in str(event.get("text")) for event in system_notes))
         self.assertEqual(done["content"], "Working. 120")
@@ -885,6 +1143,53 @@ class DeepSeekRequestTests(unittest.TestCase):
         self.assertEqual(diagnostics["cacheHitTokens"], 40)
         self.assertEqual(diagnostics["cacheMissTokens"], 50)
         self.assertEqual(diagnostics["cacheHitRate"], 44.4)
+
+    def test_stream_deepseek_returns_artifact_link_without_second_upstream_request(self) -> None:
+        tool_delta = {
+            "id": "tool-response",
+            "model": "deepseek-v4-pro",
+            "usage": {"prompt_tokens": 100, "prompt_cache_hit_tokens": 90, "prompt_cache_miss_tokens": 10},
+            "choices": [
+                {
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "id": "call_ppt",
+                                "type": "function",
+                                "function": {
+                                    "name": "create_pptx",
+                                    "arguments": json.dumps(
+                                        {
+                                            "title": "Roadmap",
+                                            "subtitle": "",
+                                            "slides": [{"title": "Intro", "bullets": ["A"], "layout": "quote"}],
+                                        }
+                                    ),
+                                },
+                            }
+                        ]
+                    }
+                }
+            ],
+        }
+        ppt_result = {
+            "fileId": "1" * 32,
+            "filename": "Roadmap.pptx",
+            "slideCount": 2,
+            "downloadUrl": "/api/download?id=" + "1" * 32,
+        }
+        events: list[dict[str, object]] = []
+        with (
+            patch("urllib.request.urlopen", return_value=FakeStream([f"data: {json.dumps(tool_delta)}\n".encode("utf-8"), b"data: [DONE]\n"])) as mocked,
+            patch("deepseek_mobile.services.tools.create_presentation", return_value=ppt_result),
+        ):
+            stream_deepseek({"apiKey": "test", "model": "expert", "messages": [{"role": "user", "content": "帮我做 Roadmap PPT"}]}, events.append)
+
+        done = [event for event in events if event.get("type") == "done"][0]
+        self.assertEqual(mocked.call_count, 1)
+        self.assertIn("[Roadmap.pptx](/api/download?id=", str(done["content"]))
+        self.assertEqual(done["diagnostics"]["cacheHitRate"], 90.0)
 
     def test_stream_deepseek_emits_memory_suggestion_event(self) -> None:
         tool_delta = {
@@ -985,17 +1290,21 @@ class DeepSeekRequestTests(unittest.TestCase):
         self.assertEqual(events[-1]["error"], "stream failed")
         self.assertEqual(events[-1]["code"], ErrorCode.UPSTREAM_FAILURE.value)
 
-    def test_force_final_answer_without_tools_drops_tools_and_appends_hint(self) -> None:
+    def test_force_final_answer_keeps_tools_stable_and_appends_hint(self) -> None:
         body = {
             "model": "expert",
             "tools": [{"type": "function"}],
+            "tool_choice": "auto",
             "messages": [
                 {"role": "user", "content": "first"},
                 {"role": "assistant", "content": "second"},
             ],
         }
         result = deepseek_client.force_final_answer_without_tools(body)
-        self.assertNotIn("tools", result)
+        # 保留 tools 让 prompt 前缀稳定（删掉会让这次最大的请求整段 cache miss），
+        # 改用 tool_choice="none" 禁止再调用工具。
+        self.assertEqual(result["tools"], body["tools"])
+        self.assertEqual(result["tool_choice"], "none")
         self.assertEqual(result["model"], "expert")
         self.assertEqual(len(result["messages"]), 3)
         self.assertEqual(result["messages"][-1]["role"], "user")

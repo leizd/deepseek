@@ -141,6 +141,18 @@ export function renderMarkdown(value, { streaming = false } = {}) {
       continue;
     }
 
+    const generatedImage = trimmed.match(/^!\[([^\]]*)\]\(((?:https?:\/\/|\/api\/download\?id=)[^)\s]+)\)$/);
+    if (generatedImage) {
+      const imageBlock = renderGeneratedDownloadImage(generatedImage[1], generatedImage[2]);
+      if (imageBlock) {
+        flushParagraph();
+        flushList();
+        flushQuote();
+        html.push(imageBlock);
+        continue;
+      }
+    }
+
     if (/^ {0,3}(#{1,6})\s+(.+?)\s*#*$/.test(line)) {
       flushParagraph();
       flushList();
@@ -216,13 +228,13 @@ export function renderInline(value) {
   text = escapeHtml(text);
   // text is already HTML-escaped above, so href/label are safe in attribute/content context.
   // Re-escaping href would double-encode "&" in query strings (&amp; -> &amp;amp;) and break the link.
-  text = text.replace(/\[([^\]]+)\]\(((?:https?:\/\/|\/api\/download\?id=)[^)\s]+)\)/g, (_, label, href) => {
+  text = text.replace(/(^|[^!])\[([^\]]+)\]\(((?:https?:\/\/|\/api\/download\?id=)[^)\s]+)\)/g, (_, prefix, label, href) => {
     const downloadId = generatedDownloadIdFromHref(href);
     if (downloadId) {
       const localHref = `/api/download?id=${downloadId}`;
-      return `<a href="${localHref}" class="download-link" data-download-id="${downloadId}" download>${label}</a>`;
+      return `${prefix}<a href="${localHref}" class="download-link" data-download-id="${downloadId}" download>${label}</a>`;
     }
-    return `<a href="${href}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+    return `${prefix}<a href="${href}" target="_blank" rel="noopener noreferrer">${label}</a>`;
   });
   text = text.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   text = text.replace(/__([^_]+)__/g, "<strong>$1</strong>");
@@ -366,6 +378,24 @@ function renderMermaidBlock(code) {
       </div>
       <div class="mermaid-output" data-mermaid-source="${escapeAttribute(source)}">${fallback}</div>
     </div>
+  `;
+}
+
+function renderGeneratedDownloadImage(label, href) {
+  const downloadId = generatedDownloadIdFromHref(href);
+  if (!downloadId) return "";
+  const localHref = `/api/download?id=${downloadId}`;
+  const imageHref = `${localHref}&inline=1`;
+  const title = String(label || "").trim() || "Generated image";
+  return `
+    <figure class="generated-image generated-mindmap" data-download-id="${downloadId}">
+      <div class="generated-image-frame">
+        <img src="${imageHref}" alt="${escapeAttribute(title)}" loading="lazy" decoding="async">
+      </div>
+      <figcaption>
+        <a href="${localHref}" class="download-link" data-download-id="${downloadId}" download>${escapeHtml(title)}</a>
+      </figcaption>
+    </figure>
   `;
 }
 

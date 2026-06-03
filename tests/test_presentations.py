@@ -5,7 +5,7 @@ import tempfile
 from pathlib import Path
 
 from deepseek_mobile.core.errors import AppError, ErrorCode
-from deepseek_mobile.services import presentations
+from deepseek_mobile.services import generated_files, presentations
 from deepseek_mobile.services.presentations import (
     create_presentation,
     infer_presentation_title,
@@ -40,6 +40,26 @@ class PresentationTests(unittest.TestCase):
         assert path is not None
         path.unlink(missing_ok=True)
 
+    def test_larger_deck_gets_agenda_and_rich_layouts(self) -> None:
+        result = create_presentation(
+            "Product Roadmap",
+            [
+                {"title": "核心观点", "bullets": ["把复杂流程拆成三条主线"]},
+                {"title": "关键能力", "bullets": ["洞察：统一指标", "执行：标准流程", "反馈：闭环复盘"]},
+                {"title": "实施流程", "bullets": ["调研", "试点", "推广", "复盘"]},
+                {"title": "方案对比", "bullets": ["自建：控制力强", "采购：上线快", "混合：风险均衡"]},
+                {"title": "总结与下一步", "bullets": ["先跑 MVP", "两周后复盘", "明确负责人"]},
+            ],
+        )
+
+        self.assertEqual(result["slideCount"], 7)
+        self.assertIn("layout", result["outline"][0])
+        self.assertEqual(result["outline"][2]["layout"], "process")
+        path = resolve_generated_file(result["fileId"])
+        self.assertIsNotNone(path)
+        assert path is not None
+        path.unlink(missing_ok=True)
+
     def test_resolve_blocks_path_traversal_and_bad_ids(self) -> None:
         self.assertIsNone(resolve_generated_file("../../etc/passwd"))
         self.assertIsNone(resolve_generated_file("not-hex-id"))
@@ -50,7 +70,7 @@ class PresentationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             generated_dir = Path(tmp) / ".generated"
             downloads_dir = Path(tmp) / "Downloads"
-            with unittest.mock.patch.object(presentations, "GENERATED_DIR", generated_dir):
+            with unittest.mock.patch.object(generated_files, "GENERATED_DIR", generated_dir):
                 result = create_presentation("路径测试", [{"title": "页", "bullets": ["内容"]}])
                 saved = save_generated_file_to_downloads(result["fileId"], filename="路径测试.pptx", downloads_dir=downloads_dir)
 
@@ -71,6 +91,9 @@ class PresentationTests(unittest.TestCase):
         create_pptx = next(tool for tool in tools if tool["function"]["name"] == "create_pptx")
         self.assertIn("slides", create_pptx["function"]["description"])
         self.assertIn("PowerPoint-style presentations", create_pptx["function"]["description"])
+        slide_schema = create_pptx["function"]["parameters"]["properties"]["slides"]["items"]
+        self.assertIn("layout", slide_schema["properties"])
+        self.assertIn("layout", slide_schema["required"])
 
     def test_text_fallback_marks_slides_skill_route(self) -> None:
         with unittest.mock.patch.object(presentations, "create_presentation", return_value={"ok": True}) as mocked:

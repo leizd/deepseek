@@ -152,6 +152,7 @@ const maxPendingAttachments = 5;
 const defaultUploadLimits = Object.freeze({ fileMaxBytes: 200_000_000, requestMaxBytes: 220_000_000, maxFiles: 8 });
 const maxLocalImagePreviewBytes = 30_000_000;
 const maxAttachmentPromptChars = 120000;
+const fileReaderChunkCount = 6;
 const draftSaveIntervalMs = 2000;
 const reminderPollIntervalMs = 60000;
 const chatRequestTimeoutMs = 240000;
@@ -216,6 +217,7 @@ const state = {
   projectUploading: false,
   historySearch: "",
   activeActivityMessageId: "",
+  fileReader: null,
   quoteDraft: null,
   selectionQuoteCandidate: null,
   selectionQuoteLocked: null,
@@ -340,6 +342,12 @@ const closeFilePreviewButton = document.querySelector("#closeFilePreviewButton")
 const filePreviewTitle = document.querySelector("#filePreviewTitle");
 const filePreviewMeta = document.querySelector("#filePreviewMeta");
 const filePreviewText = document.querySelector("#filePreviewText");
+const fileReaderToolbar = document.querySelector("#fileReaderToolbar");
+const fileReaderPrevButton = document.querySelector("#fileReaderPrevButton");
+const fileReaderNextButton = document.querySelector("#fileReaderNextButton");
+const fileReaderPageIndicator = document.querySelector("#fileReaderPageIndicator");
+const fileReaderQuoteButton = document.querySelector("#fileReaderQuoteButton");
+const fileReaderSummarizeButton = document.querySelector("#fileReaderSummarizeButton");
 const memoryPanel = document.querySelector("#memoryPanel");
 const closeMemoryPanelButton = document.querySelector("#closeMemoryPanelButton");
 const memoryPanelList = document.querySelector("#memoryPanelList");
@@ -703,6 +711,9 @@ function setupEvents() {
   if (projectList) {
     projectList.addEventListener("click", onProjectListClick);
   }
+  if (projectDocumentList) {
+    projectDocumentList.addEventListener("click", onProjectListClick);
+  }
   if (projectUploadButton && projectUploadInput) {
     projectUploadButton.addEventListener("click", () => projectUploadInput.click());
     projectUploadInput.addEventListener("change", onProjectUploadInputChange);
@@ -773,6 +784,18 @@ function setupEvents() {
   if (closeFilePreviewButton) {
     closeFilePreviewButton.addEventListener("click", closeFilePreview);
   }
+  if (fileReaderPrevButton) {
+    fileReaderPrevButton.addEventListener("click", () => stepFileReader(-1));
+  }
+  if (fileReaderNextButton) {
+    fileReaderNextButton.addEventListener("click", () => stepFileReader(1));
+  }
+  if (fileReaderQuoteButton) {
+    fileReaderQuoteButton.addEventListener("click", quoteFileReaderSelection);
+  }
+  if (fileReaderSummarizeButton) {
+    fileReaderSummarizeButton.addEventListener("click", summarizeFileReaderDocument);
+  }
   if (closeMemoryPanelButton) {
     closeMemoryPanelButton.addEventListener("click", closeMemoryPanel);
   }
@@ -788,7 +811,10 @@ function setupEvents() {
     activityPanel.addEventListener("click", onActivityPanelClick);
   }
   window.addEventListener("resize", onActivityViewportChange);
+  window.addEventListener("resize", onFileReaderViewportChange);
   window.addEventListener("resize", syncHistoryMode);
+  document.addEventListener("fullscreenchange", syncOriginalReaderFullscreenState);
+  document.addEventListener("keydown", onOriginalReaderKeydown);
   syncHistoryMode();
   if (memoryPanelList) {
     memoryPanelList.addEventListener("click", onMemoryPanelClick);
@@ -2079,14 +2105,24 @@ function renderActiveSeekChip() {
   if (activeSeekRow) activeSeekRow.hidden = !seek;
   if (activeSeekChip) activeSeekChip.hidden = !seek;
   if (!seek) {
-    if (promptInput) promptInput.placeholder = "问问 DeepSeek";
+    syncPromptPlaceholder();
     return;
   }
   if (!activeSeekChip) return;
   activeSeekChip.textContent = `Seek 助手 · ${seek.name}`;
   activeSeekChip.title = seek.description || seek.instructions;
   activeSeekChip.dataset.accent = seek.accent || "blue";
-  if (promptInput) promptInput.placeholder = `给 ${seek.name} 发送消息`;
+  syncPromptPlaceholder();
+}
+
+function syncPromptPlaceholder() {
+  if (!promptInput) return;
+  if (isFileReaderPromptContext()) {
+    promptInput.placeholder = "发消息...";
+    return;
+  }
+  const seek = activeSeek();
+  promptInput.placeholder = seek ? `给 ${seek.name} 发送消息` : "问问 DeepSeek";
 }
 
 function setActiveProject(id) {
@@ -2912,9 +2948,11 @@ function renderProjectPanel() {
   for (const doc of project.documents) {
     const row = document.createElement("article");
     row.className = "project-document";
-    row.innerHTML = `<strong></strong><span></span>`;
+    row.innerHTML = `<div><strong></strong><span></span></div><button class="secondary-button project-document-read" type="button">阅读</button>`;
     row.querySelector("strong").textContent = doc.name;
     row.querySelector("span").textContent = `${String(doc.kind || "FILE").toUpperCase()} · ${formatBytes(doc.size)} · ${doc.chunkCount || 0} 段`;
+    const readButton = row.querySelector("button");
+    if (readButton) readButton.dataset.projectDocumentRead = doc.fileId;
     projectDocumentList.append(row);
   }
 }
@@ -2929,6 +2967,13 @@ function onProjectListClick(event) {
   const remove = target?.closest("button[data-project-delete]");
   if (remove) {
     deleteProject(remove.dataset.projectDelete || "");
+    return;
+  }
+  const read = target?.closest("button[data-project-document-read]");
+  if (read) {
+    const project = activeProject();
+    const doc = project?.documents.find((item) => item.fileId === read.dataset.projectDocumentRead);
+    if (doc) openFilePreview(doc);
   }
 }
 
@@ -2976,6 +3021,8 @@ async function onProjectUploadInputChange(event) {
   try {
     const form = new FormData();
     for (const file of selectedFiles) form.append("files", file, file.name);
+    const apiKey = apiKeyInput.value.trim();
+    if (apiKey) form.append("apiKey", apiKey);
     const response = await apiFetch(`/api/project-files?projectId=${encodeURIComponent(state.activeProjectId)}`, {
       method: "POST",
       body: form,
@@ -4263,11 +4310,17 @@ function decorateFreshMessage(node, messageId) {
 
 function render() {
   chatLog.replaceChildren();
-  appShell.classList.toggle("is-empty", state.messages.length === 0);
+  appShell.classList.toggle("is-empty", state.messages.length === 0 && !shouldShowFileReaderWorkspace());
   renderActiveSeekChip();
   renderActiveProjectChip();
+  syncFileReaderWorkspaceState({ renderWorkspace: false });
 
   if (state.messages.length === 0) {
+    if (shouldShowFileReaderWorkspace()) {
+      renderFileReaderWorkspace();
+      updateJumpLatestButton();
+      return;
+    }
     renderConversationPeek();
     updateJumpLatestButton();
     return;
@@ -5095,7 +5148,7 @@ async function onSeekReferenceInputChange(event) {
         () => {
           updateSeekReferenceUploadItems(uploadItems, { status: "processing", progress: 100 });
         },
-        { ocrEnabled: true }
+        { ocrEnabled: true, apiKey: apiKeyInput.value.trim() }
       );
       applySeekReferenceUploadResult(uploadItems, result);
     } catch (error) {
@@ -5300,7 +5353,7 @@ async function retrySeekReferenceWithOcr(uploadId) {
       () => {
         updateSeekReferenceUploadItems([item], { status: "processing", progress: 100 });
       },
-      { ocrEnabled: true }
+      { ocrEnabled: true, apiKey: apiKeyInput.value.trim() }
     );
     applySeekReferenceUploadResult([item], result);
   } catch (error) {
@@ -5458,7 +5511,7 @@ async function uploadPendingAttachmentFiles(files, { emptyMessage = "没有选�
       () => {
         updateUploadItems(uploadItems, { status: "processing", progress: 100 });
       },
-      { ocrEnabled: true }
+      { ocrEnabled: true, apiKey: apiKeyInput.value.trim() }
     );
     applyBatchUploadResult(uploadItems, result);
   } catch (error) {
@@ -5651,12 +5704,12 @@ function friendlyUploadError(message) {
     return "图片需要 OCR 才能识别文字。请在启动器勾选「开启 OCR 图像光学字符识别支持 (OCR_ENABLED)」，重启服务后重试。";
   }
   // OCR_UNAVAILABLE：引擎启动或运行失败。保留后端真实细节，方便用户自助诊断
-  if (/No OCR engine|OCR dependencies|Tesseract|ocr_unavailable/i.test(text)) {
+  if (/DeepSeek OCR|DeepSeek API Key|No OCR engine|OCR dependencies|Tesseract|ocr_unavailable/i.test(text)) {
     const detail = text.length > 260 ? text.slice(0, 260) + "…" : text;
-    return `OCR 不可用：${detail}（请确认 Tesseract 在 PATH 且服务进程能 import pytesseract；扫描 PDF 还需要 pdftoppm。重启服务后重试。）`;
+    return `OCR 不可用：${detail}（请确认已配置 DEEPSEEK_API_KEY；如需本地兜底，再确认 Tesseract 在 PATH 且服务进程能 import pytesseract，扫描 PDF 还需要 pdftoppm。重启服务后重试。）`;
   }
   if (/image OCR|image text|in image|图片|图像/i.test(text)) {
-    return "这张图片需要 OCR 才能识别文字。请安装 requirements-ocr.txt 和 Tesseract，然后点击 OCR 重试。";
+    return "这张图片需要 OCR 才能识别文字。请配置 DeepSeek API Key，或安装 requirements-ocr.txt 和 Tesseract 作为本地兜底，然后点击 OCR 重试。";
   }
   if (/scanned|image-only|OCR|扫描/.test(text)) {
     return "这个 PDF 像是扫描版，当前只能读取可复制文字的 PDF。请先转成可复制文本，或接入 OCR。";
@@ -5687,6 +5740,8 @@ function normalizeAttachment(value) {
     preview: String(value.preview || value.text || ""),
     fileId: typeof value.fileId === "string" ? value.fileId : "",
     projectId: typeof value.projectId === "string" ? value.projectId : "",
+    sourceAvailable: Boolean(value.sourceAvailable),
+    pageCount: Number(value.pageCount) || 0,
     charCount: Number(value.charCount) || 0,
     chunkCount: Number(value.chunkCount) || 0,
     chunked: Boolean(value.chunked),
@@ -5876,7 +5931,7 @@ async function retryAttachmentWithOcr(uploadId) {
       () => {
         updateUploadItems([item], { status: "processing", progress: 100 });
       },
-      { ocrEnabled: true }
+      { ocrEnabled: true, apiKey: apiKeyInput.value.trim() }
     );
     applyBatchUploadResult([item], result);
   } catch (error) {
@@ -5919,7 +5974,8 @@ function renderMessageAttachments(attachments) {
   const images = imageAttachments(attachments);
 
   for (const [index, attachment] of attachments.entries()) {
-    const item = attachment.thumbnail ? document.createElement("button") : document.createElement("span");
+    const readable = Boolean(!attachment.thumbnail && (attachment.fileId || attachment.preview || attachment.text));
+    const item = attachment.thumbnail || readable ? document.createElement("button") : document.createElement("span");
     item.className = attachment.thumbnail ? "message-attachment image" : "message-attachment";
     const chunkLabel = attachment.chunked || attachment.chunkCount > 1 ? ` · ${attachment.chunkCount} 段` : "";
     if (attachment.thumbnail) {
@@ -5928,6 +5984,10 @@ function renderMessageAttachments(attachments) {
       item.innerHTML = `<img alt="" loading="lazy"><span></span>`;
       item.querySelector("img").src = attachment.thumbnail;
       item.querySelector("span").textContent = `${attachment.name} · ${formatBytes(attachment.size)}${chunkLabel}`;
+    } else if (readable) {
+      item.type = "button";
+      item.dataset.messageAttachment = String(index);
+      item.textContent = `${attachment.name} · ${formatBytes(attachment.size)}${chunkLabel}`;
     } else {
       item.textContent = `${attachment.name} · ${formatBytes(attachment.size)}${chunkLabel}`;
     }
@@ -7352,6 +7412,7 @@ async function openCitationForMessage(messageId, citationId) {
       preview: chunk.text || attachment.preview,
       text: chunk.text || attachment.text,
       name: `${attachment.name} · ${citationId}`,
+      readerChunkStart: chunkIndex,
     });
   } catch (error) {
     showToast(error.message || "读取引用片段失败");
@@ -7949,8 +8010,214 @@ function closePanels() {
   closeActivityPanel();
 }
 
+function isFileReaderPromptContext() {
+  return Boolean(filePreviewPanel?.classList.contains("open") && state.fileReader?.attachment && shouldUseSideFileReaderPanel());
+}
+
+function shouldShowFileReaderWorkspace() {
+  return Boolean(isFileReaderPromptContext() && state.messages.length === 0);
+}
+
+function syncFileReaderWorkspaceState({ renderWorkspace = true } = {}) {
+  const active = shouldShowFileReaderWorkspace();
+  document.body.classList.toggle("file-reader-workspace-open", active);
+  appShell?.classList.toggle("is-empty", state.messages.length === 0 && !active);
+  syncPromptPlaceholder();
+  if (active && renderWorkspace) {
+    renderFileReaderWorkspace();
+  } else if (!active) {
+    removeFileReaderWorkspace();
+  }
+}
+
+function removeFileReaderWorkspace() {
+  const workspace = chatLog?.querySelector?.("[data-file-reader-workspace]");
+  if (!workspace) return;
+  if (!state.messages.length) {
+    chatLog.replaceChildren();
+  } else {
+    workspace.remove();
+  }
+}
+
+function renderFileReaderWorkspace() {
+  const attachment = state.fileReader?.attachment;
+  if (!chatLog || !attachment || state.messages.length) return;
+  conversationPeek?.setAttribute("hidden", "");
+  chatLog.replaceChildren();
+
+  const workspace = document.createElement("section");
+  workspace.className = "file-reader-workspace";
+  workspace.dataset.fileReaderWorkspace = "true";
+  workspace.setAttribute("aria-label", "文档阅读对话");
+
+  workspace.append(
+    renderFileReaderWorkspaceTopbar(),
+    renderFileReaderWorkspaceFileCard(attachment),
+    renderFileReaderWorkspacePrimaryAction(attachment),
+    renderFileReaderWorkspaceAnswer(attachment),
+    renderFileReaderWorkspaceQuickPrompts(attachment)
+  );
+  chatLog.append(workspace);
+}
+
+function renderFileReaderWorkspaceTopbar() {
+  const topbar = document.createElement("div");
+  topbar.className = "file-reader-workspace-topbar";
+  const left = document.createElement("div");
+  left.className = "file-reader-workspace-topbar-left";
+  left.append(
+    createFileReaderWorkspaceIconButton("打开历史", "sidebar", () => toggleHistory()),
+    createFileReaderWorkspaceIconButton("新建对话", "edit", () => startNewConversation())
+  );
+  const right = document.createElement("div");
+  right.className = "file-reader-workspace-topbar-right";
+  const desktop = document.createElement("button");
+  desktop.type = "button";
+  desktop.className = "file-reader-workspace-desktop";
+  desktop.innerHTML = `<span class="file-reader-workspace-windows" aria-hidden="true"></span><span>下载电脑版</span>`;
+  desktop.addEventListener("click", () => showToast("当前为本地阅读工作台，已支持桌面端阅读"));
+  const mute = createFileReaderWorkspaceIconButton("静音", "volumeOff", (event) => {
+    const button = event.currentTarget;
+    const pressed = button?.getAttribute?.("aria-pressed") === "true";
+    button?.setAttribute?.("aria-pressed", String(!pressed));
+    showToast(pressed ? "已开启阅读提示音" : "已静音阅读提示音");
+  });
+  const more = createFileReaderWorkspaceIconButton("更多", "more", () => showToast("更多文档操作已放在右侧阅读栏"));
+  right.append(mute, more, desktop);
+  topbar.append(left, right);
+  return topbar;
+}
+
+function renderFileReaderWorkspaceFileCard(attachment) {
+  const card = document.createElement("button");
+  card.type = "button";
+  card.className = "file-reader-workspace-card";
+  card.title = "定位到右侧文档";
+  card.addEventListener("click", () => {
+    const stage = filePreviewText?.querySelector?.(".file-original-pdf-stage");
+    stage?.focus?.();
+    stage?.scrollTo?.({ top: stage.scrollTop, behavior: "smooth" });
+  });
+
+  const icon = document.createElement("span");
+  icon.className = `file-reader-workspace-file-icon ${fileReaderWorkspaceKind(attachment)}`;
+  icon.textContent = fileReaderWorkspaceKindLabel(attachment);
+  const text = document.createElement("span");
+  text.className = "file-reader-workspace-file-text";
+  const name = document.createElement("strong");
+  name.textContent = attachment.name || "文档";
+  const meta = document.createElement("span");
+  meta.textContent = fileReaderWorkspaceMeta(attachment);
+  text.append(name, meta);
+  card.append(icon, text);
+  return card;
+}
+
+function renderFileReaderWorkspacePrimaryAction() {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "file-reader-workspace-primary-action";
+  button.textContent = "详细总结这篇文档内容";
+  button.addEventListener("click", summarizeFileReaderDocument);
+  return button;
+}
+
+function renderFileReaderWorkspaceAnswer(attachment) {
+  const answer = document.createElement("article");
+  answer.className = "file-reader-workspace-answer";
+  const thinking = document.createElement("button");
+  thinking.type = "button";
+  thinking.className = "file-reader-workspace-thinking";
+  thinking.textContent = "已完成思考";
+  thinking.addEventListener("click", () => showToast("已根据当前文档生成阅读摘要"));
+
+  const title = document.createElement("h2");
+  title.textContent = "1. 一段话总结";
+  const body = document.createElement("p");
+  body.innerHTML = fileReaderWorkspaceSummaryHtml(attachment);
+  answer.append(thinking, title, body);
+  return answer;
+}
+
+function renderFileReaderWorkspaceQuickPrompts(attachment) {
+  const panel = document.createElement("div");
+  panel.className = "file-reader-workspace-prompts";
+  for (const action of [
+    ["summary", "详细总结这篇文档内容", "summary"],
+    ["outline", "提炼文档大纲", "outline"],
+    ["questions", "生成可追问的问题", "questions"],
+    ["translate", "翻译全文", "translate"],
+    ["mindmap", "生成思维导图", "mindmap"],
+  ]) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "file-reader-workspace-prompt";
+    button.dataset.fileReaderAction = action[0];
+    button.innerHTML = `${originalToolbarIcon(action[2])}<span>${action[1]}</span>`;
+    button.addEventListener("click", () => runFileReaderQuickAction(action[0]));
+    panel.append(button);
+  }
+  return panel;
+}
+
+function createFileReaderWorkspaceIconButton(label, icon, onClick) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "file-reader-workspace-icon-button";
+  button.title = label;
+  button.setAttribute("aria-label", label);
+  button.innerHTML = originalToolbarIcon(icon);
+  button.addEventListener("click", onClick);
+  return button;
+}
+
+function fileReaderWorkspaceKind(attachment) {
+  return String(attachment?.kind || attachment?.type || "").toLowerCase().includes("pdf") ? "pdf" : "file";
+}
+
+function fileReaderWorkspaceKindLabel(attachment) {
+  return fileReaderWorkspaceKind(attachment) === "pdf" ? "PDF" : "DOC";
+}
+
+function fileReaderWorkspaceMeta(attachment) {
+  const parts = [fileReaderWorkspaceKindLabel(attachment), formatBytes(attachment?.size)];
+  const pageCount = Number(attachment?.pageCount) || 0;
+  const chunkCount = Number(attachment?.chunkCount) || 0;
+  if (pageCount) parts.push(`${pageCount} 页`);
+  if (chunkCount) parts.push(`${chunkCount} 段`);
+  return parts.filter(Boolean).join(" · ");
+}
+
+function fileReaderWorkspaceSummaryHtml(attachment) {
+  const preview = fileReaderWorkspacePreviewText(attachment);
+  if (preview) {
+    return `我已打开 <strong>${escapeHtml(attachment.name || "这篇文档")}</strong>，可以围绕全文总结、解释、翻译和截图提问。当前可读片段显示：${escapeHtml(
+      preview
+    )}`;
+  }
+  return `我已打开 <strong>${escapeHtml(attachment.name || "这篇文档")}</strong>，可以围绕右侧原文进行总结、解释、翻译和截图提问。你可以直接选中文本或点击下方快捷问题继续阅读。`;
+}
+
+function fileReaderWorkspacePreviewText(attachment) {
+  const text = String(attachment?.preview || attachment?.text || "").replace(/\s+/g, " ").trim();
+  if (!text) return "";
+  return text.length > 220 ? `${text.slice(0, 220)}...` : text;
+}
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function openFilePreview(attachment) {
   if (!filePreviewPanel) return;
+  const readerAttachment = normalizeFileReaderAttachment(attachment);
+  if (!readerAttachment) return;
   closeHistory();
   closeSettings();
   closeSeekPanel();
@@ -7959,22 +8226,2293 @@ function openFilePreview(attachment) {
   closeMemoryPanel();
   closeDiagnosticsPanel();
   closeActivityPanel();
-  filePreviewTitle.textContent = attachment.name || "文件预览";
-  const chunkLabel = attachment.chunked || attachment.chunkCount > 1 ? ` · ${attachment.chunkCount} 段` : "";
-  filePreviewMeta.textContent = `${String(attachment.kind || "FILE").toUpperCase()} · ${formatBytes(attachment.size)}${chunkLabel}`;
-  filePreviewText.textContent = attachment.preview || attachment.text || "没有可预览内容";
+  filePreviewTitle.textContent = readerAttachment.name || "文件预览";
+  updateFilePreviewMeta(readerAttachment);
   filePreviewPanel.classList.add("open");
   filePreviewPanel.setAttribute("aria-hidden", "false");
-  setBackdropVisible(true);
-  activateFocusTrap(filePreviewPanel);
+  const initialChunkStart = Math.max(1, Number(readerAttachment.readerChunkStart) || 1);
+  state.fileReader = readerAttachment.fileId
+    ? {
+        attachment: readerAttachment,
+        chunkStart: initialChunkStart,
+        chunkCount: fileReaderChunkCount,
+        totalChunks: Number(readerAttachment.chunkCount) || 0,
+        window: null,
+        requestId: "",
+        loading: false,
+        originalPage: 1,
+        originalZoom: 100,
+        originalSidebarOpen: false,
+        originalTextOpen: false,
+        originalPageText: null,
+        originalPageTextRequestId: "",
+        originalPageTextLoading: false,
+        originalPageLayout: null,
+        originalPageLayouts: {},
+        originalPageLayoutRequests: {},
+        originalPageLayoutRequestId: "",
+        originalPageLayoutLoading: false,
+        originalSelectedText: "",
+        originalSearchOpen: false,
+        originalSearchQuery: "",
+        originalSearchResults: [],
+        originalSearchIndex: -1,
+        originalSearchTarget: null,
+        originalSearchRequestId: "",
+        originalSearchLoading: false,
+        originalMoreOpen: false,
+        originalCaptureActive: false,
+        originalCaptureRegion: null,
+        mode: originalPreviewType(readerAttachment) ? "original" : "text",
+      }
+    : null;
+  if (state.fileReader?.mode === "original") {
+    renderOriginalFilePreview(readerAttachment);
+  } else if (state.fileReader) {
+    renderFileReaderLoading(readerAttachment);
+    loadFileReaderWindow(initialChunkStart);
+  } else {
+    renderLegacyFilePreview(readerAttachment);
+  }
+  updateFileReaderPanelMode();
+  syncFileReaderWorkspaceState();
 }
 
 function closeFilePreview() {
   if (!filePreviewPanel) return;
   filePreviewPanel.classList.remove("open");
   filePreviewPanel.setAttribute("aria-hidden", "true");
+  setFilePreviewOriginalMode(false);
+  filePreviewPanel.classList.remove("fullscreen-mode");
+  document.body.classList.remove("file-reader-side-open");
+  state.fileReader = null;
+  if (fileReaderToolbar) fileReaderToolbar.hidden = true;
+  syncFileReaderWorkspaceState({ renderWorkspace: false });
+  syncPromptPlaceholder();
   deactivateFocusTrap(filePreviewPanel);
   syncBackdrop();
+}
+
+function normalizeFileReaderAttachment(attachment) {
+  const normalized = normalizeStoredAttachment(attachment);
+  if (!normalized) return null;
+  const readerChunkStart = Number(attachment?.readerChunkStart);
+  if (Number.isFinite(readerChunkStart) && readerChunkStart > 0) {
+    normalized.readerChunkStart = readerChunkStart;
+  }
+  return normalized;
+}
+
+function updateFilePreviewMeta(attachment, windowInfo = null) {
+  if (!filePreviewMeta) return;
+  const chunkCount = Number(windowInfo?.totalChunks || attachment.chunkCount) || 0;
+  const chunkLabel = chunkCount > 1 || attachment.chunked ? ` · ${chunkCount} 段` : "";
+  const charLabel = Number(attachment.charCount) > 0 ? ` · ${Number(attachment.charCount).toLocaleString()} 字` : "";
+  const rangeLabel =
+    windowInfo && Number(windowInfo.chunkStart) > 0 ? ` · 正在阅读 ${windowInfo.chunkStart}-${windowInfo.chunkEnd} 段` : "";
+  filePreviewMeta.textContent = `${String(attachment.kind || "FILE").toUpperCase()} · ${formatBytes(attachment.size)}${charLabel}${chunkLabel}${rangeLabel}`;
+}
+
+function renderLegacyFilePreview(attachment) {
+  setFilePreviewOriginalMode(false);
+  if (fileReaderToolbar) fileReaderToolbar.hidden = true;
+  if (!filePreviewText) return;
+  filePreviewText.classList.remove("loading", "error", "original");
+  filePreviewText.replaceChildren();
+  const legacy = document.createElement("pre");
+  legacy.className = "file-reader-legacy";
+  legacy.textContent = attachment.preview || attachment.text || "没有可预览内容";
+  filePreviewText.append(legacy);
+}
+
+function renderOriginalFilePreview(attachment) {
+  if (fileReaderToolbar) fileReaderToolbar.hidden = true;
+  updateFileReaderControls();
+  if (!filePreviewText) return;
+  const type = originalPreviewType(attachment);
+  setFilePreviewOriginalMode(true, type);
+  if (state.fileReader) {
+    state.fileReader.originalPage = Math.max(1, Number(state.fileReader.originalPage) || 1);
+    state.fileReader.originalZoom = Math.max(60, Math.min(180, Number(state.fileReader.originalZoom) || 100));
+    state.fileReader.originalCaptureActive = false;
+    state.fileReader.originalCaptureRegion = null;
+    state.fileReader.originalSelectedText = "";
+  }
+  filePreviewText.classList.remove("loading", "error");
+  filePreviewText.classList.add("original");
+  filePreviewText.replaceChildren();
+  const sourceUrl = fileSourceUrl(attachment);
+  const downloadUrl = fileSourceUrl(attachment, { download: true });
+  const reader = document.createElement("section");
+  reader.className = "file-original-reader";
+  reader.dataset.previewType = type || "file";
+  reader.classList.toggle("sidebar-open", Boolean(state.fileReader?.originalSidebarOpen));
+  reader.classList.toggle("text-open", Boolean(state.fileReader?.originalTextOpen));
+  reader.append(renderOriginalReaderToolbar(attachment, sourceUrl, downloadUrl, type));
+  const viewer = document.createElement("div");
+  viewer.className = "file-original-viewer-card";
+  viewer.dataset.readerRole = "originalViewerCard";
+  const body = document.createElement("div");
+  body.className = "file-original-reader-body";
+  body.append(renderOriginalReaderSidebar(attachment, type));
+  const frame = document.createElement("div");
+  frame.className = "file-original-preview";
+  if (type === "pdf") {
+    frame.classList.add("pdf-image-mode");
+    frame.append(renderOriginalPdfViewer(attachment, sourceUrl, downloadUrl, type));
+  } else if (type === "image") {
+    const img = document.createElement("img");
+    img.src = sourceUrl;
+    img.alt = attachment.name || "原文件";
+    img.loading = "lazy";
+    frame.append(img);
+    frame.append(renderOriginalCaptureLayer());
+  } else {
+    const iframe = document.createElement("iframe");
+    iframe.src = originalReaderFrameUrl(sourceUrl, type);
+    iframe.title = attachment.name || "原文件预览";
+    iframe.loading = "lazy";
+    iframe.dataset.sourceUrl = sourceUrl;
+    iframe.dataset.previewType = type;
+    frame.append(iframe);
+    frame.append(renderOriginalCaptureLayer());
+  }
+  body.append(frame);
+  body.append(renderOriginalTextLayer());
+  viewer.append(body, renderOriginalReaderFooter(attachment, sourceUrl, downloadUrl));
+  reader.append(viewer);
+  filePreviewText.append(reader);
+  syncOriginalReaderControls();
+  syncOriginalCaptureLayer();
+  if (state.fileReader?.originalTextOpen) {
+    loadOriginalPageText();
+  }
+}
+
+function renderOriginalReaderFooter(attachment, sourceUrl, downloadUrl) {
+  const actions = document.createElement("div");
+  actions.className = "file-original-actions";
+  actions.dataset.readerRole = "originalViewerFooter";
+  const open = document.createElement("a");
+  open.className = "download-link";
+  open.href = sourceUrl;
+  open.target = "_blank";
+  open.rel = "noopener";
+  open.textContent = "新窗口打开";
+  const download = document.createElement("a");
+  download.className = "download-link";
+  download.href = downloadUrl;
+  download.download = attachment?.name || "";
+  download.textContent = "下载原文件";
+  actions.append(open, download);
+  return actions;
+}
+
+function renderOriginalReaderToolbar(attachment, sourceUrl, downloadUrl, type) {
+  const toolbar = document.createElement("div");
+  toolbar.className = "file-original-toolbar";
+
+  const nav = document.createElement("div");
+  nav.className = "file-original-toolbar-row file-original-toolbar-nav";
+  const previous = createOriginalToolbarButton("上一段", {
+    className: "file-original-pill-button",
+    text: "上一段",
+    role: "previousPage",
+    onClick: () => stepOriginalReaderPage(-1),
+  });
+  const mode = createOriginalToolbarButton("原样预览", {
+    className: "file-original-mode-button",
+    text: "原样预览",
+    role: "previewMode",
+    pressed: true,
+  });
+  const next = createOriginalToolbarButton("下一段", {
+    className: "file-original-pill-button",
+    text: "下一段",
+    role: "nextPage",
+    onClick: () => stepOriginalReaderPage(1),
+  });
+  nav.append(previous, mode, next);
+
+  const actions = document.createElement("div");
+  actions.className = "file-original-toolbar-row file-original-toolbar-actions";
+  actions.append(
+    createOriginalToolbarButton("引用所选", {
+      className: "file-original-pill-button",
+      text: "引用所选",
+      onClick: quoteOriginalReaderSelection,
+    }),
+    createOriginalToolbarButton("总结全文", {
+      className: "file-original-pill-button file-original-primary-button",
+      text: "总结全文",
+      onClick: summarizeFileReaderDocument,
+    })
+  );
+
+  toolbar.append(nav, actions, renderFileReaderQuickActionStrip());
+  return toolbar;
+}
+
+function renderFileReaderQuickActionStrip({ compact = false } = {}) {
+  const strip = document.createElement("div");
+  strip.className = `file-reader-ai-strip${compact ? " compact" : ""}`;
+  strip.setAttribute("aria-label", "AI 读文档快捷操作");
+
+  const label = document.createElement("span");
+  label.className = "file-reader-ai-label";
+  label.textContent = "AI 读文档";
+  strip.append(label);
+
+  for (const action of fileReaderQuickActions()) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "file-reader-ai-action";
+    button.dataset.fileReaderAction = action.id;
+    button.disabled = !state.fileReader?.attachment?.fileId;
+    button.innerHTML = `${originalToolbarIcon(action.icon)}<span>${action.label}</span>`;
+    button.addEventListener("click", () => runFileReaderQuickAction(action.id));
+    strip.append(button);
+  }
+
+  return strip;
+}
+
+function fileReaderQuickActions() {
+  return [
+    { id: "summary", label: "总结全文", icon: "summary" },
+    { id: "outline", label: "提炼大纲", icon: "outline" },
+    { id: "questions", label: "生成追问", icon: "questions" },
+    { id: "translate", label: "翻译全文", icon: "translate" },
+    { id: "mindmap", label: "生成脑图", icon: "mindmap" },
+  ];
+}
+
+function runFileReaderQuickAction(action) {
+  if (action === "summary") {
+    summarizeFileReaderDocument();
+  } else if (action === "outline") {
+    outlineFileReaderDocument();
+  } else if (action === "questions") {
+    suggestFileReaderQuestions();
+  } else if (action === "translate") {
+    translateFileReaderDocument();
+  } else if (action === "mindmap") {
+    mindmapFileReaderDocument();
+  }
+}
+
+function renderOriginalPdfViewer(attachment, sourceUrl, downloadUrl, type) {
+  const shell = document.createElement("div");
+  shell.className = "file-original-pdf-shell";
+  shell.classList.toggle("search-open", Boolean(state.fileReader?.originalSearchOpen));
+  shell.classList.toggle("more-open", Boolean(state.fileReader?.originalMoreOpen));
+  shell.append(renderOriginalPdfInnerToolbar(attachment, sourceUrl, downloadUrl));
+  shell.append(renderOriginalSearchPanel());
+  const stage = document.createElement("div");
+  stage.className = "file-original-pdf-stage";
+  stage.addEventListener("scroll", onOriginalPdfStageScroll, { passive: true });
+  stage.append(
+    renderOriginalPdfPageStack(attachment, sourceUrl, type, shell),
+    renderOriginalPageTextOverlay(),
+    renderOriginalInlineSelectionToolbar(),
+    renderOriginalCaptureLayer()
+  );
+  shell.append(stage);
+  window.setTimeout(syncOriginalPdfPageWidths, 0);
+  return shell;
+}
+
+function renderOriginalPdfPageStack(attachment, sourceUrl, type, shell) {
+  const stack = document.createElement("div");
+  stack.className = "file-original-page-stack";
+  stack.dataset.readerRole = "pdfPageStack";
+  const pageCount = originalReaderPageCount(attachment, type) || 1;
+  for (let page = 1; page <= pageCount; page += 1) {
+    const frame = document.createElement("figure");
+    frame.className = "file-original-page-frame";
+    frame.dataset.readerRole = "pdfPageFrame";
+    frame.dataset.originalPage = String(page);
+    const pageImage = document.createElement("img");
+    pageImage.className = "file-original-page-image";
+    pageImage.alt = `${attachment.name || "PDF"} 第 ${page} 页`;
+    pageImage.loading = page <= 2 ? "eager" : "lazy";
+    pageImage.decoding = "async";
+    pageImage.dataset.sourceUrl = sourceUrl;
+    pageImage.dataset.previewType = type;
+    pageImage.dataset.originalPage = String(page);
+    pageImage.src = filePageImageUrl(attachment, { page });
+    pageImage.addEventListener("load", () => {
+      frame.classList.remove("page-loading");
+      syncOriginalPdfPageWidths();
+      if (page === originalReaderCurrentPage()) {
+        syncOriginalPageTextOverlay();
+        loadOriginalPageLayout();
+      }
+    });
+    pageImage.addEventListener(
+      "error",
+      () => {
+        frame.classList.add("page-error");
+        if (page === originalReaderCurrentPage()) {
+          renderOriginalIframeFallback(shell.parentElement, sourceUrl, type);
+        }
+      },
+      { once: true }
+    );
+    frame.append(pageImage);
+    stack.append(frame);
+  }
+  return stack;
+}
+
+function renderOriginalPageTextOverlay() {
+  const overlay = document.createElement("div");
+  overlay.className = "file-original-page-text-overlay";
+  overlay.dataset.readerRole = "pageTextOverlay";
+  overlay.setAttribute("aria-label", "PDF 当前页可选文字");
+  overlay.addEventListener("pointerup", () => window.setTimeout(showOriginalPageSelectionToolbar, 0));
+  overlay.addEventListener("keyup", showOriginalPageSelectionToolbar);
+  return overlay;
+}
+
+function renderOriginalInlineSelectionToolbar() {
+  const toolbar = document.createElement("div");
+  toolbar.className = "file-original-selection-toolbar";
+  toolbar.dataset.readerRole = "inlineSelectionToolbar";
+  toolbar.hidden = true;
+  for (const [action, label] of [
+    ["explain", "解释"],
+    ["translate", "翻译"],
+    ["copy", "复制"],
+    ["ask", "问问豆包"],
+  ]) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.originalTextAction = action;
+    decorateOriginalActionButton(button, action, label);
+    button.addEventListener("click", handleOriginalTextAction);
+    toolbar.append(button);
+  }
+  return toolbar;
+}
+
+function decorateOriginalActionButton(button, action, label) {
+  button.classList.add("file-original-action-button");
+  const icon = originalToolbarIcon(action);
+  if (icon) {
+    const iconWrap = document.createElement("span");
+    iconWrap.className = "file-original-action-button-icon";
+    iconWrap.innerHTML = icon;
+    const labelWrap = document.createElement("span");
+    labelWrap.textContent = label;
+    button.append(iconWrap, labelWrap);
+    return;
+  }
+  button.textContent = label;
+}
+
+function renderOriginalPdfInnerToolbar(attachment, sourceUrl, downloadUrl) {
+  const bar = document.createElement("div");
+  bar.className = "file-original-pdf-inner-toolbar";
+  const left = document.createElement("div");
+  left.className = "file-original-pdf-toolbar-group";
+  left.dataset.readerRole = "pdfToolbarLeft";
+  const pageForm = document.createElement("form");
+  pageForm.className = "file-original-pdf-page-form";
+  pageForm.addEventListener("submit", handleOriginalPageInputSubmit);
+  const pageInput = document.createElement("input");
+  pageInput.type = "text";
+  pageInput.inputMode = "numeric";
+  pageInput.pattern = "[0-9]*";
+  pageInput.dataset.readerRole = "pageInput";
+  pageInput.value = String(originalReaderCurrentPage());
+  pageInput.setAttribute("aria-label", "当前页码");
+  const pageTotal = document.createElement("span");
+  pageTotal.dataset.readerRole = "pageTotal";
+  pageTotal.textContent = `/ ${originalReaderPageCount(attachment, originalPreviewType(attachment)) || 1}`;
+  pageForm.append(pageInput, pageTotal);
+  left.append(
+    createOriginalToolbarButton("文档目录", {
+      className: "file-original-pdf-icon-button",
+      icon: originalToolbarIcon("sidebar"),
+      role: "sidebar",
+      pressed: Boolean(state.fileReader?.originalSidebarOpen),
+      onClick: toggleOriginalReaderSidebar,
+    }),
+    pageForm
+  );
+  const center = document.createElement("div");
+  center.className = "file-original-pdf-toolbar-group file-original-pdf-toolbar-center";
+  center.dataset.readerRole = "pdfToolbarCenter";
+  center.append(
+    createOriginalToolbarButton("翻译全文", {
+      className: "file-original-pdf-command-button",
+      icon: originalToolbarIcon("translate"),
+      text: "翻译全文",
+      onClick: translateFileReaderDocument,
+    }),
+    createOriginalToolbarButton("截图提问", {
+      className: "file-original-pdf-command-button",
+      icon: originalToolbarIcon("scissors"),
+      text: "截图提问",
+      onClick: askOriginalReaderVisiblePage,
+    })
+  );
+  const right = document.createElement("div");
+  right.className = "file-original-pdf-toolbar-group file-original-pdf-toolbar-right";
+  right.dataset.readerRole = "pdfToolbarRight";
+  right.append(
+    createOriginalToolbarButton("文字层", {
+      className: "file-original-pdf-icon-button",
+      icon: originalToolbarIcon("text"),
+      role: "textLayer",
+      pressed: Boolean(state.fileReader?.originalTextOpen),
+      onClick: toggleOriginalTextLayer,
+    }),
+    createOriginalToolbarButton("搜索文档", {
+      className: "file-original-pdf-icon-button",
+      icon: originalToolbarIcon("search"),
+      role: "search",
+      pressed: Boolean(state.fileReader?.originalSearchOpen),
+      onClick: toggleOriginalSearchPanel,
+    }),
+    createOriginalToolbarLink("新窗口打开", sourceUrl, {
+      className: "file-original-pdf-icon-link",
+      icon: originalToolbarIcon("external"),
+      target: "_blank",
+      role: "external",
+    }),
+    createOriginalToolbarButton("缩小", {
+      className: "file-original-pdf-icon-button",
+      icon: originalToolbarIcon("minus"),
+      onClick: () => zoomOriginalReader(-10),
+    }),
+    createOriginalToolbarButton("放大", {
+      className: "file-original-pdf-icon-button",
+      icon: originalToolbarIcon("plus"),
+      onClick: () => zoomOriginalReader(10),
+    }),
+    createOriginalToolbarLink("下载原文件", downloadUrl, {
+      className: "file-original-pdf-icon-link",
+      icon: originalToolbarIcon("download"),
+      download: attachment?.name || "",
+    }),
+    createOriginalToolbarButton("全屏阅读", {
+      className: "file-original-pdf-icon-button",
+      icon: originalToolbarIcon("fullscreen"),
+      onClick: toggleOriginalReaderFullscreen,
+    }),
+    createOriginalToolbarButton("关闭阅读", {
+      className: "file-original-pdf-icon-button file-original-pdf-close-button",
+      icon: originalToolbarIcon("close"),
+      onClick: closeFilePreview,
+    })
+  );
+  const moreWrap = document.createElement("div");
+  moreWrap.className = "file-original-more-wrap";
+  moreWrap.append(
+    createOriginalToolbarButton("更多操作", {
+      className: "file-original-pdf-icon-button",
+      icon: originalToolbarIcon("more"),
+      role: "more",
+      pressed: Boolean(state.fileReader?.originalMoreOpen),
+      onClick: toggleOriginalMoreMenu,
+    }),
+    renderOriginalMoreMenu(attachment, sourceUrl, downloadUrl)
+  );
+  right.append(moreWrap);
+  bar.append(left, center, right);
+  return bar;
+}
+
+function renderOriginalMoreMenu(attachment, sourceUrl, downloadUrl) {
+  const menu = document.createElement("div");
+  menu.className = "file-original-more-menu";
+  menu.dataset.readerRole = "moreMenu";
+  menu.hidden = !state.fileReader?.originalMoreOpen;
+  menu.setAttribute("role", "menu");
+
+  const open = document.createElement("a");
+  open.href = sourceUrl;
+  open.target = "_blank";
+  open.rel = "noopener";
+  open.setAttribute("role", "menuitem");
+  open.innerHTML = `${originalToolbarIcon("external")}<span>新窗口打开</span>`;
+  open.addEventListener("click", () => toggleOriginalMoreMenu(false));
+
+  const download = document.createElement("a");
+  download.href = downloadUrl;
+  download.download = attachment?.name || "";
+  download.setAttribute("role", "menuitem");
+  download.innerHTML = `${originalToolbarIcon("download")}<span>下载原文件</span>`;
+  download.addEventListener("click", () => toggleOriginalMoreMenu(false));
+
+  menu.append(
+    open,
+    download,
+    createOriginalMoreMenuButton("翻译全文", "translate", () => translateFileReaderDocument()),
+    createOriginalMoreMenuButton("切换文字层", "text", () => toggleOriginalTextLayer()),
+    createOriginalMoreMenuButton("截图提问", "scissors", () => askOriginalReaderVisiblePage())
+  );
+  return menu;
+}
+
+function createOriginalMoreMenuButton(label, icon, onClick) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.setAttribute("role", "menuitem");
+  button.innerHTML = `${originalToolbarIcon(icon)}<span>${label}</span>`;
+  button.addEventListener("click", () => {
+    toggleOriginalMoreMenu(false);
+    onClick?.();
+  });
+  return button;
+}
+
+function renderOriginalSearchPanel() {
+  const reader = state.fileReader;
+  const panel = document.createElement("form");
+  panel.className = "file-original-search-panel";
+  panel.hidden = !reader?.originalSearchOpen;
+  panel.addEventListener("submit", handleOriginalSearchSubmit);
+  const input = document.createElement("input");
+  input.type = "search";
+  input.dataset.readerRole = "searchInput";
+  input.placeholder = "搜索文档";
+  input.value = reader?.originalSearchQuery || "";
+  input.autocomplete = "off";
+  const status = document.createElement("span");
+  status.className = "file-original-search-status";
+  status.dataset.readerRole = "searchStatus";
+  status.textContent = originalSearchStatusText();
+  panel.append(
+    input,
+    status,
+    createOriginalToolbarButton("上一个搜索结果", {
+      className: "file-original-search-nav",
+      icon: originalToolbarIcon("chevronLeft"),
+      onClick: (event) => {
+        event.preventDefault();
+        stepOriginalSearchResult(-1);
+      },
+    }),
+    createOriginalToolbarButton("下一个搜索结果", {
+      className: "file-original-search-nav",
+      icon: originalToolbarIcon("chevronRight"),
+      onClick: (event) => {
+        event.preventDefault();
+        stepOriginalSearchResult(1);
+      },
+    }),
+    createOriginalToolbarButton("关闭搜索", {
+      className: "file-original-search-nav",
+      icon: originalToolbarIcon("close"),
+      onClick: (event) => {
+        event.preventDefault();
+        toggleOriginalSearchPanel(false);
+      },
+    })
+  );
+  return panel;
+}
+
+function renderOriginalIframeFallback(frame, sourceUrl, type) {
+  if (!frame) return;
+  frame.classList.remove("pdf-image-mode");
+  frame.replaceChildren();
+  const iframe = document.createElement("iframe");
+  iframe.src = originalReaderFrameUrl(sourceUrl, type);
+  iframe.title = state.fileReader?.attachment?.name || "原文件预览";
+  iframe.loading = "lazy";
+  iframe.dataset.sourceUrl = sourceUrl;
+  iframe.dataset.previewType = type;
+  frame.append(iframe, renderOriginalCaptureLayer());
+  syncOriginalCaptureLayer();
+}
+
+function renderOriginalReaderSidebar(attachment, type) {
+  const sidebar = document.createElement("aside");
+  sidebar.className = "file-original-sidebar";
+  sidebar.setAttribute("aria-label", "页面列表");
+  sidebar.classList.toggle("pdf-thumbnails", type === "pdf");
+  const pageCount = originalReaderPageCount(attachment, type);
+  const maxRenderedPages = Math.min(pageCount || 1, 240);
+  for (let page = 1; page <= maxRenderedPages; page += 1) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "file-original-page-thumb";
+    button.dataset.originalPage = String(page);
+    button.title = `第 ${page} 页`;
+    if (type === "pdf") {
+      const preview = document.createElement("span");
+      preview.className = "file-original-page-thumb-preview";
+      const img = document.createElement("img");
+      img.src = filePageThumbnailUrl(attachment, page);
+      img.alt = `第 ${page} 页缩略图`;
+      img.loading = "lazy";
+      img.decoding = "async";
+      img.addEventListener("error", () => {
+        preview.classList.add("thumbnail-error");
+        preview.textContent = String(page);
+      });
+      preview.append(img);
+      const number = document.createElement("span");
+      number.className = "file-original-page-thumb-label";
+      number.textContent = String(page);
+      button.append(preview, number);
+    } else {
+      const number = document.createElement("span");
+      number.textContent = String(page);
+      button.append(number);
+    }
+    button.addEventListener("click", () => setOriginalReaderPage(page));
+    sidebar.append(button);
+  }
+  if (pageCount > maxRenderedPages) {
+    const more = document.createElement("div");
+    more.className = "file-original-sidebar-more";
+    more.textContent = `+${pageCount - maxRenderedPages}`;
+    sidebar.append(more);
+  }
+  return sidebar;
+}
+
+function renderOriginalTextLayer() {
+  const panel = document.createElement("aside");
+  panel.className = "file-original-text-layer";
+  panel.setAttribute("aria-label", "当前页文字层");
+  const header = document.createElement("div");
+  header.className = "file-original-text-header";
+  const title = document.createElement("strong");
+  title.textContent = "当前页文本";
+  const page = document.createElement("span");
+  page.dataset.readerRole = "textPage";
+  page.textContent = originalReaderPageLabel(state.fileReader?.attachment, originalPreviewType(state.fileReader?.attachment));
+  header.append(title, page);
+  const actions = document.createElement("div");
+  actions.className = "file-original-text-actions";
+  for (const [action, label] of [
+    ["explain", "解释"],
+    ["translate", "翻译"],
+    ["copy", "复制"],
+    ["ask", "问问豆包"],
+  ]) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.originalTextAction = action;
+    decorateOriginalActionButton(button, action, label);
+    button.addEventListener("click", handleOriginalTextAction);
+    actions.append(button);
+  }
+  const body = document.createElement("div");
+  body.className = "file-original-page-text-content";
+  body.tabIndex = 0;
+  body.dataset.readerRole = "pageTextContent";
+  body.textContent = "打开后会显示当前页可选择文本。";
+  panel.append(header, actions, body);
+  return panel;
+}
+
+function renderOriginalCaptureLayer() {
+  const layer = document.createElement("div");
+  layer.className = "file-original-capture-layer";
+  layer.setAttribute("aria-hidden", "true");
+  const box = document.createElement("div");
+  box.className = "file-original-capture-box";
+  const toolbar = document.createElement("div");
+  toolbar.className = "file-original-region-toolbar";
+  toolbar.hidden = true;
+  for (const [action, label] of [
+    ["explain", "解释"],
+    ["translate", "翻译"],
+    ["copy", "复制"],
+    ["ask", "问问豆包"],
+    ["close", "关闭"],
+  ]) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.originalRegionAction = action;
+    decorateOriginalActionButton(button, action, label);
+    button.addEventListener("click", handleOriginalRegionToolbarClick);
+    toolbar.append(button);
+  }
+  layer.append(box, toolbar);
+  layer.addEventListener("pointerdown", onOriginalCapturePointerDown);
+  layer.addEventListener("pointermove", onOriginalCapturePointerMove);
+  layer.addEventListener("pointerup", onOriginalCapturePointerUp);
+  layer.addEventListener("pointercancel", cancelOriginalCaptureDrag);
+  return layer;
+}
+
+function createOriginalToolbarButton(
+  label,
+  { className = "", icon = "", text = "", onClick = null, role = "", disabled = false, pressed = false } = {}
+) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = className || "file-original-icon-button";
+  button.title = label;
+  button.setAttribute("aria-label", label);
+  if (role) button.dataset.readerRole = role;
+  if (disabled) button.disabled = true;
+  if (pressed) button.setAttribute("aria-pressed", "true");
+  if (icon) {
+    const iconWrap = document.createElement("span");
+    iconWrap.className = "file-original-toolbar-icon";
+    iconWrap.innerHTML = icon;
+    button.append(iconWrap);
+  }
+  if (text) {
+    const labelWrap = document.createElement("span");
+    labelWrap.textContent = text;
+    button.append(labelWrap);
+  }
+  if (typeof onClick === "function") {
+    button.addEventListener("click", onClick);
+  }
+  return button;
+}
+
+function createOriginalToolbarLink(
+  label,
+  href,
+  { className = "", icon = "", text = "", target = "", download = "", role = "" } = {}
+) {
+  const link = document.createElement("a");
+  link.className = className || "file-original-icon-link";
+  link.href = href;
+  link.title = label;
+  link.setAttribute("aria-label", label);
+  if (target) {
+    link.target = target;
+    link.rel = "noopener";
+  }
+  if (download) link.download = download;
+  if (role) link.dataset.readerRole = role;
+  if (icon) {
+    const iconWrap = document.createElement("span");
+    iconWrap.className = "file-original-toolbar-icon";
+    iconWrap.innerHTML = icon;
+    link.append(iconWrap);
+  }
+  if (text) {
+    const labelWrap = document.createElement("span");
+    labelWrap.textContent = text;
+    link.append(labelWrap);
+  }
+  return link;
+}
+
+function originalToolbarIcon(name) {
+  const icons = {
+    sidebar: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="M10 4v16"/></svg>',
+    text: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14"/><path d="M12 5v14"/><path d="M8 19h8"/></svg>',
+    edit: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>',
+    volumeOff: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10v4h4l5 4V6l-5 4H4Z"/><path d="m19 9-4 4"/><path d="m15 9 4 4"/></svg>',
+    explain: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h12v16H6z"/><path d="M9 8h6M9 12h6M9 16h3"/></svg>',
+    copy: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
+    ask: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14v11H8l-3 3z"/><path d="M9 10h6M9 14h4"/></svg>',
+    summary: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h9l3 3v13H6z"/><path d="M14 4v4h4"/><path d="M9 12h6M9 16h4"/></svg>',
+    outline: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3.5 6h.01M3.5 12h.01M3.5 18h.01"/></svg>',
+    questions: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14v11H8l-3 3z"/><path d="M12 13v-.4c0-1.2 2-1.4 2-3 0-1.1-.9-2-2.1-2-1 0-1.8.5-2.2 1.4"/><path d="M12 16h.01"/></svg>',
+    mindmap: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="7" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="M8.2 7 15.8 7M7.4 8.2 10.8 15.8M16.6 9.2 13.2 15.8"/></svg>',
+    translate: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h9"/><path d="M9 3v2c0 4-2 7-5 9"/><path d="M6 9c1 2 3 4 6 5"/><path d="m13 21 4-9 4 9"/><path d="M15 17h6"/></svg>',
+    scissors: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="7" r="3"/><circle cx="6" cy="17" r="3"/><path d="m9 8 12-4"/><path d="m9 16 12 4"/><path d="m11 12 4 0"/></svg>',
+    search: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m16.5 16.5 4.5 4.5"/></svg>',
+    chevronLeft: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>',
+    chevronRight: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>',
+    minus: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/></svg>',
+    plus: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>',
+    external: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6"/><path d="m10 14 10-10"/><path d="M20 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h5"/></svg>',
+    download: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>',
+    fullscreen: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5"/><path d="M20 9V4h-5"/><path d="M4 15v5h5"/><path d="M20 15v5h-5"/></svg>',
+    more: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>',
+    close: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>',
+  };
+  return icons[name] || "";
+}
+
+function originalReaderPageLabel(attachment, type) {
+  if (type === "pdf" || type === "image") return `${originalReaderCurrentPage()} / ${originalReaderPageCount(attachment, type) || 1}`;
+  const kind = String(attachment?.kind || "FILE").toUpperCase();
+  return kind || "原样预览";
+}
+
+function originalReaderFrameUrl(sourceUrl, type, { page = 1, zoom = 100 } = {}) {
+  if (type !== "pdf") return sourceUrl;
+  const fragment = new URLSearchParams();
+  fragment.set("page", String(Math.max(1, Number(page) || 1)));
+  if (Number(zoom) && Number(zoom) !== 100) {
+    fragment.set("zoom", String(Math.max(60, Math.min(180, Number(zoom)))));
+  }
+  return `${sourceUrl}#${fragment.toString()}`;
+}
+
+function originalReaderPageCount(attachment = state.fileReader?.attachment, type = originalPreviewType(attachment)) {
+  if (type === "pdf") return Math.max(1, Number(attachment?.pageCount) || 1);
+  if (type === "image") return 1;
+  return 0;
+}
+
+function originalReaderCurrentPage() {
+  const reader = state.fileReader;
+  const maxPage = originalReaderPageCount(reader?.attachment, originalPreviewType(reader?.attachment)) || 1;
+  return Math.max(1, Math.min(maxPage, Number(reader?.originalPage) || 1));
+}
+
+function stepOriginalReaderPage(delta) {
+  setOriginalReaderPage(originalReaderCurrentPage() + delta);
+}
+
+function handleOriginalPageInputSubmit(event) {
+  event.preventDefault();
+  const input = event.currentTarget?.querySelector?.('[data-reader-role="pageInput"]');
+  const value = Number(input?.value || 1);
+  setOriginalReaderPage(value);
+  input?.blur?.();
+}
+
+function setOriginalReaderPage(page, { scrollIntoView = true, fromScroll = false } = {}) {
+  const reader = state.fileReader;
+  if (!reader?.attachment) return;
+  const type = originalPreviewType(reader.attachment);
+  const pageCount = originalReaderPageCount(reader.attachment, type) || 1;
+  const nextPage = Math.max(1, Math.min(pageCount, Number(page) || 1));
+  const changed = nextPage !== originalReaderCurrentPage();
+  reader.originalPage = nextPage;
+  if (changed) {
+    reader.originalPageText = null;
+    reader.originalPageLayout = reader.originalPageLayouts?.[String(nextPage)] || null;
+    reader.originalSelectedText = "";
+    reader.originalCaptureRegion = null;
+    reader.originalCaptureActive = false;
+  }
+  if (!fromScroll) {
+    reader.originalMoreOpen = false;
+  }
+  const hasPageStack = Boolean(filePreviewText?.querySelector?.('[data-reader-role="pdfPageStack"]'));
+  if (hasPageStack) {
+    hideOriginalPageSelectionToolbar();
+    if (scrollIntoView) {
+      scrollOriginalPdfPageIntoView(nextPage);
+    }
+    renderOriginalPageTextOverlayContent();
+  } else {
+    refreshOriginalReaderFrame();
+  }
+  syncOriginalReaderControls();
+  syncOriginalCaptureLayer();
+  if (reader.originalTextOpen) {
+    loadOriginalPageText();
+  }
+  if (hasPageStack) {
+    loadOriginalPageLayout();
+  }
+}
+
+function toggleOriginalReaderSidebar() {
+  const reader = state.fileReader;
+  if (!reader) return;
+  reader.originalSidebarOpen = !reader.originalSidebarOpen;
+  const root = filePreviewText?.querySelector?.(".file-original-reader");
+  root?.classList.toggle("sidebar-open", reader.originalSidebarOpen);
+  syncOriginalReaderControls();
+}
+
+function refreshOriginalReaderFrame() {
+  const reader = state.fileReader;
+  if (!reader?.attachment) return;
+  const pageStack = filePreviewText?.querySelector?.('[data-reader-role="pdfPageStack"]');
+  if (pageStack) {
+    reader.originalSelectedText = "";
+    hideOriginalPageSelectionToolbar();
+    renderOriginalPageTextOverlayContent();
+    for (const image of pageStack.querySelectorAll?.(".file-original-page-image") || []) {
+      const page = Number(image.dataset.originalPage) || originalReaderCurrentPage();
+      image.alt = `${reader.attachment.name || "PDF"} 第 ${page} 页`;
+      image.src = filePageImageUrl(reader.attachment, {
+        page,
+        zoom: Number(reader.originalZoom) || 100,
+      });
+    }
+    syncOriginalPdfPageWidths();
+    window.setTimeout(() => {
+      syncOriginalPdfPageWidths();
+      scrollOriginalPdfPageIntoView(originalReaderCurrentPage(), { behavior: "auto" });
+    }, 0);
+    return;
+  }
+  const pageImage = filePreviewText?.querySelector?.(".file-original-page-image");
+  if (pageImage) {
+    reader.originalSelectedText = "";
+    hideOriginalPageSelectionToolbar();
+    renderOriginalPageTextOverlayContent();
+    pageImage.alt = `${reader.attachment.name || "PDF"} 第 ${originalReaderCurrentPage()} 页`;
+    pageImage.src = filePageImageUrl(reader.attachment, {
+      page: originalReaderCurrentPage(),
+      zoom: Number(reader.originalZoom) || 100,
+    });
+    return;
+  }
+  const frame = filePreviewText?.querySelector?.(".file-original-preview iframe");
+  if (!frame?.dataset?.sourceUrl) return;
+  const type = frame.dataset.previewType || originalPreviewType(reader.attachment);
+  frame.src = originalReaderFrameUrl(frame.dataset.sourceUrl, type, {
+    page: originalReaderCurrentPage(),
+    zoom: Number(reader.originalZoom) || 100,
+  });
+}
+
+function onOriginalPdfStageScroll(event) {
+  const reader = state.fileReader;
+  if (!reader?.attachment || originalPreviewType(reader.attachment) !== "pdf") return;
+  if (reader.originalScrollFrame) return;
+  reader.originalScrollFrame = window.requestAnimationFrame(() => {
+    reader.originalScrollFrame = 0;
+    syncOriginalReaderPageFromScroll(event.currentTarget);
+    syncOriginalPageTextOverlay();
+    syncOriginalCaptureLayer();
+  });
+}
+
+function syncOriginalReaderPageFromScroll(stage) {
+  if (!(stage instanceof HTMLElement)) return;
+  const reader = state.fileReader;
+  if (!reader?.attachment) return;
+  const frames = Array.from(stage.querySelectorAll('[data-reader-role="pdfPageFrame"]'));
+  if (!frames.length) return;
+  const stageRect = stage.getBoundingClientRect();
+  const viewportCenter = stageRect.top + Math.max(80, stageRect.height * 0.38);
+  let bestPage = originalReaderCurrentPage();
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (const frame of frames) {
+    const rect = frame.getBoundingClientRect();
+    if (rect.bottom < stageRect.top || rect.top > stageRect.bottom) continue;
+    const distance = Math.abs(rect.top + rect.height * 0.22 - viewportCenter);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestPage = Number(frame.dataset.originalPage) || bestPage;
+    }
+  }
+  if (bestPage !== originalReaderCurrentPage()) {
+    setOriginalReaderPage(bestPage, { scrollIntoView: false, fromScroll: true });
+  }
+}
+
+function scrollOriginalPdfPageIntoView(page, { behavior = "smooth" } = {}) {
+  const stage = filePreviewText?.querySelector?.(".file-original-pdf-stage");
+  const frame = filePreviewText?.querySelector?.(`[data-reader-role="pdfPageFrame"][data-original-page="${Number(page) || 1}"]`);
+  if (!stage || !frame) return;
+  const stageRect = stage.getBoundingClientRect();
+  const frameRect = frame.getBoundingClientRect();
+  stage.scrollTo({
+    top: Math.max(0, stage.scrollTop + frameRect.top - stageRect.top - 16),
+    left: Math.max(0, stage.scrollLeft + frameRect.left - stageRect.left - 18),
+    behavior,
+  });
+}
+
+function syncOriginalPdfPageWidths() {
+  const reader = state.fileReader;
+  const stage = filePreviewText?.querySelector?.(".file-original-pdf-stage");
+  const stack = filePreviewText?.querySelector?.('[data-reader-role="pdfPageStack"]');
+  if (!reader?.attachment || !stage || !stack) return false;
+  const zoom = Math.max(60, Math.min(180, Number(reader.originalZoom) || 100)) / 100;
+  const fitWidth = Math.max(220, stage.clientWidth - 36);
+  let widest = 0;
+  for (const frame of stack.querySelectorAll?.('[data-reader-role="pdfPageFrame"]') || []) {
+    const image = frame.querySelector?.(".file-original-page-image");
+    if (!image) continue;
+    const visualWidth = Math.max(160, Math.round(fitWidth * zoom));
+    image.style.width = `${visualWidth}px`;
+    image.style.height = "auto";
+    frame.style.width = `${visualWidth}px`;
+    widest = Math.max(widest, visualWidth);
+  }
+  if (widest > 0) {
+    stack.style.width = `${Math.max(stage.clientWidth, widest)}px`;
+  }
+  syncOriginalPageTextOverlay();
+  syncOriginalCaptureLayer();
+  return widest > 0;
+}
+
+function syncOriginalReaderControls() {
+  const reader = state.fileReader;
+  if (!reader?.attachment || reader.mode !== "original") return;
+  const type = originalPreviewType(reader.attachment);
+  const pageCount = originalReaderPageCount(reader.attachment, type);
+  const currentPage = originalReaderCurrentPage();
+  const root = filePreviewText?.querySelector?.(".file-original-reader");
+  if (root) {
+    root.classList.toggle("sidebar-open", Boolean(reader.originalSidebarOpen));
+    root.classList.toggle("text-open", Boolean(reader.originalTextOpen));
+  }
+  const page = filePreviewText?.querySelector?.('[data-reader-role="page"]');
+  if (page) page.textContent = originalReaderPageLabel(reader.attachment, type);
+  const pageInput = filePreviewText?.querySelector?.('[data-reader-role="pageInput"]');
+  if (pageInput && document.activeElement !== pageInput) pageInput.value = String(currentPage);
+  const pageTotal = filePreviewText?.querySelector?.('[data-reader-role="pageTotal"]');
+  if (pageTotal) pageTotal.textContent = `/ ${pageCount || 1}`;
+  const previous = filePreviewText?.querySelector?.('[data-reader-role="previousPage"]');
+  if (previous) previous.disabled = currentPage <= 1 || pageCount <= 1;
+  const next = filePreviewText?.querySelector?.('[data-reader-role="nextPage"]');
+  if (next) next.disabled = currentPage >= pageCount || pageCount <= 1;
+  const sidebar = filePreviewText?.querySelector?.('[data-reader-role="sidebar"]');
+  if (sidebar) sidebar.setAttribute("aria-pressed", String(Boolean(reader.originalSidebarOpen)));
+  const textLayer = filePreviewText?.querySelector?.('[data-reader-role="textLayer"]');
+  if (textLayer) textLayer.setAttribute("aria-pressed", String(Boolean(reader.originalTextOpen)));
+  const search = filePreviewText?.querySelector?.('[data-reader-role="search"]');
+  if (search) search.setAttribute("aria-pressed", String(Boolean(reader.originalSearchOpen)));
+  const more = filePreviewText?.querySelector?.('[data-reader-role="more"]');
+  if (more) more.setAttribute("aria-pressed", String(Boolean(reader.originalMoreOpen)));
+  const moreMenu = filePreviewText?.querySelector?.('[data-reader-role="moreMenu"]');
+  if (moreMenu) moreMenu.hidden = !reader.originalMoreOpen;
+  const searchPanel = filePreviewText?.querySelector?.(".file-original-search-panel");
+  if (searchPanel) searchPanel.hidden = !reader.originalSearchOpen;
+  const searchStatus = filePreviewText?.querySelector?.('[data-reader-role="searchStatus"]');
+  if (searchStatus) searchStatus.textContent = originalSearchStatusText();
+  const shell = filePreviewText?.querySelector?.(".file-original-pdf-shell");
+  if (shell) {
+    shell.classList.toggle("search-open", Boolean(reader.originalSearchOpen));
+    shell.classList.toggle("more-open", Boolean(reader.originalMoreOpen));
+  }
+  const textPage = filePreviewText?.querySelector?.('[data-reader-role="textPage"]');
+  if (textPage) textPage.textContent = originalReaderPageLabel(reader.attachment, type);
+  for (const button of filePreviewText?.querySelectorAll?.(".file-original-page-thumb") || []) {
+    button.classList.toggle("active", Number(button.dataset.originalPage) === currentPage);
+  }
+}
+
+function toggleOriginalSearchPanel(force = null) {
+  const reader = state.fileReader;
+  if (!reader) return;
+  reader.originalSearchOpen = force === null ? !reader.originalSearchOpen : Boolean(force);
+  if (reader.originalSearchOpen) {
+    reader.originalMoreOpen = false;
+  }
+  if (!reader.originalSearchOpen) {
+    hideOriginalPageSelectionToolbar();
+    reader.originalSearchTarget = null;
+    renderOriginalPageTextOverlayContent();
+  }
+  syncOriginalReaderControls();
+  if (reader.originalSearchOpen) {
+    window.setTimeout(() => filePreviewText?.querySelector?.('[data-reader-role="searchInput"]')?.focus?.(), 0);
+  }
+}
+
+function toggleOriginalMoreMenu(force = null) {
+  const reader = state.fileReader;
+  if (!reader) return;
+  reader.originalMoreOpen = force === null ? !reader.originalMoreOpen : Boolean(force);
+  if (reader.originalMoreOpen) {
+    hideOriginalPageSelectionToolbar();
+  }
+  syncOriginalReaderControls();
+}
+
+function handleOriginalSearchSubmit(event) {
+  event.preventDefault();
+  const input = event.currentTarget?.querySelector?.('[data-reader-role="searchInput"]');
+  performOriginalSearch(input?.value || "");
+}
+
+async function performOriginalSearch(rawQuery) {
+  const reader = state.fileReader;
+  if (!reader?.attachment?.fileId) return;
+  const query = String(rawQuery || "").trim();
+  reader.originalSearchQuery = query;
+  reader.originalSearchResults = [];
+  reader.originalSearchIndex = -1;
+  reader.originalSearchTarget = null;
+  if (!query) {
+    reader.originalSearchLoading = false;
+    syncOriginalReaderControls();
+    renderOriginalPageTextOverlayContent();
+    return;
+  }
+  const requestId = createId();
+  reader.originalSearchRequestId = requestId;
+  reader.originalSearchLoading = true;
+  syncOriginalReaderControls();
+  try {
+    const response = await apiFetch(filePageSearchUrl(reader.attachment, { query }));
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || "搜索失败");
+    if (state.fileReader?.originalSearchRequestId !== requestId) return;
+    const matches = Array.isArray(data.matches) ? data.matches : [];
+    reader.originalSearchResults = matches;
+    reader.originalSearchIndex = matches.length ? 0 : -1;
+    reader.originalSearchLoading = false;
+    syncOriginalReaderControls();
+    renderOriginalPageTextOverlayContent();
+    if (matches.length) {
+      jumpToOriginalSearchResult(0);
+    }
+  } catch (error) {
+    if (state.fileReader?.originalSearchRequestId !== requestId) return;
+    reader.originalSearchResults = [];
+    reader.originalSearchIndex = -1;
+    reader.originalSearchLoading = false;
+    syncOriginalReaderControls();
+    showToast(error.message || "搜索失败");
+  }
+}
+
+function stepOriginalSearchResult(delta) {
+  const reader = state.fileReader;
+  const results = Array.isArray(reader?.originalSearchResults) ? reader.originalSearchResults : [];
+  if (!results.length) return;
+  const next = (Math.max(0, Number(reader.originalSearchIndex) || 0) + delta + results.length) % results.length;
+  jumpToOriginalSearchResult(next);
+}
+
+function jumpToOriginalSearchResult(index) {
+  const reader = state.fileReader;
+  const results = Array.isArray(reader?.originalSearchResults) ? reader.originalSearchResults : [];
+  if (!reader || !results.length) return;
+  const bounded = Math.max(0, Math.min(results.length - 1, Number(index) || 0));
+  reader.originalSearchIndex = bounded;
+  reader.originalSearchTarget = results[bounded] || null;
+  const page = Number(results[bounded]?.page) || originalReaderCurrentPage();
+  if (page !== originalReaderCurrentPage()) {
+    setOriginalReaderPage(page);
+  } else {
+    syncOriginalReaderControls();
+    renderOriginalPageTextOverlayContent();
+  }
+}
+
+function originalSearchStatusText() {
+  const reader = state.fileReader;
+  if (!reader?.originalSearchQuery) return "";
+  if (reader.originalSearchLoading) return "搜索中";
+  const count = Array.isArray(reader.originalSearchResults) ? reader.originalSearchResults.length : 0;
+  if (!count) return "0 / 0";
+  return `${Math.max(1, Number(reader.originalSearchIndex) + 1 || 1)} / ${count}`;
+}
+
+function toggleOriginalTextLayer() {
+  const reader = state.fileReader;
+  if (!reader?.attachment) return;
+  reader.originalTextOpen = !reader.originalTextOpen;
+  const root = filePreviewText?.querySelector?.(".file-original-reader");
+  root?.classList.toggle("text-open", reader.originalTextOpen);
+  syncOriginalReaderControls();
+  if (reader.originalTextOpen) {
+    loadOriginalPageText();
+  }
+}
+
+async function loadOriginalPageText() {
+  const reader = state.fileReader;
+  if (!reader?.attachment?.fileId || !reader.originalTextOpen) return;
+  const requestId = createId();
+  reader.originalPageTextRequestId = requestId;
+  reader.originalPageTextLoading = true;
+  renderOriginalPageTextContent();
+  try {
+    const response = await apiFetch("/api/file-page-text", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        fileId: reader.attachment.fileId,
+        projectId: reader.attachment.projectId || "",
+        page: originalReaderCurrentPage(),
+      }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || "读取当前页文本失败");
+    if (state.fileReader?.originalPageTextRequestId !== requestId) return;
+    reader.originalPageText = data.page && typeof data.page === "object" ? data.page : null;
+    reader.originalPageTextLoading = false;
+    renderOriginalPageTextContent();
+  } catch (error) {
+    if (state.fileReader?.originalPageTextRequestId !== requestId) return;
+    reader.originalPageText = { text: error.message || "读取当前页文本失败", hasText: false, error: true };
+    reader.originalPageTextLoading = false;
+    renderOriginalPageTextContent();
+  }
+}
+
+async function loadOriginalPageLayout(pageOverride = null, { prefetch = false } = {}) {
+  const reader = state.fileReader;
+  if (!reader?.attachment?.fileId || originalPreviewType(reader.attachment) !== "pdf") return;
+  const pageCount = originalReaderPageCount(reader.attachment, "pdf") || 1;
+  const page = Math.max(1, Math.min(pageCount, Number(pageOverride) || originalReaderCurrentPage()));
+  const pageKey = String(page);
+  const cachedLayout = reader.originalPageLayouts?.[pageKey];
+  if (cachedLayout) {
+    if (page === originalReaderCurrentPage()) {
+      reader.originalPageLayout = cachedLayout;
+      renderOriginalPageTextOverlayContent();
+    }
+    if (!prefetch) prefetchOriginalPageLayouts(page);
+    return;
+  }
+  if (reader.originalPageLayoutRequests?.[pageKey]) {
+    if (page === originalReaderCurrentPage() && !prefetch) {
+      reader.originalPageLayoutLoading = true;
+      renderOriginalPageTextOverlayContent();
+    }
+    return;
+  }
+  const requestId = createId();
+  reader.originalPageLayoutRequests = { ...(reader.originalPageLayoutRequests || {}), [pageKey]: requestId };
+  if (page === originalReaderCurrentPage() && !prefetch) {
+    reader.originalPageLayoutRequestId = requestId;
+    reader.originalPageLayoutLoading = true;
+    renderOriginalPageTextOverlayContent();
+  }
+  try {
+    const response = await apiFetch(filePageLayoutUrl(reader.attachment, { page }));
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || "读取页面文字坐标失败");
+    if (state.fileReader?.originalPageLayoutRequests?.[pageKey] !== requestId) return;
+    const layout = data.page && typeof data.page === "object" ? data.page : null;
+    if (layout) {
+      reader.originalPageLayouts = { ...(reader.originalPageLayouts || {}), [pageKey]: layout };
+    }
+    delete reader.originalPageLayoutRequests[pageKey];
+    if (page === originalReaderCurrentPage()) {
+      reader.originalPageLayout = layout;
+      reader.originalPageLayoutLoading = false;
+      renderOriginalPageTextOverlayContent();
+      if (!prefetch) prefetchOriginalPageLayouts(page);
+    }
+  } catch (error) {
+    if (state.fileReader?.originalPageLayoutRequests?.[pageKey] !== requestId) return;
+    delete reader.originalPageLayoutRequests[pageKey];
+    if (page === originalReaderCurrentPage()) {
+      reader.originalPageLayout = null;
+      reader.originalPageLayoutLoading = false;
+      renderOriginalPageTextOverlayContent();
+    }
+  }
+}
+
+function prefetchOriginalPageLayouts(page = originalReaderCurrentPage()) {
+  const reader = state.fileReader;
+  if (!reader?.attachment?.fileId || originalPreviewType(reader.attachment) !== "pdf") return;
+  const pageCount = originalReaderPageCount(reader.attachment, "pdf") || 1;
+  for (const nearbyPage of [Number(page) - 1, Number(page) + 1]) {
+    if (nearbyPage < 1 || nearbyPage > pageCount) continue;
+    const key = String(nearbyPage);
+    if (reader.originalPageLayouts?.[key] || reader.originalPageLayoutRequests?.[key]) continue;
+    loadOriginalPageLayout(nearbyPage, { prefetch: true });
+  }
+}
+
+function renderOriginalPageTextOverlayContent() {
+  const overlay = filePreviewText?.querySelector?.('[data-reader-role="pageTextOverlay"]');
+  if (!overlay) return;
+  overlay.replaceChildren();
+  hideOriginalPageSelectionToolbar();
+  const reader = state.fileReader;
+  const currentPage = originalReaderCurrentPage();
+  const layout =
+    Number(reader?.originalPageLayout?.index) === currentPage
+      ? reader.originalPageLayout
+      : reader?.originalPageLayouts?.[String(currentPage)];
+  if (layout && reader && reader.originalPageLayout !== layout) {
+    reader.originalPageLayout = layout;
+  }
+  const words = Array.isArray(layout?.words) ? layout.words : [];
+  if (!words.length || !syncOriginalPageTextOverlay()) return;
+  const overlayHeight = overlay.clientHeight || originalCurrentPageImage()?.clientHeight || 0;
+  const fragment = document.createDocumentFragment();
+  let currentMarked = false;
+  for (const word of words) {
+    const text = String(word.text || "").trim();
+    if (!text) continue;
+    const span = document.createElement("span");
+    span.className = "file-original-page-text-word";
+    span.textContent = text;
+    span.style.left = `${Number(word.left) || 0}%`;
+    span.style.top = `${Number(word.top) || 0}%`;
+    span.style.width = `${Math.max(0.01, Number(word.width) || 0.01)}%`;
+    span.style.height = `${Math.max(0.01, Number(word.height) || 0.01)}%`;
+    const fontSize = overlayHeight > 0 ? Math.max(3, ((Number(word.height) || 1) / 100) * overlayHeight * 0.92) : 8;
+    span.style.fontSize = `${fontSize}px`;
+    if (originalWordMatchesSearch(text)) {
+      span.classList.add("search-match");
+      if (!currentMarked && originalWordMatchesCurrentSearchTarget(text)) {
+        span.classList.add("current-search-match");
+        span.dataset.readerRole = "currentSearchMatch";
+        currentMarked = true;
+      }
+    }
+    fragment.append(span);
+  }
+  overlay.append(fragment);
+  scrollOriginalCurrentSearchMatchIntoView();
+}
+
+function originalWordMatchesSearch(text) {
+  const query = String(state.fileReader?.originalSearchQuery || "").trim().toLowerCase();
+  if (!query) return false;
+  const word = String(text || "").toLowerCase();
+  if (!word) return false;
+  const terms = query.split(/\s+/).filter(Boolean);
+  return terms.some((term) => term && (word.includes(term) || (word.length >= 3 && term.includes(word))));
+}
+
+function originalWordMatchesCurrentSearchTarget(text) {
+  const reader = state.fileReader;
+  const target = reader?.originalSearchTarget;
+  if (!target || Number(target.page) !== originalReaderCurrentPage()) return false;
+  const targetText = String(target.text || reader.originalSearchQuery || "").trim().toLowerCase();
+  const word = String(text || "").trim().toLowerCase();
+  if (!targetText || !word) return false;
+  return word.includes(targetText) || targetText.includes(word);
+}
+
+function scrollOriginalCurrentSearchMatchIntoView() {
+  const stage = filePreviewText?.querySelector?.(".file-original-pdf-stage");
+  const match = filePreviewText?.querySelector?.('[data-reader-role="currentSearchMatch"]');
+  if (!stage || !match) return;
+  const stageRect = stage.getBoundingClientRect();
+  const matchRect = match.getBoundingClientRect();
+  const top = stage.scrollTop + matchRect.top - stageRect.top - Math.max(40, stage.clientHeight * 0.28);
+  const left = stage.scrollLeft + matchRect.left - stageRect.left - Math.max(40, stage.clientWidth * 0.25);
+  stage.scrollTo({
+    top: Math.max(0, top),
+    left: Math.max(0, left),
+    behavior: "smooth",
+  });
+}
+
+function syncOriginalPageTextOverlay() {
+  const stage = filePreviewText?.querySelector?.(".file-original-pdf-stage");
+  const image = originalCurrentPageImage();
+  const overlay = filePreviewText?.querySelector?.('[data-reader-role="pageTextOverlay"]');
+  if (!stage || !image || !overlay || !image.clientWidth || !image.clientHeight) return false;
+  const stageRect = stage.getBoundingClientRect();
+  const imageRect = image.getBoundingClientRect();
+  overlay.style.left = `${stage.scrollLeft + imageRect.left - stageRect.left}px`;
+  overlay.style.top = `${stage.scrollTop + imageRect.top - stageRect.top}px`;
+  overlay.style.width = `${image.clientWidth}px`;
+  overlay.style.height = `${image.clientHeight}px`;
+  return true;
+}
+
+function originalCurrentPageImage() {
+  const page = originalReaderCurrentPage();
+  return (
+    filePreviewText?.querySelector?.(`.file-original-page-image[data-original-page="${page}"]`) ||
+    filePreviewText?.querySelector?.(".file-original-page-image")
+  );
+}
+
+function showOriginalPageSelectionToolbar() {
+  const reader = state.fileReader;
+  const toolbar = filePreviewText?.querySelector?.('[data-reader-role="inlineSelectionToolbar"]');
+  const stage = filePreviewText?.querySelector?.(".file-original-pdf-stage");
+  const text = selectedOriginalInlineText();
+  if (!toolbar || !stage || !reader || !text) {
+    hideOriginalPageSelectionToolbar();
+    return;
+  }
+  const selection = window.getSelection?.();
+  if (!selection || !selection.rangeCount) {
+    hideOriginalPageSelectionToolbar();
+    return;
+  }
+  const rect = selection.getRangeAt(0).getBoundingClientRect();
+  const stageRect = stage.getBoundingClientRect();
+  reader.originalSelectedText = text;
+  toolbar.hidden = false;
+  toolbar.style.left = `${Math.min(stage.scrollWidth - 16, Math.max(16, rect.left - stageRect.left + stage.scrollLeft + rect.width / 2))}px`;
+  toolbar.style.top = `${Math.max(8, rect.top - stageRect.top + stage.scrollTop - 44)}px`;
+}
+
+function hideOriginalPageSelectionToolbar() {
+  const toolbar = filePreviewText?.querySelector?.('[data-reader-role="inlineSelectionToolbar"]');
+  if (!toolbar) return;
+  toolbar.hidden = true;
+  toolbar.removeAttribute("style");
+}
+
+function clearOriginalInlineSelection({ clearStoredText = true } = {}) {
+  hideOriginalPageSelectionToolbar();
+  const selection = window.getSelection?.();
+  if (selection && selection.rangeCount) {
+    try {
+      selection.removeAllRanges();
+    } catch {
+      // Selection can be controlled by the browser in embedded contexts.
+    }
+  }
+  if (clearStoredText && state.fileReader) {
+    state.fileReader.originalSelectedText = "";
+  }
+}
+
+function renderOriginalPageTextContent() {
+  const reader = state.fileReader;
+  const content = filePreviewText?.querySelector?.('[data-reader-role="pageTextContent"]');
+  if (!content) return;
+  if (!reader?.originalTextOpen) {
+    content.textContent = "打开后会显示当前页可选择文本。";
+    return;
+  }
+  if (reader.originalPageTextLoading) {
+    content.textContent = "正在读取当前页文本...";
+    return;
+  }
+  const page = reader.originalPageText;
+  const text = String(page?.text || "").trim();
+  if (!text || page?.hasText === false) {
+    content.textContent = text || "当前页没有可选择文本，可使用截图提问框选区域。";
+    return;
+  }
+  content.textContent = text;
+}
+
+function handleOriginalTextAction(event) {
+  const action = event.currentTarget?.dataset?.originalTextAction || "";
+  if (!action) return;
+  runOriginalTextAction(action);
+}
+
+function runOriginalTextAction(action) {
+  const reader = state.fileReader;
+  const attachment = reader?.attachment;
+  if (!attachment) return;
+  const text = selectedOriginalReaderText() || String(reader.originalPageText?.text || "").trim();
+  if (!text) {
+    showToast("当前页没有可操作文本，可使用截图提问");
+    return;
+  }
+  if (action === "copy") {
+    copyText(text).then((ok) => showToast(ok ? "已复制当前页文本" : "复制失败，请手动复制"));
+    return;
+  }
+  const clipped = text.length > 6000 ? `${text.slice(0, 6000)}\n[文本较长，已截取前 6000 字]` : text;
+  const prompts = {
+    explain: `请解释文档《${attachment.name || "附件"}》第 ${originalReaderCurrentPage()} 页中这段文字的含义：\n\n${clipped}`,
+    translate: `请翻译文档《${attachment.name || "附件"}》第 ${originalReaderCurrentPage()} 页中这段文字，保留术语、公式和编号：\n\n${clipped}`,
+    ask: `请根据文档《${attachment.name || "附件"}》第 ${originalReaderCurrentPage()} 页中这段文字回答我的问题：\n\n${clipped}`,
+  };
+  appendFileReaderPrompt(attachment, prompts[action] || prompts.ask, "已把当前页文本加入本轮提问");
+}
+
+function selectedOriginalPageText() {
+  const content = filePreviewText?.querySelector?.('[data-reader-role="pageTextContent"]');
+  if (!content) return "";
+  const selection = window.getSelection?.();
+  if (!selection || selection.isCollapsed || !selection.rangeCount) return "";
+  const range = selection.getRangeAt(0);
+  const container = range.commonAncestorContainer;
+  const element = container.nodeType === Node.ELEMENT_NODE ? container : container.parentElement;
+  if (!element || !content.contains(element)) return "";
+  return selection.toString().trim();
+}
+
+function selectedOriginalInlineText() {
+  const overlay = filePreviewText?.querySelector?.('[data-reader-role="pageTextOverlay"]');
+  if (!overlay) return "";
+  const selection = window.getSelection?.();
+  if (!selection || selection.isCollapsed || !selection.rangeCount) return "";
+  const range = selection.getRangeAt(0);
+  const container = range.commonAncestorContainer;
+  const element = container.nodeType === Node.ELEMENT_NODE ? container : container.parentElement;
+  if (!element || !overlay.contains(element)) return "";
+  return selection.toString().replace(/\s+/g, " ").trim();
+}
+
+function selectedOriginalReaderText() {
+  return selectedOriginalInlineText() || selectedOriginalPageText() || String(state.fileReader?.originalSelectedText || "").trim();
+}
+
+function quoteOriginalReaderSelection() {
+  const reader = state.fileReader;
+  const attachment = reader?.attachment;
+  if (!attachment) return;
+  const text = selectedOriginalReaderText();
+  if (!text) {
+    if (!reader.originalTextOpen) {
+      reader.originalTextOpen = true;
+      const root = filePreviewText?.querySelector?.(".file-original-reader");
+      root?.classList.add("text-open");
+      syncOriginalReaderControls();
+      loadOriginalPageText();
+      showToast("已打开当前页文字层，选中文字后再引用");
+      return;
+    }
+    showToast("请先在当前页文字层选中要引用的文字");
+    return;
+  }
+  state.quoteDraft = {
+    role: "file",
+    text,
+    fragment: text,
+    isFragment: true,
+    sourceName: attachment.name || "",
+  };
+  renderQuotePreview();
+  saveDraft();
+  if (!shouldUseSideFileReaderPanel()) {
+    closeFilePreview();
+  }
+  promptInput.focus();
+  showToast("已引用选中文本");
+}
+
+function zoomOriginalReader(delta) {
+  const reader = state.fileReader;
+  if (!reader?.attachment) return;
+  const nextZoom = Math.max(60, Math.min(180, (Number(reader.originalZoom) || 100) + delta));
+  if (nextZoom === (Number(reader.originalZoom) || 100)) return;
+  reader.originalZoom = nextZoom;
+  clearOriginalInlineSelection();
+  clearOriginalCaptureRegion();
+  const pageStack = filePreviewText?.querySelector?.('[data-reader-role="pdfPageStack"]');
+  if (pageStack) {
+    syncOriginalPdfPageWidths();
+    refreshOriginalReaderFrame();
+    return;
+  }
+  const pageImage = filePreviewText?.querySelector?.(".file-original-page-image");
+  if (pageImage) {
+    refreshOriginalReaderFrame();
+    return;
+  }
+  const frame = filePreviewText?.querySelector?.(".file-original-preview iframe");
+  if (frame?.dataset?.sourceUrl && frame.dataset.previewType === "pdf") {
+    refreshOriginalReaderFrame();
+    return;
+  }
+  const image = filePreviewText?.querySelector?.(".file-original-preview img");
+  if (image) image.style.transform = `scale(${nextZoom / 100})`;
+}
+
+function translateFileReaderDocument() {
+  const attachment = state.fileReader?.attachment;
+  if (!attachment) return;
+  appendFileReaderPrompt(
+    attachment,
+    `请把这篇文档《${attachment.name || "附件"}》完整翻译成中文，保留标题、表格、编号和关键术语；如果原文已经是中文，请改为提炼英文关键词并给出中英对照。`,
+    "已把翻译全文加入本轮提问"
+  );
+}
+
+function askOriginalReaderVisiblePage() {
+  const attachment = state.fileReader?.attachment;
+  if (!attachment) return;
+  const reader = state.fileReader;
+  if (!reader) return;
+  hideOriginalPageSelectionToolbar();
+  reader.originalCaptureActive = true;
+  reader.originalCaptureRegion = null;
+  syncOriginalCaptureLayer();
+  showToast("截图提问：在右侧文档中框选要提问的区域");
+}
+
+function syncOriginalCaptureLayer() {
+  const reader = state.fileReader;
+  const layer = filePreviewText?.querySelector?.(".file-original-capture-layer");
+  const root = filePreviewText?.querySelector?.(".file-original-reader");
+  if (!layer || !root) return;
+  const active = Boolean(reader?.originalCaptureActive);
+  const region = reader?.originalCaptureRegion || null;
+  root.classList.toggle("capture-active", active);
+  root.classList.toggle("region-selected", Boolean(region));
+  layer.classList.toggle("is-active", active);
+  layer.classList.toggle("has-region", Boolean(region));
+  layer.setAttribute("aria-hidden", String(!active && !region));
+  syncOriginalCaptureLayerBounds(layer);
+  const box = layer.querySelector(".file-original-capture-box");
+  const toolbar = layer.querySelector(".file-original-region-toolbar");
+  if (box) {
+    if (region) {
+      applyOriginalRegionStyle(box, region);
+      box.hidden = false;
+    } else {
+      box.hidden = !active;
+      box.removeAttribute("style");
+    }
+  }
+  if (toolbar) {
+    toolbar.hidden = !region;
+    if (region) {
+      toolbar.style.left = `${Math.min(96, Math.max(4, region.left + region.width / 2))}%`;
+      toolbar.style.top = `${Math.min(94, Math.max(6, region.top + region.height))}%`;
+    } else {
+      toolbar.removeAttribute("style");
+    }
+  }
+}
+
+function onOriginalCapturePointerDown(event) {
+  const reader = state.fileReader;
+  if (!reader?.originalCaptureActive) return;
+  event.preventDefault();
+  const layer = event.currentTarget;
+  if (!(layer instanceof HTMLElement)) return;
+  syncOriginalCaptureLayerBounds(layer);
+  layer.setPointerCapture?.(event.pointerId);
+  const start = originalCapturePoint(event, layer);
+  reader.originalCaptureDrag = { start, current: start };
+  reader.originalCaptureRegion = null;
+  const box = layer.querySelector(".file-original-capture-box");
+  if (box) {
+    box.hidden = false;
+    applyOriginalRegionStyle(box, originalRegionFromPoints(start, start));
+  }
+}
+
+function onOriginalCapturePointerMove(event) {
+  const reader = state.fileReader;
+  const drag = reader?.originalCaptureDrag;
+  if (!drag) return;
+  event.preventDefault();
+  const layer = event.currentTarget;
+  if (!(layer instanceof HTMLElement)) return;
+  drag.current = originalCapturePoint(event, layer);
+  const region = originalRegionFromPoints(drag.start, drag.current);
+  const box = layer.querySelector(".file-original-capture-box");
+  if (box) applyOriginalRegionStyle(box, region);
+}
+
+function onOriginalCapturePointerUp(event) {
+  const reader = state.fileReader;
+  const drag = reader?.originalCaptureDrag;
+  if (!reader || !drag) return;
+  event.preventDefault();
+  const layer = event.currentTarget;
+  if (!(layer instanceof HTMLElement)) return;
+  layer.releasePointerCapture?.(event.pointerId);
+  const end = originalCapturePoint(event, layer);
+  const region = originalRegionFromPoints(drag.start, end);
+  reader.originalCaptureDrag = null;
+  if (region.width < 3 || region.height < 3) {
+    reader.originalCaptureActive = false;
+    reader.originalCaptureRegion = originalVisiblePageRegion();
+  } else {
+    reader.originalCaptureActive = false;
+    reader.originalCaptureRegion = region;
+  }
+  syncOriginalCaptureLayer();
+  haptic("light");
+}
+
+function cancelOriginalCaptureDrag() {
+  if (!state.fileReader) return;
+  state.fileReader.originalCaptureDrag = null;
+  syncOriginalCaptureLayer();
+}
+
+function syncOriginalCaptureLayerBounds(layer) {
+  if (!(layer instanceof HTMLElement)) return null;
+  const stage = filePreviewText?.querySelector?.(".file-original-pdf-stage");
+  const image = originalCurrentPageImage();
+  if (stage && image && image.clientWidth && image.clientHeight) {
+    const stageRect = stage.getBoundingClientRect();
+    const imageRect = image.getBoundingClientRect();
+    if (stageRect.width && stageRect.height && imageRect.width && imageRect.height) {
+      layer.style.inset = "auto";
+      layer.style.left = `${stage.scrollLeft + imageRect.left - stageRect.left}px`;
+      layer.style.top = `${stage.scrollTop + imageRect.top - stageRect.top}px`;
+      layer.style.width = `${image.clientWidth}px`;
+      layer.style.height = `${image.clientHeight}px`;
+      layer.style.right = "auto";
+      layer.style.bottom = "auto";
+      return imageRect;
+    }
+  }
+  layer.style.inset = "";
+  layer.style.left = "";
+  layer.style.top = "";
+  layer.style.width = "";
+  layer.style.height = "";
+  layer.style.right = "";
+  layer.style.bottom = "";
+  return layer.getBoundingClientRect();
+}
+
+function originalCaptureTargetRect(layer) {
+  const image = originalCurrentPageImage();
+  if (image && image.clientWidth && image.clientHeight) {
+    const rect = image.getBoundingClientRect();
+    if (rect.width && rect.height) return rect;
+  }
+  return layer.getBoundingClientRect();
+}
+
+function originalCapturePoint(event, layer) {
+  const rect = originalCaptureTargetRect(layer);
+  const left = rect.width > 0 ? ((event.clientX - rect.left) / rect.width) * 100 : 0;
+  const top = rect.height > 0 ? ((event.clientY - rect.top) / rect.height) * 100 : 0;
+  return {
+    left: Math.max(0, Math.min(100, left)),
+    top: Math.max(0, Math.min(100, top)),
+  };
+}
+
+function originalRegionFromPoints(start, end) {
+  const left = Math.min(start.left, end.left);
+  const top = Math.min(start.top, end.top);
+  return {
+    left,
+    top,
+    width: Math.abs(end.left - start.left),
+    height: Math.abs(end.top - start.top),
+  };
+}
+
+function originalVisiblePageRegion() {
+  return { left: 8, top: 8, width: 84, height: 84 };
+}
+
+function applyOriginalRegionStyle(element, region) {
+  element.style.left = `${region.left}%`;
+  element.style.top = `${region.top}%`;
+  element.style.width = `${region.width}%`;
+  element.style.height = `${region.height}%`;
+}
+
+function handleOriginalRegionToolbarClick(event) {
+  const button = event.currentTarget;
+  const action = button?.dataset?.originalRegionAction || "";
+  if (!action) return;
+  if (action === "close") {
+    clearOriginalCaptureRegion();
+    return;
+  }
+  runOriginalRegionAction(action);
+}
+
+async function runOriginalRegionAction(action) {
+  const reader = state.fileReader;
+  const attachment = reader?.attachment;
+  const region = reader?.originalCaptureRegion;
+  if (!attachment || !region) return;
+  const description = originalRegionDescription(region);
+  if (action === "copy") {
+    copyText(description).then((ok) => showToast(ok ? "已复制区域描述" : "复制失败，请手动记录区域"));
+    return;
+  }
+  const prompts = {
+    explain: `请解释文档《${attachment.name || "附件"}》第 ${originalReaderCurrentPage()} 页中我框选的截图内容。`,
+    translate: `请翻译文档《${attachment.name || "附件"}》第 ${originalReaderCurrentPage()} 页中我框选截图里的文字，保留术语和公式含义。`,
+    ask: `请根据文档《${attachment.name || "附件"}》第 ${originalReaderCurrentPage()} 页中我框选的截图回答我的问题。`,
+  };
+  try {
+    const imageAttachment = originalRegionImageAttachment(attachment, region);
+    if (imageAttachment) {
+      if (!ensureFileReaderAttachmentForPrompt(attachment)) return;
+      if (state.pendingAttachments.length >= maxPendingAttachments) {
+        showToast(`附件已达上限 ${maxPendingAttachments} 个，请先移除一个`);
+        return;
+      }
+      state.pendingAttachments.push(imageAttachment);
+      appendPromptToComposer(prompts[action] || prompts.ask, "已把框选截图加入本轮提问");
+      return;
+    }
+  } catch (error) {
+    console.warn("original_region_crop_failed", error);
+  }
+  appendFileReaderPrompt(attachment, `${prompts[action] || prompts.ask}\n\n${description}`, "已把框选区域加入本轮提问");
+}
+
+function originalRegionDescription(region) {
+  const percent = (value) => `${Math.round(value)}%`;
+  return `框选区域：左 ${percent(region.left)}，上 ${percent(region.top)}，宽 ${percent(region.width)}，高 ${percent(region.height)}。`;
+}
+
+function originalRegionImageAttachment(attachment, region) {
+  const pageImage = originalCurrentPageImage();
+  const layer = filePreviewText?.querySelector?.(".file-original-capture-layer");
+  if (!pageImage || !layer || !pageImage.complete || !pageImage.naturalWidth || !pageImage.naturalHeight) return null;
+  const imageRect = pageImage.getBoundingClientRect();
+  if (!imageRect.width || !imageRect.height) return null;
+  const selection = {
+    left: imageRect.left + (region.left / 100) * imageRect.width,
+    top: imageRect.top + (region.top / 100) * imageRect.height,
+    right: imageRect.left + ((region.left + region.width) / 100) * imageRect.width,
+    bottom: imageRect.top + ((region.top + region.height) / 100) * imageRect.height,
+  };
+  const left = Math.max(selection.left, imageRect.left);
+  const top = Math.max(selection.top, imageRect.top);
+  const right = Math.min(selection.right, imageRect.right);
+  const bottom = Math.min(selection.bottom, imageRect.bottom);
+  if (right - left < 4 || bottom - top < 4) return null;
+
+  const scaleX = pageImage.naturalWidth / imageRect.width;
+  const scaleY = pageImage.naturalHeight / imageRect.height;
+  const sourceX = Math.max(0, Math.round((left - imageRect.left) * scaleX));
+  const sourceY = Math.max(0, Math.round((top - imageRect.top) * scaleY));
+  const sourceWidth = Math.min(pageImage.naturalWidth - sourceX, Math.round((right - left) * scaleX));
+  const sourceHeight = Math.min(pageImage.naturalHeight - sourceY, Math.round((bottom - top) * scaleY));
+  if (sourceWidth < 4 || sourceHeight < 4) return null;
+
+  const maxSize = 1600;
+  const outputScale = Math.min(1, maxSize / Math.max(sourceWidth, sourceHeight));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(sourceWidth * outputScale));
+  canvas.height = Math.max(1, Math.round(sourceHeight * outputScale));
+  const context = canvas.getContext("2d");
+  if (!context) return null;
+  context.drawImage(pageImage, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height);
+  const page = originalReaderCurrentPage();
+  const name = `${attachment.name || "文档"}-第${page}页框选.jpg`;
+  const imagePreview = canvas.toDataURL("image/jpeg", 0.86);
+  return normalizeStoredAttachment({
+    name,
+    type: "image/jpeg",
+    size: Math.round((imagePreview.length * 3) / 4),
+    kind: "image",
+    thumbnail: imageDataUrlFromCanvas(canvas, 96, 0.78),
+    imagePreview,
+  });
+}
+
+function clearOriginalCaptureRegion() {
+  if (!state.fileReader) return;
+  state.fileReader.originalCaptureActive = false;
+  state.fileReader.originalCaptureDrag = null;
+  state.fileReader.originalCaptureRegion = null;
+  syncOriginalCaptureLayer();
+}
+
+function onOriginalReaderKeydown(event) {
+  if (!filePreviewPanel?.classList.contains("open")) return;
+  const reader = state.fileReader;
+  if (!reader?.attachment || reader.mode !== "original") return;
+  const target = event.target;
+  const tagName = String(target?.tagName || "").toLowerCase();
+  const isTextEditing = tagName === "input" || tagName === "textarea" || target?.isContentEditable;
+  const key = String(event.key || "");
+  const modifier = event.ctrlKey || event.metaKey;
+  if (modifier && key.toLowerCase() === "f") {
+    event.preventDefault();
+    toggleOriginalSearchPanel(true);
+    return;
+  }
+  if (modifier && (key === "+" || key === "=")) {
+    event.preventDefault();
+    zoomOriginalReader(10);
+    return;
+  }
+  if (modifier && key === "-") {
+    event.preventDefault();
+    zoomOriginalReader(-10);
+    return;
+  }
+  if (!isTextEditing && key === "PageDown") {
+    event.preventDefault();
+    stepOriginalReaderPage(1);
+    return;
+  }
+  if (!isTextEditing && key === "PageUp") {
+    event.preventDefault();
+    stepOriginalReaderPage(-1);
+    return;
+  }
+  if (key !== "Escape") return;
+  if (state.fileReader?.originalCaptureActive || state.fileReader?.originalCaptureRegion) {
+    clearOriginalCaptureRegion();
+    event.preventDefault();
+    return;
+  }
+  if (state.fileReader?.originalMoreOpen) {
+    toggleOriginalMoreMenu(false);
+    event.preventDefault();
+    return;
+  }
+  if (state.fileReader?.originalSearchOpen) {
+    toggleOriginalSearchPanel(false);
+    event.preventDefault();
+    return;
+  }
+  if (document.fullscreenElement === filePreviewPanel) {
+    document.exitFullscreen?.();
+    event.preventDefault();
+  }
+}
+
+function appendFileReaderPrompt(attachment, prompt, toastMessage) {
+  if (!ensureFileReaderAttachmentForPrompt(attachment)) return false;
+  return appendPromptToComposer(prompt, toastMessage);
+}
+
+function appendPromptToComposer(prompt, toastMessage) {
+  const current = promptInput.value.trim();
+  promptInput.value = current ? `${current}\n\n${prompt}` : prompt;
+  renderAttachmentList();
+  resizeComposer();
+  saveDraft();
+  if (!shouldUseSideFileReaderPanel()) {
+    closeFilePreview();
+  }
+  promptInput.focus();
+  const length = promptInput.value.length;
+  try {
+    promptInput.setSelectionRange(length, length);
+  } catch {
+    // textarea may not support setSelectionRange in all browsers; safe to ignore
+  }
+  if (toastMessage) showToast(toastMessage);
+  return true;
+}
+
+function toggleOriginalReaderFullscreen() {
+  if (!filePreviewPanel) return;
+  if (document.fullscreenElement === filePreviewPanel) {
+    document.exitFullscreen?.();
+    return;
+  }
+  if (filePreviewPanel.requestFullscreen) {
+    filePreviewPanel.requestFullscreen().catch(() => {
+      filePreviewPanel.classList.toggle("fullscreen-mode");
+    });
+    return;
+  }
+  filePreviewPanel.classList.toggle("fullscreen-mode");
+}
+
+function syncOriginalReaderFullscreenState() {
+  if (!filePreviewPanel) return;
+  filePreviewPanel.classList.toggle("fullscreen-mode", document.fullscreenElement === filePreviewPanel);
+}
+
+function setFilePreviewOriginalMode(enabled, type = "") {
+  if (!filePreviewPanel) return;
+  filePreviewPanel.classList.toggle("original-mode", Boolean(enabled));
+  filePreviewPanel.classList.toggle("original-pdf", Boolean(enabled && type === "pdf"));
+  document.body.classList.toggle("file-reader-original-open", Boolean(enabled));
+  document.body.classList.toggle("file-reader-pdf-open", Boolean(enabled && type === "pdf"));
+}
+
+function fileSourceUrl(attachment, { download = false } = {}) {
+  const params = new URLSearchParams({ fileId: attachment.fileId || "" });
+  if (attachment.projectId) params.set("projectId", attachment.projectId);
+  if (download) params.set("download", "1");
+  return `/api/file-source?${params.toString()}`;
+}
+
+function filePageImageUrl(
+  attachment,
+  { page = originalReaderCurrentPage(), zoom = Number(state.fileReader?.originalZoom) || 100 } = {}
+) {
+  const params = new URLSearchParams({ fileId: attachment.fileId || "" });
+  if (attachment.projectId) params.set("projectId", attachment.projectId);
+  params.set("page", String(Math.max(1, Number(page) || 1)));
+  params.set("scale", originalReaderImageScale(zoom).toFixed(2));
+  return `/api/file-page-image?${params.toString()}`;
+}
+
+function filePageThumbnailUrl(attachment, page) {
+  const params = new URLSearchParams({ fileId: attachment.fileId || "" });
+  if (attachment.projectId) params.set("projectId", attachment.projectId);
+  params.set("page", String(Math.max(1, Number(page) || 1)));
+  params.set("scale", "0.35");
+  return `/api/file-page-image?${params.toString()}`;
+}
+
+function filePageLayoutUrl(attachment, { page = originalReaderCurrentPage() } = {}) {
+  const params = new URLSearchParams({ fileId: attachment.fileId || "" });
+  if (attachment.projectId) params.set("projectId", attachment.projectId);
+  params.set("page", String(Math.max(1, Number(page) || 1)));
+  return `/api/file-page-layout?${params.toString()}`;
+}
+
+function filePageSearchUrl(attachment, { query = "" } = {}) {
+  const params = new URLSearchParams({ fileId: attachment.fileId || "", query: String(query || "") });
+  if (attachment.projectId) params.set("projectId", attachment.projectId);
+  return `/api/file-page-search?${params.toString()}`;
+}
+
+function originalReaderImageScale(zoom) {
+  return Math.max(0.8, Math.min(3, ((Number(zoom) || 100) / 100) * 1.6));
+}
+
+function originalPreviewType(attachment) {
+  if (!attachment?.fileId || !attachment.sourceAvailable) return "";
+  const kind = String(attachment.kind || "").toLowerCase();
+  const type = String(attachment.type || "").split(";", 1)[0].trim().toLowerCase();
+  if (kind === "pdf" || type === "application/pdf") return "pdf";
+  if (kind === "image" && type.startsWith("image/") && type !== "image/svg+xml") return "image";
+  if (type.startsWith("text/") && type !== "text/html") return "text";
+  if (["txt", "text", "md", "csv", "json", "xml", "log"].includes(kind)) return "text";
+  return "";
+}
+
+function renderFileReaderLoading(attachment) {
+  setFilePreviewOriginalMode(false);
+  if (fileReaderToolbar) fileReaderToolbar.hidden = false;
+  updateFileReaderControls();
+  if (!filePreviewText) return;
+  filePreviewText.classList.add("loading");
+  filePreviewText.classList.remove("error", "original");
+  filePreviewText.replaceChildren();
+  const empty = document.createElement("p");
+  empty.className = "file-reader-empty";
+  empty.textContent = `正在打开 ${attachment.name || "文件"}...`;
+  filePreviewText.append(empty);
+}
+
+async function loadFileReaderWindow(chunkStart) {
+  const reader = state.fileReader;
+  if (!reader?.attachment?.fileId) return;
+  const requestId = createId();
+  reader.requestId = requestId;
+  reader.loading = true;
+  updateFileReaderControls();
+  try {
+    const response = await apiFetch("/api/file-reader", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        fileId: reader.attachment.fileId,
+        projectId: reader.attachment.projectId || "",
+        chunkStart,
+        chunkCount: reader.chunkCount || fileReaderChunkCount,
+      }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || "读取文档失败");
+    if (state.fileReader?.requestId !== requestId) return;
+    const file = data.file && typeof data.file === "object" ? data.file : {};
+    const windowInfo = data.window && typeof data.window === "object" ? data.window : {};
+    reader.attachment = {
+      ...reader.attachment,
+      name: String(file.name || reader.attachment.name || "文件"),
+      kind: String(file.kind || reader.attachment.kind || "text"),
+      type: String(file.type || reader.attachment.type || ""),
+      size: Number(file.size || reader.attachment.size) || 0,
+      charCount: Number(file.charCount || reader.attachment.charCount) || 0,
+      chunkCount: Number(file.chunkCount || windowInfo.totalChunks || reader.attachment.chunkCount) || 0,
+      pageCount: Number(file.pageCount || reader.attachment.pageCount) || 0,
+      projectId: String(file.projectId || reader.attachment.projectId || ""),
+      sourceAvailable: Boolean(file.sourceAvailable || reader.attachment.sourceAvailable),
+    };
+    reader.window = windowInfo;
+    reader.chunkStart = Number(windowInfo.chunkStart) || Math.max(1, Number(chunkStart) || 1);
+    reader.totalChunks = Number(windowInfo.totalChunks || reader.attachment.chunkCount) || 0;
+    reader.loading = false;
+    renderFileReader(data, reader.attachment);
+  } catch (error) {
+    if (state.fileReader?.requestId !== requestId) return;
+    reader.loading = false;
+    renderFileReaderError(error.message || "读取文档失败");
+  }
+}
+
+function renderFileReader(data, attachment) {
+  setFilePreviewOriginalMode(false);
+  if (!filePreviewText) return;
+  const windowInfo = data.window && typeof data.window === "object" ? data.window : {};
+  const chunks = Array.isArray(data.chunks) ? data.chunks : [];
+  if (filePreviewTitle) filePreviewTitle.textContent = attachment.name || "文件预览";
+  updateFilePreviewMeta(attachment, windowInfo);
+  if (fileReaderToolbar) fileReaderToolbar.hidden = false;
+  filePreviewText.classList.remove("loading", "error", "original");
+  filePreviewText.replaceChildren();
+  if (attachment.sourceAvailable && !originalPreviewType(attachment)) {
+    filePreviewText.append(renderOriginalUnavailableNotice(attachment));
+  }
+  if (attachment.fileId) {
+    filePreviewText.append(renderFileReaderQuickActionStrip({ compact: true }));
+  }
+  if (!chunks.length) {
+    const empty = document.createElement("p");
+    empty.className = "file-reader-empty";
+    empty.textContent = "这个文件暂时没有可阅读的文本内容。";
+    filePreviewText.append(empty);
+  }
+  const totalChunks = Number(windowInfo.totalChunks || attachment.chunkCount) || chunks.length;
+  for (const chunk of chunks) {
+    const article = document.createElement("article");
+    article.className = "file-reader-chunk";
+    const header = document.createElement("div");
+    header.className = "file-reader-chunk-header";
+    const index = Number(chunk.index) || 0;
+    const title = document.createElement("strong");
+    title.textContent = index ? `片段 ${index}/${totalChunks}` : "片段";
+    const lines = document.createElement("span");
+    const lineStart = Number(chunk.lineStart) || 0;
+    const lineEnd = Number(chunk.lineEnd) || 0;
+    lines.textContent = lineStart && lineEnd ? `行 ${lineStart}-${lineEnd}` : "";
+    header.append(title, lines);
+    const body = document.createElement("div");
+    body.className = "file-reader-chunk-body";
+    body.textContent = String(chunk.text || "");
+    article.append(header, body);
+    filePreviewText.append(article);
+  }
+  updateFileReaderControls();
+}
+
+function renderOriginalUnavailableNotice(attachment) {
+  const note = document.createElement("div");
+  note.className = "file-original-unavailable";
+  const text = document.createElement("span");
+  text.textContent = "浏览器不能直接原样预览这个格式，已保留原文件；下面显示提取文本。";
+  const download = document.createElement("a");
+  download.className = "download-link";
+  download.href = fileSourceUrl(attachment, { download: true });
+  download.textContent = "下载原文件";
+  note.append(text, download);
+  return note;
+}
+
+function renderFileReaderError(message) {
+  setFilePreviewOriginalMode(false);
+  if (fileReaderToolbar) fileReaderToolbar.hidden = false;
+  if (!filePreviewText) return;
+  filePreviewText.classList.remove("loading", "original");
+  filePreviewText.classList.add("error");
+  filePreviewText.replaceChildren();
+  const empty = document.createElement("p");
+  empty.className = "file-reader-empty";
+  empty.textContent = message || "读取文档失败";
+  filePreviewText.append(empty);
+  updateFileReaderControls();
+}
+
+function updateFileReaderControls() {
+  const reader = state.fileReader;
+  const windowInfo = reader?.window || {};
+  if (fileReaderPageIndicator) {
+    if (!reader) {
+      fileReaderPageIndicator.textContent = "-";
+    } else if (reader.mode === "original") {
+      fileReaderPageIndicator.textContent = "原样预览";
+    } else if (reader.loading) {
+      fileReaderPageIndicator.textContent = "加载中";
+    } else if (Number(windowInfo.chunkStart) > 0) {
+      fileReaderPageIndicator.textContent = `${windowInfo.chunkStart}-${windowInfo.chunkEnd} / ${windowInfo.totalChunks}`;
+    } else {
+      fileReaderPageIndicator.textContent = "无内容";
+    }
+  }
+  if (fileReaderPrevButton) fileReaderPrevButton.disabled = !reader || reader.mode === "original" || reader.loading || !windowInfo.hasPrevious;
+  if (fileReaderNextButton) fileReaderNextButton.disabled = !reader || reader.mode === "original" || reader.loading || !windowInfo.hasNext;
+  if (fileReaderQuoteButton) fileReaderQuoteButton.disabled = !reader || reader.mode === "original";
+  if (fileReaderSummarizeButton) fileReaderSummarizeButton.disabled = !reader;
+}
+
+function stepFileReader(delta) {
+  const reader = state.fileReader;
+  if (!reader || reader.loading) return;
+  const windowInfo = reader.window || {};
+  if (delta < 0 && !windowInfo.hasPrevious) return;
+  if (delta > 0 && !windowInfo.hasNext) return;
+  const currentStart = Number(windowInfo.chunkStart || reader.chunkStart) || 1;
+  const currentEnd = Number(windowInfo.chunkEnd || currentStart) || currentStart;
+  const count = Number(reader.chunkCount) || fileReaderChunkCount;
+  const nextStart = delta < 0 ? Math.max(1, currentStart - count) : currentEnd + 1;
+  loadFileReaderWindow(nextStart);
+}
+
+function fileReaderSelectedText() {
+  if (!filePreviewText) return "";
+  const selection = window.getSelection?.();
+  if (!selection || selection.isCollapsed || !selection.rangeCount) return "";
+  const range = selection.getRangeAt(0);
+  const container = range.commonAncestorContainer;
+  const element = container.nodeType === Node.ELEMENT_NODE ? container : container.parentElement;
+  if (!element || !filePreviewText.contains(element)) return "";
+  return selection.toString().trim();
+}
+
+function quoteFileReaderSelection() {
+  const text = fileReaderSelectedText();
+  const attachment = state.fileReader?.attachment;
+  if (!text) {
+    showToast("请先在文档里选中要引用的文字");
+    return;
+  }
+  state.quoteDraft = {
+    role: "file",
+    text,
+    fragment: text,
+    isFragment: true,
+    sourceName: attachment?.name || "",
+  };
+  renderQuotePreview();
+  saveDraft();
+  if (!shouldUseSideFileReaderPanel()) {
+    closeFilePreview();
+  }
+  promptInput.focus();
+  showToast("已引用选中文本");
+}
+
+function summarizeFileReaderDocument() {
+  const attachment = state.fileReader?.attachment;
+  if (!attachment) return;
+  const prompt = `请详细总结这篇文档《${attachment.name || "附件"}》的内容：先给一段总览，再按主题分段列出要点，最后列出关键结论和可继续追问的问题。`;
+  appendFileReaderPrompt(attachment, prompt, "已把文档加入本轮提问");
+}
+
+function outlineFileReaderDocument() {
+  const attachment = state.fileReader?.attachment;
+  if (!attachment) return;
+  const prompt = `请为文档《${attachment.name || "附件"}》提炼一份结构化阅读大纲：按章节或主题分层列出标题、核心观点、关键数据/公式/表格信息，并标出最值得重点阅读的部分。`;
+  appendFileReaderPrompt(attachment, prompt, "已把提纲请求加入本轮提问");
+}
+
+function suggestFileReaderQuestions() {
+  const attachment = state.fileReader?.attachment;
+  if (!attachment) return;
+  const prompt = `请基于文档《${attachment.name || "附件"}》生成 8 个高价值追问，覆盖：快速理解、细节核对、结论推导、风险/局限、可执行下一步。每个问题后用一句话说明它能帮助我弄清什么。`;
+  appendFileReaderPrompt(attachment, prompt, "已把追问请求加入本轮提问");
+}
+
+function mindmapFileReaderDocument() {
+  const attachment = state.fileReader?.attachment;
+  if (!attachment) return;
+  const prompt = `请把文档《${attachment.name || "附件"}》整理成一张中文思维导图，优先调用本地 create_mindmap 工具生成可下载 SVG；如果工具不可用，请输出 Mermaid mindmap 或分层 Markdown 大纲。`;
+  appendFileReaderPrompt(attachment, prompt, "已把脑图请求加入本轮提问");
+}
+
+function ensureFileReaderAttachmentForPrompt(attachment) {
+  if (!attachment?.fileId) return false;
+  const exists = state.pendingAttachments.some(
+    (item) => item.fileId === attachment.fileId && String(item.projectId || "") === String(attachment.projectId || "")
+  );
+  if (exists) return true;
+  if (state.pendingAttachments.length >= maxPendingAttachments) {
+    showToast(`附件已达上限 ${maxPendingAttachments} 个，请先移除一个`);
+    return false;
+  }
+  const normalized = normalizeStoredAttachment({
+    ...attachment,
+    text: "",
+    preview: attachment.preview || "",
+  });
+  if (!normalized) return false;
+  state.pendingAttachments.push(normalized);
+  return true;
+}
+
+function shouldUseSideFileReaderPanel() {
+  return Boolean(filePreviewPanel && window.matchMedia?.("(min-width: 960px)")?.matches);
+}
+
+function updateFileReaderPanelMode() {
+  if (!filePreviewPanel?.classList.contains("open")) return;
+  if (shouldUseSideFileReaderPanel()) {
+    document.body.classList.add("file-reader-side-open");
+    setBackdropVisible(false);
+    deactivateFocusTrap(filePreviewPanel);
+  } else {
+    document.body.classList.remove("file-reader-side-open");
+    setBackdropVisible(true);
+    activateFocusTrap(filePreviewPanel);
+  }
+  syncBackdrop();
+}
+
+function onFileReaderViewportChange() {
+  if (!filePreviewPanel?.classList.contains("open")) return;
+  updateFileReaderPanelMode();
+  syncOriginalPdfPageWidths();
+  renderOriginalPageTextOverlayContent();
 }
 
 function openImageLightbox(items, index = 0) {
@@ -8318,7 +10856,7 @@ function syncBackdrop() {
   const hasSettings = settingsPanel.classList.contains("open");
   const hasSeek = seekPanel?.classList.contains("open");
   const hasProject = projectPanel?.classList.contains("open");
-  const hasPreview = filePreviewPanel?.classList.contains("open");
+  const hasPreview = filePreviewPanel?.classList.contains("open") && !shouldUseSideFileReaderPanel();
   const hasMemory = memoryPanel?.classList.contains("open");
   const hasDiagnostics = diagnosticsPanel?.classList.contains("open");
   const hasSearch = searchPanel?.classList.contains("open");
@@ -8832,6 +11370,14 @@ async function onChatLogClick(event) {
     openImageLightbox(imageAttachments(message?.attachments || []), Number(imageButton.dataset.messageImage) || 0);
     return;
   }
+  const attachmentButton = clickTarget?.closest("button[data-message-attachment]");
+  if (attachmentButton) {
+    const node = attachmentButton.closest(".message[data-message-id]");
+    const message = state.messages.find((item) => item.id === node?.dataset.messageId);
+    const attachment = combinedAttachmentsForMessage(message || {})[Number(attachmentButton.dataset.messageAttachment) || 0];
+    if (attachment) openFilePreview(attachment);
+    return;
+  }
 
   const searchButton = clickTarget?.closest("button[data-search-results]");
   if (searchButton) {
@@ -8985,24 +11531,25 @@ async function downloadGeneratedFile(link) {
     showToast("下载链接无效或已损坏", { tone: "error" });
     return;
   }
-  const filename = pptxFilename(link.textContent || "presentation");
+  // 文件真实扩展名由后端按磁盘文件决定，这里的名字只提供基名。
+  const filename = generatedDownloadName(link.textContent || "");
   const saved = await saveGeneratedFileToDownloads(id, filename);
   if (saved) return;
 
   // Fallback for non-desktop browsers or locked-down filesystems.
   try {
-    showToast("正在准备下载 PPT...");
+    showToast("正在准备下载文件…");
     const response = await apiFetch(generatedDownloadApiPath(id));
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
       throw new Error(apiErrorMessage(response, data, `下载失败：${response.status}`));
     }
     const blob = await response.blob();
-    const filename = filenameFromContentDisposition(response.headers.get("Content-Disposition")) || "presentation.pptx";
+    const filename = filenameFromContentDisposition(response.headers.get("Content-Disposition")) || "document";
     downloadBlob(blob, filename);
-    showToast("PPT 下载已开始", { tone: "success" });
+    showToast("文件下载已开始", { tone: "success" });
   } catch (error) {
-    showToast(error.message || "下载失败，请重新生成 PPT", { tone: "error" });
+    showToast(error.message || "下载失败，请重新生成", { tone: "error" });
   }
 }
 
@@ -9016,13 +11563,13 @@ async function saveGeneratedFileToDownloads(id, filename) {
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
       if (response.status === 404) {
-        showToast("PPT 链接已过期，请重新生成", { tone: "error" });
+        showToast("下载链接已过期，请重新生成", { tone: "error" });
         return true;
       }
       throw new Error(apiErrorMessage(response, data, `保存失败：${response.status}`));
     }
     const path = data.path || data.filename || "下载目录";
-    showToast(`PPT 已保存到：${path}`, { tone: "success" });
+    showToast(`已保存到：${path}`, { tone: "success" });
     return true;
   } catch {
     return false;
@@ -9056,18 +11603,22 @@ function filenameFromContentDisposition(value) {
   const encoded = header.match(/filename\*=UTF-8''([^;]+)/i);
   if (encoded) {
     try {
-      return pptxFilename(decodeURIComponent(encoded[1]));
+      return generatedDownloadName(decodeURIComponent(encoded[1]));
     } catch {
-      return pptxFilename(encoded[1]);
+      return generatedDownloadName(encoded[1]);
     }
   }
   const plain = header.match(/filename="?([^";]+)"?/i);
-  return plain ? pptxFilename(plain[1]) : "";
+  return plain ? generatedDownloadName(plain[1]) : "";
 }
 
-function pptxFilename(value) {
-  const name = safeFilename(String(value || "").replace(/\.pptx$/i, "")) || "presentation";
-  return `${name}.pptx`;
+// 生成文件（PPT / Word / PDF）的下载名：保留已知文档扩展名，其余只取安全基名；
+// 真正落盘的扩展名以后端实际文件为准。
+function generatedDownloadName(value) {
+  const raw = String(value || "").trim();
+  const matched = raw.match(/\.(pptx|docx|pdf)$/i);
+  const base = safeFilename(raw.replace(/\.(pptx|docx|pdf)$/i, "")) || "document";
+  return matched ? `${base}.${matched[1].toLowerCase()}` : base;
 }
 
 // 公式 / 表格图表 / 代码块这些"内容块级"按钮，主聊天区（onChatLogClick）和右侧

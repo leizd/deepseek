@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import io
 import json
 import math
@@ -11,11 +12,14 @@ import shlex
 import shutil
 import subprocess
 import tempfile
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Protocol
 
-from deepseek_mobile.core.config import settings
+from deepseek_mobile.core.config import DEEPSEEK_TIMEOUT_SECONDS, DEEPSEEK_URL, settings
 from deepseek_mobile.core.errors import AppError, ErrorCode
+from deepseek_mobile.core.utils import format_upstream_error
 
 # OCR 输入预处理 / 渲染参数。提高印刷体识别率的两个关键：足够分辨率 + 二值化。
 OCR_PDF_DPI = 300  # PDF 渲染 DPI（原 200 偏低；300 显著提升小字 / 公式识别）
@@ -24,6 +28,25 @@ OCR_UPSCALE_MAX = 3.0  # 单次放大倍数上限，避免超大图爆内存
 OCR_MODES = {"fast", "balanced", "quality"}
 OCR_DEFAULT_MODE = "balanced"
 OCR_FORMULA_LANGUAGE = "equ"
+DEEPSEEK_OCR_MODEL = "deepseek-v4-pro"
+DEEPSEEK_OCR_PROMPT = (
+    "You are an OCR engine. Transcribe all visible text from the image exactly. "
+    "Preserve line breaks, table-like spacing, labels, punctuation, and math. "
+    "Use LaTeX only when it is the clearest way to preserve formulas. "
+    "Return only the transcription. If there is no readable text, return an empty response."
+)
+DEEPSEEK_EMPTY_OCR_RESPONSES = {
+    "",
+    "no readable text",
+    "no text",
+    "no text found",
+    "no text detected",
+    "there is no readable text",
+    "there is no readable text in the image",
+    "empty",
+    "none",
+    "n/a",
+}
 MATH_SYMBOLS = set("=+-*/^_()[]{}<>|.,:;∑∏∫√∞≈≠≤≥±×÷·⋅∘∂∇∆∈∉⊂⊆⊄⊇∪∩∀∃→←↔⇒⇔∴∵′″°πθλμσΣΠΩαβγδεφψω")
 _FORMULA_COMMAND_CANDIDATES = (
     ("pix2tex", "pix2tex {image}"),
@@ -250,6 +273,33 @@ def _image_suffix(image_bytes: bytes) -> str:
     if image_bytes.startswith(b"BM"):
         return ".bmp"
     return ".img"
+
+
+def _image_media_type(image_bytes: bytes) -> str:
+    suffix = _image_suffix(image_bytes)
+    return {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".webp": "image/webp",
+        ".tif": "image/tiff",
+        ".gif": "image/gif",
+        ".bmp": "image/bmp",
+    }.get(suffix, "image/png")
+
+
+def _image_data_url(image_bytes: bytes) -> str:
+    encoded = base64.b64encode(image_bytes).decode("ascii")
+    return f"data:{_image_media_type(image_bytes)};base64,{encoded}"
+
+
+def _pil_image_png_bytes(image: object) -> bytes:
+    limited = _limit_pil_image_pixels(image)
+    mode = str(getattr(limited, "mode", "") or "")
+    if mode and mode not in {"RGB", "RGBA", "L"} and callable(getattr(limited, "convert", None)):
+        limited = limited.convert("RGB")  # type: ignore[attr-defined]
+    buffer = io.BytesIO()
+    limited.save(buffer, "PNG")  # type: ignore[attr-defined]
+    return buffer.getvalue()
 
 
 def _limit_pil_image_pixels(image: object) -> object:
@@ -975,6 +1025,143 @@ class OCREngine(Protocol):
         ...
 
 
+def _deepseek_ocr_body(data_url: str) -> dict[str, object]:
+    return {
+        "model": DEEPSEEK_OCR_MODEL,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": DEEPSEEK_OCR_PROMPT},
+                    {"type": "image_url", "image_url": {"url": data_url}},
+                ],
+            }
+        ],
+        "stream": False,
+    }
+
+
+def _deepseek_ocr_request(api_key: str, body: dict[str, object]) -> urllib.request.Request:
+    return urllib.request.Request(
+        DEEPSEEK_URL,
+        data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+        method="POST",
+    )
+
+
+def _deepseek_ocr_response_content(response_json: dict[str, object]) -> str:
+    choices = response_json.get("choices")
+    if not isinstance(choices, list) or not choices:
+        raise AppError("DeepSeek OCR returned no answer.", code=ErrorCode.OCR_UNAVAILABLE, status=502)
+    first_choice = choices[0]
+    if not isinstance(first_choice, dict):
+        return ""
+    message = first_choice.get("message")
+    if not isinstance(message, dict):
+        return ""
+    content = message.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for part in content:
+            if isinstance(part, str):
+                parts.append(part)
+            elif isinstance(part, dict) and isinstance(part.get("text"), str):
+                parts.append(str(part["text"]))
+        return "\n".join(parts)
+    return ""
+
+
+def _clean_deepseek_ocr_output(value: str) -> str:
+    raw = str(value or "").strip()
+    fence = re.fullmatch(r"```(?:[A-Za-z0-9_+-]+)?\s*\n(.*?)\n?```", raw, flags=re.DOTALL)
+    if fence:
+        raw = fence.group(1).strip()
+    text = normalize_ocr_text(raw)
+    compact = re.sub(r"[\s.。!！?？:：]+", " ", text).strip().strip("()[]{}").lower()
+    return "" if compact in DEEPSEEK_EMPTY_OCR_RESPONSES else text
+
+
+def _run_deepseek_ocr_image(image_bytes: bytes, api_key: str) -> str:
+    request = _deepseek_ocr_request(api_key, _deepseek_ocr_body(_image_data_url(image_bytes)))
+    try:
+        with urllib.request.urlopen(request, timeout=DEEPSEEK_TIMEOUT_SECONDS) as response:
+            response_json = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise AppError(
+            f"DeepSeek OCR failed: {format_upstream_error(detail)}",
+            code=ErrorCode.OCR_UNAVAILABLE,
+            status=min(exc.code, 502),
+        ) from exc
+    except urllib.error.URLError as exc:
+        raise AppError(f"Cannot reach DeepSeek API for OCR: {exc.reason}", code=ErrorCode.OCR_UNAVAILABLE, status=502) from exc
+    except json.JSONDecodeError as exc:
+        raise AppError("DeepSeek OCR returned invalid JSON.", code=ErrorCode.OCR_UNAVAILABLE, status=502) from exc
+
+    if not isinstance(response_json, dict):
+        raise AppError("DeepSeek OCR returned invalid JSON.", code=ErrorCode.OCR_UNAVAILABLE, status=502)
+    text = _clean_deepseek_ocr_output(_deepseek_ocr_response_content(response_json))
+    if not text:
+        raise AppError("DeepSeek OCR did not recognize any text.", code=ErrorCode.OCR_EMPTY, status=422)
+    return text
+
+
+class DeepSeekApiOcrEngine:
+    name = "deepseek-api"
+
+    def __init__(self, api_key: str | None = None) -> None:
+        api_key = str(api_key or getattr(settings, "deepseek_api_key", "") or "").strip()
+        if not api_key:
+            raise AppError("Missing DeepSeek API Key for OCR.", code=ErrorCode.OCR_UNAVAILABLE, status=415)
+        self._api_key = api_key
+
+    def extract(self, pdf_bytes: bytes) -> str:
+        try:
+            import pdf2image
+        except ModuleNotFoundError as exc:
+            raise AppError(
+                "DeepSeek PDF OCR requires pdf2image and pdftoppm to render pages.",
+                code=ErrorCode.OCR_UNAVAILABLE,
+                status=415,
+            ) from exc
+
+        pages: list[str] = []
+        try:
+            images = pdf2image.convert_from_bytes(pdf_bytes, dpi=_ocr_pdf_dpi(), fmt="png")
+            for index, image in enumerate(images, start=1):
+                try:
+                    text = self.extract_page_image(image)
+                except AppError as exc:
+                    if exc.code == ErrorCode.OCR_EMPTY:
+                        continue
+                    raise
+                if text.strip():
+                    pages.append(f"[PDF µЪ {index} Ті (OCR)]\n{text.strip()}")
+        except AppError:
+            raise
+        except Exception as exc:
+            raise AppError("DeepSeek PDF OCR failed.", code=ErrorCode.OCR_UNAVAILABLE, status=415) from exc
+        return "\n\n".join(pages)
+
+    def extract_page_image(self, image: object) -> str:
+        try:
+            return _run_deepseek_ocr_image(_pil_image_png_bytes(image), self._api_key)
+        except AppError:
+            raise
+        except Exception as exc:
+            raise AppError("DeepSeek PDF page OCR failed.", code=ErrorCode.OCR_UNAVAILABLE, status=415) from exc
+
+    def extract_image(self, image_bytes: bytes) -> str:
+        return _run_deepseek_ocr_image(image_bytes, self._api_key)
+
+
 class FormulaOcrCommandEngine:
     name = "formula-command"
 
@@ -1235,14 +1422,19 @@ class AndroidMlKitEngine:
         return normalize_ocr_text(str(self._bridge.recognizeImage(image_bytes)))
 
 
-def select_ocr_engine() -> OCREngine | None:
-    engines, _errors = _ocr_engine_candidates()
+def select_ocr_engine(api_key: str | None = None) -> OCREngine | None:
+    engines, _errors = _ocr_engine_candidates(api_key=api_key)
     return engines[0] if engines else None
 
 
-def _ocr_engine_candidates() -> tuple[list[OCREngine], list[str]]:
+def _ocr_engine_candidates(api_key: str | None = None) -> tuple[list[OCREngine], list[str]]:
     engines: list[OCREngine] = []
     errors: list[str] = []
+
+    try:
+        engines.append(DeepSeekApiOcrEngine(api_key=api_key))
+    except AppError as exc:
+        errors.append(f"deepseek-api: {exc}")
 
     if os.environ.get("DEEPSEEK_ANDROID_APP") == "1":
         try:
@@ -1342,6 +1534,9 @@ def _extract_pdf_with_page_fallback(
             if name == "formula-command" and not _formula_ocr_output_is_credible(text):
                 text = ""
             if text.strip():
+                if name == "deepseek-api":
+                    page_text = text.strip()
+                    break
                 score = _ocr_text_score(text)
                 if score > page_score:
                     page_text = text.strip()
@@ -1370,8 +1565,9 @@ def _extract_with_fallback(
     mode: str,
     no_engine_message: str,
     empty_message: str,
+    api_key: str | None = None,
 ) -> str:
-    engines, startup_errors = _ocr_engine_candidates()
+    engines, startup_errors = _ocr_engine_candidates(api_key=api_key)
     if not engines:
         raise AppError(
             _with_error_details(no_engine_message, startup_errors),
@@ -1414,6 +1610,8 @@ def _extract_with_fallback(
         if name == "formula-command" and not _formula_ocr_output_is_credible(text):
             text = ""
         if text.strip():
+            if name == "deepseek-api":
+                return text.strip()
             score = _ocr_text_score(text)
             if score > best_score:
                 best_text = text.strip()
@@ -1435,19 +1633,27 @@ def _extract_with_fallback(
     )
 
 
-def extract_pdf_ocr(pdf_bytes: bytes) -> str:
+def extract_pdf_ocr(pdf_bytes: bytes, *, api_key: str | None = None) -> str:
     return _extract_with_fallback(
         pdf_bytes,
         mode="pdf",
-        no_engine_message="No OCR engine is available. Install requirements-ocr.txt and Tesseract to read scanned PDFs.",
+        no_engine_message=(
+            "No OCR engine is available. Set DEEPSEEK_API_KEY for DeepSeek OCR, or install "
+            "requirements-ocr.txt and Tesseract to use the local fallback for scanned PDFs."
+        ),
         empty_message="OCR did not recognize any text.",
+        api_key=api_key,
     )
 
 
-def extract_image_ocr(image_bytes: bytes) -> str:
+def extract_image_ocr(image_bytes: bytes, *, api_key: str | None = None) -> str:
     return _extract_with_fallback(
         image_bytes,
         mode="image",
-        no_engine_message="No OCR engine is available. Install requirements-ocr.txt and Tesseract to read image text.",
+        no_engine_message=(
+            "No OCR engine is available. Set DEEPSEEK_API_KEY for DeepSeek OCR, or install "
+            "requirements-ocr.txt and Tesseract to use the local fallback for image text."
+        ),
         empty_message="OCR did not recognize any text in image.",
+        api_key=api_key,
     )

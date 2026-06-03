@@ -43,6 +43,7 @@
       text,
       preview,
       fileId,
+      pageCount: Number(value.pageCount) || 0,
       charCount: Number(value.charCount) || 0,
       chunkCount: Number(value.chunkCount) || 0,
       chunked: Boolean(value.chunked),

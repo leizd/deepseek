@@ -55,6 +55,8 @@ export function normalizeStoredAttachment(value) {
     imagePreview: String(value.imagePreview || ""),
     fileId: typeof value.fileId === "string" ? value.fileId : "",
     projectId: typeof value.projectId === "string" ? value.projectId : "",
+    sourceAvailable: Boolean(value.sourceAvailable),
+    pageCount: Number(value.pageCount) || 0,
     charCount: Number(value.charCount) || 0,
     chunkCount: Number(value.chunkCount) || 0,
     chunked: Boolean(value.chunked),

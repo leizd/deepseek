@@ -39,6 +39,7 @@ SLIDES_RUNTIME_GUIDANCE = """DeepSeek Mobile runtime routing:
 - Treat user requests to create, modify, export, or polish PPT / PPTX / slides / presentations / posters / visual aids as the `slides` skill.
 - For PowerPoint output in this app, the available local export boundary is the `create_pptx` function tool. Call it to create a real downloadable `.pptx`; do not answer with only an outline, Marp, Markdown slides, or a refusal about lacking file-generation ability.
 - Build a concrete deck spec before calling the tool: concise title, optional subtitle, and ordered slides. Use slide titles as claims or clear section labels, and keep bullets short enough to fit on slides.
+- Avoid plain outline decks. Aim for a polished consultant-style deck: 6-10 slides when the user does not specify length, 3-6 short bullets per content slide, and varied layouts such as `cards` for key points, `process` or `timeline` for steps, `comparison` for tradeoffs, `quote` for a core thesis, and `summary` for the final takeaways. Use `auto` only when no visual pattern is obvious.
 - If the user supplies source material, convert it into editable slide content instead of summarizing the source as prose.
 - In the final reply, include the returned Markdown download link and a brief slide inventory."""
 
