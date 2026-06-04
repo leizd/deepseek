@@ -117,19 +117,24 @@ def memory_file_lock() -> Iterator[None]:
     lock_path = MEMORY_DIR / "memories.lock"
     with lock_path.open("a+b") as lock_file:
         if os.name == "nt":
-            import msvcrt
+            # 与下面 fcntl 分支一致：用 __import__ + getattr 访问平台专属模块成员，
+            # 避免 mypy 在非 Windows 平台（CI 为 Linux）校验 msvcrt 的 Windows-only 属性。
+            msvcrt_module = __import__("msvcrt")
+            locking = getattr(msvcrt_module, "locking")
+            lk_lock = getattr(msvcrt_module, "LK_LOCK")
+            lk_unlck = getattr(msvcrt_module, "LK_UNLCK")
 
             lock_file.seek(0, os.SEEK_END)
             if lock_file.tell() == 0:
                 lock_file.write(b"\0")
                 lock_file.flush()
             lock_file.seek(0)
-            msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK, 1)
+            locking(lock_file.fileno(), lk_lock, 1)
             try:
                 yield
             finally:
                 lock_file.seek(0)
-                msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+                locking(lock_file.fileno(), lk_unlck, 1)
             return
 
         fcntl_module = __import__("fcntl")
