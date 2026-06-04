@@ -72,6 +72,18 @@ class FrontendUtilsTests(unittest.TestCase):
             assert.strictEqual(attachment.thumbnail, "data:image/jpeg;base64,thumb");
             assert.strictEqual(attachment.imagePreview, "data:image/jpeg;base64,preview");
             assert.ok(attachment.id);
+            // PDF 阅读器开图路径 (openFilePreview -> normalizeStoredAttachment) 必须保留
+            // pageCount / sourceAvailable，否则多页 PDF 只会渲染 1 页（回归保护）。
+            const pdfAttachment = normalize.normalizeStoredAttachment({
+              name: "paper.pdf",
+              kind: "pdf",
+              type: "application/pdf",
+              fileId: "f".repeat(32),
+              pageCount: 58,
+              sourceAvailable: true,
+            });
+            assert.strictEqual(pdfAttachment.pageCount, 58);
+            assert.strictEqual(pdfAttachment.sourceAvailable, true);
 
             const parsed = reminder.detectReminderFromText("明天 9 点提醒我提交日报", new Date("2026-01-01T00:00:00Z"));
             assert.strictEqual(parsed.title, "DeepSeek 提醒");

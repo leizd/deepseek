@@ -4,12 +4,15 @@
 ![Python](https://img.shields.io/badge/python-3.10%2B-green)
 ![许可证](https://img.shields.io/badge/license-MIT-black)
 
-DeepSeek Mobile 是一个手机优先、本地优先的 AI 客户端。桌面端可打包成双击即用的本地应用窗口，手机端可打包成 APK；本机 Python 后端负责转发 DeepSeek API、搜索、文件解析、OCR、长期记忆、持久项目文档库、本地工具调用和静态资源。v1.7.0 强化图片视觉理解、PPT 生成与本地下载，并修复流式调用工具/输出正文时 Activity 状态文案和计时不准的问题；v1.6.6 把前端换上 Gemini 风格的新皮肤，并修复桌面 WebView 启动鉴权、选区引用提问、当前时间上下文、多 Agent 历史回放丢答案、Markdown 链接和饼图渲染等问题；v1.6.3 起 Windows exe 默认入口为内嵌 WebView 的本地桌面应用，不再需要跳转外部浏览器。
+DeepSeek Mobile 是一个手机优先、本地优先的 AI 客户端。桌面端可打包成双击即用的本地应用窗口，手机端可打包成 APK；本机 Python 后端负责转发 DeepSeek API、搜索、文件解析、OCR、长期记忆、持久项目文档库、本地工具调用和静态资源。v1.7.0 强化图片视觉理解、PPT / 文档 / 思维导图生成与本地下载，并修复流式调用工具/输出正文时 Activity 状态文案和计时不准的问题；v1.6.6 把前端换上 Gemini 风格的新皮肤，并修复桌面 WebView 启动鉴权、选区引用提问、当前时间上下文、多 Agent 历史回放丢答案、Markdown 链接和饼图渲染等问题；v1.6.3 起 Windows exe 默认入口为内嵌 WebView 的本地桌面应用，不再需要跳转外部浏览器。
 
 ## v1.7.0 更新
 
-- 图片上传默认交给 `deepseek-v4-pro` 多模态理解，公式、图表和截图题不再只依赖 OCR 文字抽取；OCR 保留为本地降级路径。
-- PPT 请求接入 `slides` skill 与本地 `create_pptx` 工具，模型漏调工具时后端会基于大纲兜底生成 `.pptx`，下载链接会保存到系统下载目录。
+- 图片上传默认交给 `deepseek-v4-pro` 多模态理解；OCR 重试也优先把图片页交给 DeepSeek API 直接转写，本地 OCR 只作为 API 不可用时的降级路径。
+- PPT 请求接入 `slides` skill 与本地 `create_pptx` 工具，模型漏调工具时后端会基于大纲兜底生成 `.pptx`；生成器会自动加入目录页并在卡片、流程、对比、总结等版式间切换，避免只输出简陋 bullet 页。
+- 新增 `create_document` 工具：模型可直接生成排版精美的 Word（`.docx`）和 PDF 文档，支持标题块、分章节编号、正文段落、要点、表格、页码与配色主题（PDF 用 reportlab 内置中文字体，无需附带字体文件），复用同一套 `/api/download` 下载链路。
+- 新增 `create_mindmap` 工具：用户要求“画思维导图 / 脑图 / mind map”时，后端强制让模型输出结构化节点，并在本地生成可下载 SVG 思维导图，最终回复会在正文中直接显示预览图。
+- `create_pptx` / `create_document` / `create_mindmap` 这类终态文件工具执行成功后，后端会直接返回本地下载链接，不再把完整工具参数和结果二次发给 DeepSeek 总结，避免工具回合把 prompt cache 命中率拉低。
 - 修复流式工具调用期间 Activity 标题计时停顿：运行中计时改为整轮活跃耗时，调用工具、搜索和 Agent 工作阶段都继续刷新。
 - 修复正文已经开始输出时仍显示“思考中”：流式状态会按阶段显示“思考中 / 调用工具中 / 搜索中 / Agent 工作中 / 生成中”。
 - Service Worker 缓存版本更新到 `deepseek-mobile-v170`，确保新的前端状态逻辑刷新后生效。
@@ -49,7 +52,7 @@ DeepSeek Mobile 是一个手机优先、本地优先的 AI 客户端。桌面端
 ## v1.6.1 更新
 
 - 联网搜索工具 `web_search` 现在会复用 `.search-cache` 中的同查询结果，避免同一轮或相近请求反复拿到细微变化的搜索结果。
-- 工具调用交换会把上游随机 `tool_call_id` 改成稳定 ID，并把工具参数 JSON 规范化，减少第二轮 DeepSeek 请求在工具调用处提前 cache miss。
+- 工具调用交换会保留上游原始 `tool_call_id` 和参数 JSON，让第二轮 DeepSeek 请求能继续命中上一轮“模型输出末尾”的 prompt cache；工具结果仍用稳定 JSON 回填，减少本地状态字段造成的 cache miss。
 - 传给模型的联网搜索工具结果会移除 `cached` 这类只服务本地状态的波动字段，并使用稳定 JSON 序列化；前端搜索进度和诊断仍保留搜索缓存状态。
 - Service Worker 缓存版本更新到 `deepseek-mobile-v161`。
 
@@ -227,11 +230,11 @@ gradle :app:assembleDebug
 python -m pip install -r requirements-ocr.txt
 ```
 
-桌面端图片 OCR 会优先使用已安装的 Tesseract；如果 Tesseract / Python OCR 依赖不可用，或 Tesseract 在实际识别时失败，Windows 本地应用会自动尝试系统自带 `Windows.Media.Ocr` 作为兜底。桌面端扫描 PDF OCR 仍需要 Poppler / `pdftoppm` 在 `PATH` 中；Android APK 内置 ML Kit OCR 桥接，图片和扫描 PDF OCR 不需要额外安装 Tesseract / Poppler。
+图片 OCR 会优先使用 `DEEPSEEK_API_KEY` 调用 DeepSeek API，把图片直接交给 `deepseek-v4-pro` 转写文字；如果 API Key 缺失或 API 识别不可用，桌面端才会回退到本地 Tesseract / Windows OCR。扫描 PDF 仍需要 Poppler / `pdftoppm` 在 `PATH` 中先把页面渲染成图片；Android APK 仍保留 ML Kit 作为本机兜底。
 
 桌面 Tesseract 路线会按 `OCR_MODE` 生成本地轻量候选：灰度、小图放大、保边去噪、Otsu 二值化、深色背景反相；`balanced`/`quality` 还会尝试自适应阈值和弱光增强，`quality` 再做轻量倾斜校正。Tesseract 会按多个 `psm` 版面模式重试并用可读字符评分选择结果，其中包括更适合公式截图的单行/原始行模式和 `preserve_interword_spaces=1`；如果本机 Tesseract 安装了 `equ` 公式语言包，也会自动并入识别语言。
 
-公式截图如果仍然很差，建议安装本地公式 OCR 工具并通过 `OCR_FORMULA_CMD` 接入，例如 `pix2tex "{image}"`。后端会把公式 OCR 输出的 LaTeX 与 Tesseract/Windows OCR 结果一起评分择优；命令输出可以是纯文本、Markdown 代码围栏或包含 `latex`/`text`/`result` 字段的 JSON。扫描 PDF 会逐页处理，某页 Tesseract 为空或失败时可继续用 Windows OCR 或公式命令兜底。OCR 文本会做基础结构整理，保留疑似表格列、键值对、数学符号行、上下标符号和换行。当前仍是本机“图片文字识别”，不会描述没有文字的画面，也不会把原始图片发给 DeepSeek 或云端服务。OCR 不可用时，上传会返回 `ocr_unavailable` 和安装提示。
+公式截图如果仍然很差，可以安装本地公式 OCR 工具并通过 `OCR_FORMULA_CMD` 接入，例如 `pix2tex "{image}"`。后端会先采用 DeepSeek API 的非空转写结果；API 为空或失败时，再把公式 OCR 输出的 LaTeX 与 Tesseract/Windows OCR 结果一起评分择优。命令输出可以是纯文本、Markdown 代码围栏或包含 `latex`/`text`/`result` 字段的 JSON。OCR 文本会做基础结构整理，保留疑似表格列、键值对、数学符号行、上下标符号和换行。OCR 不可用时，上传会返回 `ocr_unavailable` 和安装/API Key 提示。
 
 ## 功能
 
@@ -263,8 +266,9 @@ python -m pip install -r requirements-ocr.txt
 - 支持选取用户或助手消息片段后直接“引用提问”，自动把所选片段带入下一条用户消息。
 - 支持项目空间 / 文档库：每个项目可以长期保存一组参考文档，进入项目对话后会自动参与附件检索，不受临时 `.file-cache` 清理策略影响。
 - 支持回答引用回链：模型使用 `[^F1-2]` 这类引用标记时，前端会渲染为可点击 pin，并打开对应文件片段预览。
-- 支持 DeepSeek function calling：模型可调用本地 `python_eval`、`search_files`、`fetch_url`、`web_search`、`suggest_memory`、提醒、记忆、项目文件、数据转换、图表、PPT 生成和多查询对比工具，完成小型数学计算、跨临时附件/项目文档搜索、模型驱动联网搜索、搜索结果来源二次精读、Markdown 图表表格生成、真实 `.pptx` 文件生成，以及受用户确认或作用域限制控制的本地记忆/提醒操作。
-- 用户要求“做 PPT / 幻灯片 / 演示文稿”时，后端会把本轮标记为 `slides` skill（PowerPoint-style presentations，可参考 pptxgenjs / artifact tool 路线），并强制走本地 `create_pptx` 工具；如果上游模型只返回大纲没有调用工具，后端也会用该大纲兜底生成 `.pptx` 并追加下载链接。下载链接会重写到当前本地服务地址，前端点击时保存到系统下载目录。
+- 支持 DeepSeek function calling：模型可调用本地 `python_eval`、`search_files`、`fetch_url`、`web_search`、`suggest_memory`、提醒、记忆、项目文件、数据转换、图表、PPT 生成、Word/PDF 文档生成、SVG 思维导图生成和多查询对比工具，完成小型数学计算、跨临时附件/项目文档搜索、模型驱动联网搜索、搜索结果来源二次精读、Markdown 图表表格生成、真实 `.pptx` 演示文稿、排版精美的 `.docx` / `.pdf` 文档和可下载 `.svg` 脑图生成，以及受用户确认或作用域限制控制的本地记忆/提醒操作。
+- 用户要求“做 PPT / 幻灯片 / 演示文稿”时，后端会把本轮标记为 `slides` skill（PowerPoint-style presentations，可参考 pptxgenjs / artifact tool 路线），并强制走本地 `create_pptx` 工具；如果上游模型只返回大纲没有调用工具，后端也会用该大纲兜底生成 `.pptx` 并追加下载链接。PPT 生成器会按页面标题和 `layout` 提示自动选择目录、卡片、流程、对比、观点和总结版式。下载链接会重写到当前本地服务地址，前端点击时保存到系统下载目录。
+- 用户要求“画思维导图 / 脑图 / mind map”时，后端会强制走本地 `create_mindmap` 工具；DeepSeek 只负责整理 `title`、`subtitle` 和节点树，本地渲染器负责生成 SVG 文件，正文里直接显示预览图并附带 `/api/download` 下载入口。
 - 支持关闭 / 自动 / 强制三档联网搜索；自动模式由模型决定本轮是否联网，Tavily Key 可来自服务端环境变量，也可来自页面设置中的本轮请求。
 - 支持 Seek 助手：创建本地自定义助手，保存名称、简介、专属指令、开场提示和参考文件，并在对话中自动注入对应系统指令。
 - Seek 助手参考文件会随消息快照保存；继续生成、重新生成、编辑后重发和导出 Markdown 时都会使用消息当时的 Seek 和参考资料，而不是当前面板里选中的 Seek。
@@ -289,7 +293,7 @@ python -m pip install -r requirements-ocr.txt
 - 文件会在本地后端解析并分块缓存，聊天请求只发送 `fileId` 等元数据。
 - 提问时后端会按问题从缓存中检索相关片段，而不是把整份文件硬塞给模型；v0.7.1 起检索会结合关键词分数和本地哈希向量相似度，先提供完全本地的轻量语义排序。v0.7.2 起模型也可通过 `search_files` 工具主动检索 `.file-cache` 和 `.projects`。
 - PDF 优先读取可复制文字；扫描版或图片型 PDF、照片和截图可通过 OCR 重试读取文字。
-- 当前图片识别走 OCR 路线，只提取图片里的文字；它不是通用视觉模型，不能可靠描述没有文字的画面内容。
+- OCR 重试会优先调用 DeepSeek API 转写图片文字；它的目标仍是“提取文字”，普通聊天里的图片理解才负责更开放的看图问答。
 
 ## 上下文与记忆
 

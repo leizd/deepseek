@@ -1508,7 +1508,7 @@ def agent_durations_for_diagnostics(agent_outputs: list[dict[str, Any]]) -> dict
         if agent_id == "leader":
             continue
         raw_duration = output.get("duration_ms")
-        if isinstance(raw_duration, bool):
+        if raw_duration is None or isinstance(raw_duration, bool):
             continue
         try:
             duration_ms = int(raw_duration)

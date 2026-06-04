@@ -10,90 +10,36 @@ already turns Markdown links into clickable anchors.
 from __future__ import annotations
 
 import re
-import secrets
-import shutil
-import time
-from pathlib import Path
 from typing import Any
 
-from deepseek_mobile.core.config import GENERATED_DIR
 from deepseek_mobile.core.errors import AppError, ErrorCode
+from deepseek_mobile.services.generated_files import (
+    cleanup_generated_files,
+    resolve_generated_file,
+    save_generated_file_to_downloads,
+    store_generated_file,
+)
 from deepseek_mobile.services.slides_skill import SLIDES_SKILL_NAME
 
-GENERATED_FILE_MAX_AGE_SECONDS = 6 * 3600  # 生成文件保留 6 小时后清理
+# resolve/save/cleanup 现在由 generated_files 统一提供，这里 re-export 以保持历史导入路径。
+__all__ = [
+    "cleanup_generated_files",
+    "create_presentation",
+    "create_presentation_from_text",
+    "infer_presentation_title",
+    "resolve_generated_file",
+    "save_generated_file_to_downloads",
+    "slides_from_outline_text",
+]
+
 MAX_SLIDES = 60
 MAX_BULLETS_PER_SLIDE = 24
-_ID_RE = re.compile(r"[0-9a-f]{32}")
 _OUTLINE_HEADING_RE = re.compile(
     r"^\s*(?:#{1,4}\s*)?(?:(?:第\s*)?\d{1,2}\s*[页、.．):：-]|slide\s+\d{1,2}\s*[:：.-])\s*(.+?)\s*$",
     flags=re.IGNORECASE,
 )
 _BULLET_RE = re.compile(r"^\s*(?:[-*•·]|[（(]?[a-zA-Z][）)]|[（(]?\d{1,2}[）)])\s+(.+?)\s*$")
 _REFUSAL_RE = re.compile(r"(?:无法|不能|没有.*能力|只能|可以帮.*大纲|不能直接|无法直接)")
-
-
-def _safe_filename(title: str) -> str:
-    name = re.sub(r"[^\w一-鿿 -]", "", str(title or "")).strip()
-    return (name[:60] or "presentation")
-
-
-def cleanup_generated_files() -> None:
-    """删除过期的生成文件。任何 IO 异常都静默吞掉，不影响主流程。"""
-    try:
-        if not GENERATED_DIR.exists():
-            return
-        now = time.time()
-        for path in GENERATED_DIR.glob("*.pptx"):
-            try:
-                if now - path.stat().st_mtime > GENERATED_FILE_MAX_AGE_SECONDS:
-                    path.unlink(missing_ok=True)
-            except OSError:
-                continue
-    except OSError:
-        pass
-
-
-def resolve_generated_file(file_id: str) -> Path | None:
-    """把下载请求的 id 解析成磁盘路径；只接受 32 位十六进制 id，杜绝路径遍历。"""
-    if not _ID_RE.fullmatch(str(file_id or "")):
-        return None
-    path = GENERATED_DIR / f"{file_id}.pptx"
-    return path if path.is_file() else None
-
-
-def save_generated_file_to_downloads(file_id: str, filename: str = "", *, downloads_dir: Path | None = None) -> dict[str, Any]:
-    source = resolve_generated_file(file_id)
-    if source is None:
-        raise AppError("文件不存在或已过期", code=ErrorCode.NOT_FOUND, status=404)
-
-    target_dir = downloads_dir or _downloads_dir()
-    target_dir.mkdir(parents=True, exist_ok=True)
-    target = _unique_download_path(target_dir, _download_filename(filename))
-    shutil.copy2(source, target)
-    return {"ok": True, "filename": target.name, "path": str(target), "downloadUrl": f"/api/download?id={file_id}"}
-
-
-def _downloads_dir() -> Path:
-    home = Path.home()
-    return home / "Downloads"
-
-
-def _download_filename(value: str) -> str:
-    raw = str(value or "").strip()
-    raw = re.sub(r"\.pptx$", "", raw, flags=re.IGNORECASE)
-    raw = re.sub(r"^(?:点击)?下载\s*", "", raw, flags=re.IGNORECASE).strip()
-    return f"{_safe_filename(raw) or 'presentation'}.pptx"
-
-
-def _unique_download_path(directory: Path, filename: str) -> Path:
-    base = Path(filename).stem or "presentation"
-    suffix = Path(filename).suffix or ".pptx"
-    candidate = directory / f"{base}{suffix}"
-    index = 2
-    while candidate.exists():
-        candidate = directory / f"{base} ({index}){suffix}"
-        index += 1
-    return candidate
 
 
 def _normalize_bullets(item: dict[str, Any]) -> list[str]:
@@ -383,6 +329,342 @@ def _add_content_slide(prs: Any, theme: dict[str, str], title: str, bullets: lis
     pp.font.color.rgb = _hex(_MUTED_INK)
 
 
+def _layout_for_slide(item: dict[str, Any], title: str, bullets: list[str], index: int, total: int) -> str:
+    requested = str(item.get("layout") or "").strip().lower()
+    if requested in {"section", "agenda", "cards", "process", "timeline", "comparison", "quote", "summary", "bullets"}:
+        return requested
+
+    title_text = str(title or "").lower()
+    joined = " ".join(str(bullet or "") for bullet in bullets).lower()
+    if re.search(r"总结|结论|建议|下一步|行动|takeaway|summary|recommendation", title_text):
+        return "summary"
+    if re.search(r"流程|步骤|路径|路线|工作流|计划|roadmap|workflow|process|timeline", title_text):
+        return "process"
+    if re.search(r"对比|比较|差异|取舍|优劣|vs\.?|versus|compare", title_text + " " + joined):
+        return "comparison"
+    if len(bullets) <= 2 and (index == 0 or re.search(r"背景|目标|问题|机会|挑战|核心观点|overview|context", title_text)):
+        return "quote"
+    if 3 <= len(bullets) <= 6:
+        return "cards"
+    return "bullets"
+
+
+def _fit_font_size(text: str, *, base: int, small: int) -> int:
+    length = len(str(text or ""))
+    if length > 90:
+        return small
+    if length > 58:
+        return max(small, base - 3)
+    return base
+
+
+def _style_paragraph(
+    paragraph: Any,
+    text: str,
+    *,
+    size: int,
+    color: str = _BODY_INK,
+    bold: bool = False,
+    align: Any | None = None,
+) -> None:
+    from pptx.util import Pt
+
+    paragraph.text = str(text or "")
+    paragraph.font.size = Pt(size)
+    paragraph.font.bold = bold
+    paragraph.font.name = _CN_FONT
+    paragraph.font.color.rgb = _hex(color)
+    if align is not None:
+        paragraph.alignment = align
+
+
+def _add_header(slide: Any, theme: dict[str, str], title: str, *, kicker: str = "") -> None:
+    from pptx.enum.shapes import MSO_SHAPE
+    from pptx.util import Inches
+
+    if kicker:
+        label = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(0.82), Inches(0.36), Inches(1.35), Inches(0.34))
+        label.fill.solid()
+        label.fill.fore_color.rgb = _hex(theme["band"])
+        label.line.fill.background()
+        p = label.text_frame.paragraphs[0]
+        _style_paragraph(p, kicker.upper(), size=8, color=theme["cover_bg"], bold=True)
+
+    title_box = slide.shapes.add_textbox(Inches(0.82), Inches(0.68), Inches(11.7), Inches(0.72))
+    tp = title_box.text_frame.paragraphs[0]
+    _style_paragraph(tp, title[:120], size=_fit_font_size(title, base=27, small=21), color=theme["cover_bg"], bold=True)
+
+    line = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(0.86), Inches(1.43), Inches(1.65), Inches(0.055))
+    line.fill.solid()
+    line.fill.fore_color.rgb = _hex(theme["accent"])
+    line.line.fill.background()
+
+
+def _add_footer(slide: Any, theme: dict[str, str], page_no: int) -> None:
+    from pptx.enum.text import PP_ALIGN
+    from pptx.util import Inches
+
+    footer = slide.shapes.add_textbox(Inches(11.72), Inches(6.92), Inches(0.95), Inches(0.28))
+    p = footer.text_frame.paragraphs[0]
+    _style_paragraph(p, f"{page_no:02d}", size=9, color=_MUTED_INK, bold=True, align=PP_ALIGN.RIGHT)
+
+
+def _card(
+    slide: Any,
+    theme: dict[str, str],
+    x: float,
+    y: float,
+    w: float,
+    h: float,
+    title: str,
+    body: str = "",
+    *,
+    number: int | None = None,
+) -> None:
+    from pptx.enum.shapes import MSO_SHAPE
+    from pptx.util import Inches, Pt
+
+    shape = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(x), Inches(y), Inches(w), Inches(h))
+    shape.fill.solid()
+    shape.fill.fore_color.rgb = _hex("F8FAFC")
+    shape.line.color.rgb = _hex("E2E8F0")
+    shape.line.width = Pt(1)
+
+    if number is not None:
+        chip = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(x + 0.22), Inches(y + 0.18), Inches(0.46), Inches(0.32))
+        chip.fill.solid()
+        chip.fill.fore_color.rgb = _hex(theme["accent"])
+        chip.line.fill.background()
+        cp = chip.text_frame.paragraphs[0]
+        _style_paragraph(cp, str(number), size=9, color="FFFFFF", bold=True)
+        text_x = x + 0.78
+        text_w = w - 1.0
+    else:
+        text_x = x + 0.25
+        text_w = w - 0.5
+
+    box = slide.shapes.add_textbox(Inches(text_x), Inches(y + 0.16), Inches(text_w), Inches(h - 0.28))
+    tf = box.text_frame
+    tf.word_wrap = True
+    hp = tf.paragraphs[0]
+    _style_paragraph(hp, title[:160], size=_fit_font_size(title, base=15, small=11), color=_BODY_INK, bold=True)
+    if body:
+        bp = tf.add_paragraph()
+        _style_paragraph(bp, body[:220], size=_fit_font_size(body, base=11, small=9), color="64748B")
+        bp.space_before = Pt(6)
+
+
+def _split_lead_detail(value: str) -> tuple[str, str]:
+    text = str(value or "").strip()
+    for delimiter in ("：", ":", " - ", " — ", "——"):
+        if delimiter in text:
+            left, right = text.split(delimiter, 1)
+            if left.strip() and right.strip():
+                return left.strip(), right.strip()
+    return text, ""
+
+
+def _add_agenda_slide(prs: Any, theme: dict[str, str], titles: list[str], page_no: int) -> None:
+    from pptx.enum.shapes import MSO_SHAPE
+    from pptx.util import Inches
+
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    _set_slide_bg(slide, "FFFFFF")
+    _add_header(slide, theme, "内容导航", kicker="Agenda")
+
+    items = titles[:6]
+    y = 1.92
+    for index, item in enumerate(items, start=1):
+        y_pos = y + (index - 1) * 0.72
+        badge = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(0.95), Inches(y_pos), Inches(0.54), Inches(0.38))
+        badge.fill.solid()
+        badge.fill.fore_color.rgb = _hex(theme["accent"])
+        badge.line.fill.background()
+        _style_paragraph(badge.text_frame.paragraphs[0], f"{index:02d}", size=9, color="FFFFFF", bold=True)
+
+        box = slide.shapes.add_textbox(Inches(1.72), Inches(y_pos - 0.02), Inches(9.8), Inches(0.5))
+        _style_paragraph(box.text_frame.paragraphs[0], item[:96], size=18, color=_BODY_INK, bold=True)
+
+        line = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(1.73), Inches(y_pos + 0.5), Inches(9.5), Inches(0.012))
+        line.fill.solid()
+        line.fill.fore_color.rgb = _hex("E2E8F0")
+        line.line.fill.background()
+
+    _add_footer(slide, theme, page_no)
+
+
+def _add_cards_slide(prs: Any, theme: dict[str, str], title: str, bullets: list[str], page_no: int) -> None:
+
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    _set_slide_bg(slide, "FFFFFF")
+    _add_header(slide, theme, title, kicker="Key Points")
+    positions = [
+        (0.9, 1.78, 5.8, 1.15),
+        (6.85, 1.78, 5.6, 1.15),
+        (0.9, 3.08, 5.8, 1.15),
+        (6.85, 3.08, 5.6, 1.15),
+        (0.9, 4.38, 5.8, 1.15),
+        (6.85, 4.38, 5.6, 1.15),
+    ]
+    for index, bullet in enumerate(bullets[:6]):
+        lead, detail = _split_lead_detail(bullet)
+        _card(slide, theme, *positions[index], lead, detail, number=index + 1)
+    _add_footer(slide, theme, page_no)
+
+
+def _add_process_slide(prs: Any, theme: dict[str, str], title: str, bullets: list[str], page_no: int) -> None:
+    from pptx.enum.shapes import MSO_SHAPE
+    from pptx.enum.text import PP_ALIGN
+    from pptx.util import Inches, Pt
+
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    _set_slide_bg(slide, "FFFFFF")
+    _add_header(slide, theme, title, kicker="Process")
+
+    steps = bullets[:5] or ["明确目标", "拆解任务", "执行推进", "验证结果"]
+    width = 10.8 / max(1, len(steps))
+    y = 3.02
+    for index, step in enumerate(steps, start=1):
+        x = 0.98 + (index - 1) * width
+        circle = slide.shapes.add_shape(MSO_SHAPE.OVAL, Inches(x + width / 2 - 0.34), Inches(y - 0.32), Inches(0.68), Inches(0.68))
+        circle.fill.solid()
+        circle.fill.fore_color.rgb = _hex(theme["accent"])
+        circle.line.fill.background()
+        cp = circle.text_frame.paragraphs[0]
+        _style_paragraph(cp, str(index), size=13, color="FFFFFF", bold=True, align=PP_ALIGN.CENTER)
+
+        if index < len(steps):
+            connector = slide.shapes.add_shape(
+                MSO_SHAPE.RECTANGLE,
+                Inches(x + width / 2 + 0.36),
+                Inches(y - 0.02),
+                Inches(max(0.2, width - 0.72)),
+                Inches(0.035),
+            )
+            connector.fill.solid()
+            connector.fill.fore_color.rgb = _hex(theme["band"])
+            connector.line.fill.background()
+
+        lead, detail = _split_lead_detail(step)
+        box = slide.shapes.add_textbox(Inches(x + 0.08), Inches(y + 0.62), Inches(width - 0.16), Inches(1.25))
+        tf = box.text_frame
+        tf.word_wrap = True
+        _style_paragraph(tf.paragraphs[0], lead[:80], size=_fit_font_size(lead, base=13, small=9), color=_BODY_INK, bold=True, align=PP_ALIGN.CENTER)
+        if detail:
+            dp = tf.add_paragraph()
+            _style_paragraph(dp, detail[:120], size=9, color="64748B", align=PP_ALIGN.CENTER)
+            dp.space_before = Pt(4)
+    _add_footer(slide, theme, page_no)
+
+
+def _add_comparison_slide(prs: Any, theme: dict[str, str], title: str, bullets: list[str], page_no: int) -> None:
+    from pptx.enum.shapes import MSO_SHAPE
+    from pptx.util import Inches
+
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    _set_slide_bg(slide, "FFFFFF")
+    _add_header(slide, theme, title, kicker="Compare")
+
+    midpoint = max(1, (len(bullets) + 1) // 2)
+    columns = [bullets[:midpoint], bullets[midpoint:] or bullets[:midpoint]]
+    headers = ("方案 / 维度 A", "方案 / 维度 B")
+    for col, items in enumerate(columns):
+        x = 0.95 + col * 5.95
+        panel = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(x), Inches(1.82), Inches(5.45), Inches(4.65))
+        panel.fill.solid()
+        panel.fill.fore_color.rgb = _hex("F8FAFC")
+        panel.line.color.rgb = _hex("E2E8F0")
+        hp = slide.shapes.add_textbox(Inches(x + 0.32), Inches(2.08), Inches(4.8), Inches(0.36))
+        _style_paragraph(hp.text_frame.paragraphs[0], headers[col], size=14, color=theme["accent"], bold=True)
+        y = 2.7
+        for item in items[:5]:
+            lead, detail = _split_lead_detail(item)
+            box = slide.shapes.add_textbox(Inches(x + 0.38), Inches(y), Inches(4.65), Inches(0.55))
+            _style_paragraph(box.text_frame.paragraphs[0], f"• {lead[:100]}", size=12, color=_BODY_INK, bold=not detail)
+            if detail:
+                db = slide.shapes.add_textbox(Inches(x + 0.62), Inches(y + 0.32), Inches(4.35), Inches(0.34))
+                _style_paragraph(db.text_frame.paragraphs[0], detail[:150], size=9, color="64748B")
+                y += 0.8
+            else:
+                y += 0.55
+    _add_footer(slide, theme, page_no)
+
+
+def _add_quote_slide(prs: Any, theme: dict[str, str], title: str, bullets: list[str], page_no: int) -> None:
+    from pptx.enum.shapes import MSO_SHAPE
+    from pptx.util import Inches, Pt
+
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    _set_slide_bg(slide, theme["cover_bg"])
+    accent = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(0.84), Inches(1.46), Inches(0.12), Inches(4.28))
+    accent.fill.solid()
+    accent.fill.fore_color.rgb = _hex(theme["accent"])
+    accent.line.fill.background()
+
+    quote = bullets[0] if bullets else title
+    box = slide.shapes.add_textbox(Inches(1.25), Inches(1.62), Inches(10.6), Inches(2.55))
+    tf = box.text_frame
+    tf.word_wrap = True
+    _style_paragraph(tf.paragraphs[0], title[:120], size=_fit_font_size(title, base=34, small=26), color="FFFFFF", bold=True)
+    qp = tf.add_paragraph()
+    _style_paragraph(qp, quote[:220], size=_fit_font_size(quote, base=18, small=13), color=theme["band"])
+    qp.space_before = Pt(18)
+
+    for index, bullet in enumerate(bullets[1:4], start=1):
+        lead, detail = _split_lead_detail(bullet)
+        _card(slide, theme, 1.26 + (index - 1) * 3.55, 5.18, 3.22, 0.88, lead, detail)
+    _add_footer(slide, theme, page_no)
+
+
+def _add_summary_slide(prs: Any, theme: dict[str, str], title: str, bullets: list[str], page_no: int) -> None:
+    from pptx.enum.shapes import MSO_SHAPE
+    from pptx.enum.text import PP_ALIGN
+    from pptx.util import Inches
+
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    _set_slide_bg(slide, "FFFFFF")
+    _add_header(slide, theme, title, kicker="Wrap Up")
+
+    big = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(0.95), Inches(1.85), Inches(11.35), Inches(1.2))
+    big.fill.solid()
+    big.fill.fore_color.rgb = _hex(theme["cover_bg"])
+    big.line.fill.background()
+    headline = bullets[0] if bullets else "回顾重点，明确下一步行动。"
+    _style_paragraph(big.text_frame.paragraphs[0], headline[:160], size=_fit_font_size(headline, base=19, small=14), color="FFFFFF", bold=True, align=PP_ALIGN.CENTER)
+
+    for index, bullet in enumerate((bullets[1:] or bullets)[:4], start=1):
+        lead, detail = _split_lead_detail(bullet)
+        _card(slide, theme, 1.03 + ((index - 1) % 2) * 5.55, 3.55 + ((index - 1) // 2) * 1.18, 5.0, 0.95, lead, detail, number=index)
+    _add_footer(slide, theme, page_no)
+
+
+def _add_rich_slide(
+    prs: Any,
+    theme: dict[str, str],
+    title: str,
+    bullets: list[str],
+    *,
+    layout: str,
+    page_no: int,
+) -> None:
+    if layout == "agenda":
+        _add_agenda_slide(prs, theme, bullets or [title], page_no)
+    elif layout == "section":
+        _add_quote_slide(prs, theme, title, bullets, page_no)
+    elif layout == "cards":
+        _add_cards_slide(prs, theme, title, bullets, page_no)
+    elif layout in {"process", "timeline"}:
+        _add_process_slide(prs, theme, title, bullets, page_no)
+    elif layout == "comparison":
+        _add_comparison_slide(prs, theme, title, bullets, page_no)
+    elif layout == "quote":
+        _add_quote_slide(prs, theme, title, bullets, page_no)
+    elif layout == "summary":
+        _add_summary_slide(prs, theme, title, bullets, page_no)
+    else:
+        _add_content_slide(prs, theme, title, bullets, page_no)
+
+
 def create_presentation(title: str, slides: Any, *, subtitle: str = "") -> dict[str, Any]:
     """根据大纲生成一份带配色主题的 16:9 .pptx，返回包含 downloadUrl 的结果字典。"""
     try:
@@ -407,30 +689,36 @@ def create_presentation(title: str, slides: Any, *, subtitle: str = "") -> dict[
 
     _add_cover_slide(prs, theme, title, str(subtitle or "").strip())
 
-    content_pages = 0
-    outline: list[dict[str, Any]] = []
+    normalized_slides: list[dict[str, Any]] = []
     for item in slides[:MAX_SLIDES]:
         if not isinstance(item, dict):
             continue
-        slide_title = (str(item.get("title") or "").strip() or f"第 {content_pages + 1} 页")[:120]
+        slide_title = (str(item.get("title") or "").strip() or f"第 {len(normalized_slides) + 1} 页")[:120]
         bullets = _normalize_bullets(item)[:MAX_BULLETS_PER_SLIDE]
-        _add_content_slide(prs, theme, slide_title, bullets, content_pages + 2)
-        outline.append({"page": content_pages + 1, "title": slide_title, "bullets": bullets})
-        content_pages += 1
+        normalized_slides.append({"raw": item, "title": slide_title, "bullets": bullets})
 
-    if content_pages == 0:
+    if not normalized_slides:
         raise AppError("没有解析到有效的幻灯片内容。", code=ErrorCode.INVALID_PAYLOAD)
 
-    GENERATED_DIR.mkdir(parents=True, exist_ok=True)
-    cleanup_generated_files()
-    file_id = secrets.token_hex(16)
-    prs.save(str(GENERATED_DIR / f"{file_id}.pptx"))
+    if len(normalized_slides) >= 4:
+        _add_agenda_slide(prs, theme, [item["title"] for item in normalized_slides], len(prs.slides) + 1)
+
+    outline: list[dict[str, Any]] = []
+    for index, item in enumerate(normalized_slides):
+        slide_title = item["title"]
+        bullets = item["bullets"]
+        layout = _layout_for_slide(item["raw"], slide_title, bullets, index, len(normalized_slides))
+        _add_rich_slide(prs, theme, slide_title, bullets, layout=layout, page_no=len(prs.slides) + 1)
+        outline.append({"page": index + 1, "title": slide_title, "bullets": bullets, "layout": layout})
+
+    slide_count = len(prs.slides)
+    stored = store_generated_file(title, "pptx", lambda path: prs.save(str(path)))
 
     return {
-        "fileId": file_id,
-        "filename": f"{_safe_filename(title)}.pptx",
-        "slideCount": content_pages + 1,
-        "downloadUrl": f"/api/download?id={file_id}",
+        "fileId": stored["fileId"],
+        "filename": stored["filename"],
+        "slideCount": slide_count,
+        "downloadUrl": stored["downloadUrl"],
         "title": title,
         "outline": outline,
         "note": (

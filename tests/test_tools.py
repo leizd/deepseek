@@ -78,6 +78,27 @@ class ToolServiceTests(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertIn("not enabled", result["error"])
 
+    def test_artifact_tool_output_is_compact_for_model(self) -> None:
+        output = {
+            "ok": True,
+            "tool": "create_pptx",
+            "result": {
+                "fileId": "a" * 32,
+                "filename": "deck.pptx",
+                "slideCount": 8,
+                "downloadUrl": "/api/download?id=" + "a" * 32,
+                "title": "Deck",
+                "outline": [{"page": 1, "title": "Intro", "layout": "quote", "bullets": ["very long duplicate content"]}],
+                "note": "long instruction that should not be sent back to the model",
+            },
+        }
+
+        compact = tools.stable_tool_output_for_model(output)
+
+        self.assertEqual(compact["result"]["slideCount"], 8)
+        self.assertNotIn("note", compact["result"])
+        self.assertNotIn("bullets", compact["result"]["outline"][0])
+
     def test_new_tool_definitions_are_available(self) -> None:
         names = {tool["function"]["name"] for tool in tools.available_tool_definitions()}
 
@@ -89,6 +110,7 @@ class ToolServiceTests(unittest.TestCase):
         self.assertIn("read_file_chunk", names)
         self.assertIn("data_transform", names)
         self.assertIn("generate_chart", names)
+        self.assertIn("create_mindmap", names)
         self.assertIn("compare_search_results", names)
 
 

@@ -13,7 +13,18 @@ from unittest.mock import patch
 
 import deepseek_mobile.services.files as files
 from deepseek_mobile.core.errors import AppError, ErrorCode
-from deepseek_mobile.services.files import chunk_text, decode_text_file, normalize_extracted_text, select_file_chunk_indices
+from deepseek_mobile.services.files import (
+    cached_file_source,
+    chunk_text,
+    decode_text_file,
+    file_page_image,
+    file_page_layout,
+    file_page_search,
+    file_page_text,
+    file_reader_window,
+    normalize_extracted_text,
+    select_file_chunk_indices,
+)
 
 
 class FilesTests(unittest.TestCase):
@@ -126,6 +137,213 @@ class CachedFileTests(unittest.TestCase):
         self.assertNotEqual(first["fileId"], second["fileId"])
         self.assertIn("A", files.load_cached_file(str(first["fileId"]))["chunks"][-1]["text"])
         self.assertIn("B", files.load_cached_file(str(second["fileId"]))["chunks"][-1]["text"])
+        _, first_source = cached_file_source(str(first["fileId"]))
+        self.assertEqual(first_source.read_bytes(), shared_prefix + b"A")
+        self.assertTrue(first["sourceAvailable"])
+
+    def test_pdf_page_count_is_cached_for_reader_preview(self) -> None:
+        data = b"%PDF-1.7\n1 0 obj<</Type /Pages>>endobj\n2 0 obj<</Type /Page>>endobj\n3 0 obj<</Type /Page>>endobj"
+        page_count = files.count_pdf_pages(data)
+        file_id = files.cache_file_chunks(
+            "two-pages.pdf",
+            "application/pdf",
+            len(data),
+            "pdf",
+            "page one\npage two",
+            files.chunk_text("page one\npage two"),
+            source_bytes=data,
+            page_count=page_count,
+        )
+
+        self.assertEqual(page_count, 2)
+        self.assertEqual(files.load_cached_file(file_id)["pageCount"], 2)
+        self.assertEqual(file_reader_window(file_id)["file"]["pageCount"], 2)
+
+    def test_pdf_page_count_handles_compressed_object_streams(self) -> None:
+        # 使用对象流/压缩 xref 的 PDF，其 `/Type /Page` 不在原始字节里，仅靠字节正则
+        # 会漏数（退化成 1 页）。count_pdf_pages 必须用真实解析器拿到正确总页数。
+        try:
+            import fitz
+        except ImportError:
+            self.skipTest("PyMuPDF not available")
+        document = fitz.open()
+        for index in range(5):
+            page = document.new_page()
+            page.insert_text((72, 72), f"Page {index + 1} content")
+        try:
+            data = document.tobytes(garbage=4, deflate=True, use_objstms=1)
+        except TypeError:  # 旧版 PyMuPDF 无 use_objstms 参数
+            data = document.tobytes(garbage=4, deflate=True)
+        document.close()
+        # 前提：原始字节正则确实看不到 /Type /Page（否则这个回归用例没意义）
+        import re
+
+        self.assertEqual(len(re.findall(rb"/Type\s*/Page\b", data)), 0)
+        self.assertEqual(files.count_pdf_pages(data), 5)
+
+    def test_file_page_text_returns_cached_page_text(self) -> None:
+        chunks = files.chunk_text("first page\nsecond page")
+        file_id = files.cache_file_chunks(
+            "two-pages.pdf",
+            "application/pdf",
+            20,
+            "pdf",
+            "first page\nsecond page",
+            chunks,
+            source_bytes=b"%PDF",
+            page_count=2,
+            page_texts=[{"page": 1, "text": "first page"}, {"page": 2, "text": "second page"}],
+        )
+
+        payload = file_page_text(file_id, page=2)
+
+        self.assertEqual(payload["page"]["index"], 2)
+        self.assertEqual(payload["page"]["pageCount"], 2)
+        self.assertEqual(payload["page"]["text"], "second page")
+        self.assertTrue(payload["page"]["hasText"])
+
+    def test_file_page_text_falls_back_to_cached_chunks(self) -> None:
+        file_id = "b" * 32
+        chunks = files.chunk_text("alpha beta gamma")
+        (self.cache_dir / f"{file_id}.json").write_text(
+            json.dumps(
+                {
+                    "id": file_id,
+                    "name": "text.pdf",
+                    "type": "application/pdf",
+                    "size": 123,
+                    "kind": "pdf",
+                    "pageCount": 1,
+                    "charCount": 16,
+                    "chunkCount": len(chunks),
+                    "chunks": chunks,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        payload = file_page_text(file_id, page=1)
+
+        self.assertIn("alpha beta gamma", payload["page"]["text"])
+
+    def test_file_page_image_renders_pdf_page_and_caches_png(self) -> None:
+        file_id = files.cache_file_chunks(
+            "two-pages.pdf",
+            "application/pdf",
+            4,
+            "pdf",
+            "page one\npage two",
+            files.chunk_text("page one\npage two"),
+            source_bytes=b"%PDF",
+            page_count=2,
+        )
+        png = b"\x89PNG\r\n\x1a\nrendered"
+
+        with patch.object(files, "render_pdf_page_png", return_value=(png, 2, 2)) as render:
+            _, first_data, first_page, first_page_count = file_page_image(file_id, page=2, scale=1.4)
+            _, second_data, second_page, second_page_count = file_page_image(file_id, page=2, scale=1.4)
+
+        self.assertEqual(first_data, png)
+        self.assertEqual(second_data, png)
+        self.assertEqual(first_page, 2)
+        self.assertEqual(second_page, 2)
+        self.assertEqual(first_page_count, 2)
+        self.assertEqual(second_page_count, 2)
+        render.assert_called_once()
+        self.assertTrue((self.cache_dir / f"{file_id}.page-2-140.png").exists())
+
+    def test_file_page_layout_returns_pdf_word_coordinates(self) -> None:
+        file_id = files.cache_file_chunks(
+            "layout.pdf",
+            "application/pdf",
+            4,
+            "pdf",
+            "hello layout",
+            files.chunk_text("hello layout"),
+            source_bytes=b"%PDF",
+            page_count=3,
+        )
+        layout = {
+            "index": 2,
+            "pageCount": 3,
+            "width": 200,
+            "height": 100,
+            "text": "hello layout",
+            "hasText": True,
+            "words": [{"text": "hello", "left": 10, "top": 20, "width": 12, "height": 5}],
+        }
+
+        with patch.object(files, "render_pdf_page_layout", return_value=layout) as render:
+            payload = file_page_layout(file_id, page=2)
+
+        self.assertEqual(payload["page"]["index"], 2)
+        self.assertEqual(payload["page"]["pageCount"], 3)
+        self.assertEqual(payload["page"]["words"][0]["text"], "hello")
+        render.assert_called_once_with(b"%PDF", 2)
+
+    def test_file_page_search_returns_page_matches(self) -> None:
+        file_id = files.cache_file_chunks(
+            "search.pdf",
+            "application/pdf",
+            20,
+            "pdf",
+            "alpha beta\nsecond beta",
+            files.chunk_text("alpha beta\nsecond beta"),
+            source_bytes=b"%PDF",
+            page_count=2,
+            page_texts=[{"page": 1, "text": "alpha beta"}, {"page": 2, "text": "second beta"}],
+        )
+
+        payload = file_page_search(file_id, query="beta")
+
+        self.assertEqual(payload["query"], "beta")
+        self.assertEqual(len(payload["matches"]), 2)
+        self.assertEqual(payload["matches"][0]["page"], 1)
+        self.assertEqual(payload["matches"][1]["page"], 2)
+        self.assertIn("beta", payload["matches"][0]["snippet"])
+
+    def test_file_reader_window_returns_bounded_document_chunks(self) -> None:
+        file_id = "d" * 32
+        chunks = [
+            {"index": index, "start": index * 10, "end": index * 10 + 9, "lineStart": index + 1, "lineEnd": index + 1, "text": f"chunk {index}"}
+            for index in range(20)
+        ]
+        (self.cache_dir / f"{file_id}.json").write_text(
+            json.dumps(
+                {
+                    "id": file_id,
+                    "name": "long.txt",
+                    "type": "text/plain",
+                    "size": 123,
+                    "kind": "text",
+                    "charCount": 150,
+                    "chunkCount": len(chunks),
+                    "chunks": chunks,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        window = file_reader_window(file_id, chunk_start=5, chunk_count=99)
+
+        self.assertEqual(window["file"]["name"], "long.txt")
+        self.assertEqual(window["window"]["chunkStart"], 5)
+        self.assertEqual(window["window"]["chunkCount"], files.FILE_READER_MAX_CHUNKS)
+        self.assertTrue(window["window"]["hasNext"])
+        self.assertTrue(window["window"]["hasPrevious"])
+        self.assertEqual(window["chunks"][0]["index"], 5)
+        self.assertEqual(window["chunks"][0]["text"], "chunk 4")
+        self.assertNotIn("vector", window["chunks"][0])
+
+    def test_file_reader_window_rejects_invalid_start(self) -> None:
+        file_id = "e" * 32
+        self.write_cached_file(file_id, "empty.txt")
+
+        with self.assertRaises(AppError) as cm:
+            file_reader_window(file_id, chunk_start="bad")
+
+        self.assertEqual(cm.exception.status, 400)
+        self.assertEqual(cm.exception.code, ErrorCode.INVALID_PAYLOAD)
 
     def test_cleanup_keeps_recent_files_within_budget(self) -> None:
         paths = [self.write_sized_cache_file(index, size=100, mtime_offset=-index) for index in range(5)]
@@ -258,13 +476,20 @@ class CachedFileTests(unittest.TestCase):
     def test_extract_uploaded_pdf_caches_fake_ocr_text(self) -> None:
         with (
             patch("builtins.__import__", return_value=fake_pdf_module("")),
-            patch.object(files, "extract_pdf_ocr", return_value="ocr text"),
+            patch.object(files, "extract_pdf_ocr", return_value="ocr text") as extract_pdf_ocr,
         ):
-            extracted = files.extract_uploaded_file("scan.pdf", "application/pdf", b"%PDF", ocr_enabled=True)
+            extracted = files.extract_uploaded_file(
+                "scan.pdf",
+                "application/pdf",
+                b"%PDF",
+                ocr_enabled=True,
+                ocr_api_key="sk-upload",
+            )
 
         self.assertEqual(extracted["kind"], "pdf")
         self.assertEqual(extracted["charCount"], len("ocr text"))
         self.assertTrue((self.cache_dir / f"{extracted['fileId']}.json").exists())
+        extract_pdf_ocr.assert_called_once_with(b"%PDF", api_key="sk-upload")
 
     def test_extract_uploaded_image_requires_ocr(self) -> None:
         with self.assertRaises(AppError) as cm:
@@ -274,12 +499,19 @@ class CachedFileTests(unittest.TestCase):
         self.assertEqual(cm.exception.status, 415)
 
     def test_extract_uploaded_image_caches_fake_ocr_text(self) -> None:
-        with patch.object(files, "extract_image_ocr", return_value="图片文字"):
-            extracted = files.extract_uploaded_file("photo.png", "image/png", b"\x89PNG", ocr_enabled=True)
+        with patch.object(files, "extract_image_ocr", return_value="图片文字") as extract_image_ocr:
+            extracted = files.extract_uploaded_file(
+                "photo.png",
+                "image/png",
+                b"\x89PNG",
+                ocr_enabled=True,
+                ocr_api_key="sk-upload",
+            )
 
         self.assertEqual(extracted["kind"], "image")
         self.assertEqual(extracted["charCount"], len("图片文字"))
         self.assertTrue((self.cache_dir / f"{extracted['fileId']}.json").exists())
+        extract_image_ocr.assert_called_once_with(b"\x89PNG", api_key="sk-upload")
 
     def test_extract_html_strips_scripts_and_keeps_visible_text(self) -> None:
         extracted = files.extract_uploaded_file(

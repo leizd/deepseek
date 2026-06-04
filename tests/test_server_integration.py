@@ -122,6 +122,45 @@ class ServerIntegrationTests(unittest.TestCase):
         self.assertEqual(response.getheader("Content-Type"), "application/vnd.openxmlformats-officedocument.presentationml.presentation")
         self.assertIn("presentation.pptx", response.getheader("Content-Disposition") or "")
 
+    def test_download_serves_generated_docx_with_correct_type(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            doc = Path(tmp) / "report.docx"
+            doc.write_bytes(b"docx-bytes")
+            with patch.object(server_module, "resolve_generated_file", return_value=doc):
+                status, data, response = self.request("GET", "/api/download?id=" + "b" * 32)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(data, b"docx-bytes")
+        self.assertEqual(
+            response.getheader("Content-Type"),
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+        self.assertIn("document.docx", response.getheader("Content-Disposition") or "")
+
+    def test_download_serves_generated_svg_mindmap_with_correct_type(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            mindmap = Path(tmp) / "map.svg"
+            mindmap.write_text("<svg></svg>", encoding="utf-8")
+            with patch.object(server_module, "resolve_generated_file", return_value=mindmap):
+                status, data, response = self.request("GET", "/api/download?id=" + "c" * 32)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(data, b"<svg></svg>")
+        self.assertEqual(response.getheader("Content-Type"), "image/svg+xml")
+        self.assertIn("mindmap.svg", response.getheader("Content-Disposition") or "")
+
+    def test_download_serves_generated_svg_mindmap_inline_preview(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            mindmap = Path(tmp) / "map.svg"
+            mindmap.write_text("<svg></svg>", encoding="utf-8")
+            with patch.object(server_module, "resolve_generated_file", return_value=mindmap):
+                status, data, response = self.request("GET", "/api/download?id=" + "d" * 32 + "&inline=1")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(data, b"<svg></svg>")
+        self.assertEqual(response.getheader("Content-Type"), "image/svg+xml")
+        self.assertTrue((response.getheader("Content-Disposition") or "").startswith("inline;"))
+
     def test_download_save_returns_local_path(self) -> None:
         expected = {"ok": True, "filename": "deck.pptx", "path": r"C:\Users\me\Downloads\deck.pptx"}
         with patch.object(server_module, "save_generated_file_to_downloads", return_value=expected) as save_file:
@@ -216,6 +255,20 @@ class ServerIntegrationTests(unittest.TestCase):
                     "/api/file-chunk",
                     body={"fileId": added[0]["fileId"], "projectId": project["id"], "chunkIndex": 1},
                 )
+                reader_status, reader_payload = self.request_json(
+                    "POST",
+                    "/api/file-reader",
+                    body={"fileId": added[0]["fileId"], "projectId": project["id"], "chunkStart": 1, "chunkCount": 6},
+                )
+                page_text_status, page_text_payload = self.request_json(
+                    "POST",
+                    "/api/file-page-text",
+                    body={"fileId": added[0]["fileId"], "projectId": project["id"], "page": 1},
+                )
+                source_status, source_data, source_response = self.request_raw(
+                    "GET",
+                    f"/api/file-source?fileId={added[0]['fileId']}&projectId={project['id']}",
+                )
                 bad_status, bad_payload = self.request_json(
                     "POST",
                     "/api/file-chunk",
@@ -227,8 +280,76 @@ class ServerIntegrationTests(unittest.TestCase):
         self.assertEqual(cast(list[dict[str, Any]], list_payload["projects"])[0]["name"], "Docs")
         self.assertEqual(chunk_status, 200)
         self.assertIn("alpha beta gamma", cast(dict[str, Any], chunk_payload["chunk"])["text"])
+        self.assertEqual(reader_status, 200)
+        self.assertEqual(cast(dict[str, Any], reader_payload["file"])["name"], "guide.txt")
+        self.assertIn("alpha beta gamma", cast(list[dict[str, Any]], reader_payload["chunks"])[0]["text"])
+        self.assertEqual(page_text_status, 200)
+        self.assertIn("alpha beta gamma", cast(dict[str, Any], page_text_payload["page"])["text"])
+        self.assertEqual(source_status, 200)
+        self.assertEqual(source_data, b"alpha beta gamma")
+        self.assertIn("text/plain", source_response.getheader("Content-Type") or "")
+        self.assertIn("inline", source_response.getheader("Content-Disposition") or "")
+        self.assertEqual(source_response.getheader("X-Frame-Options"), "SAMEORIGIN")
+        self.assertIn("frame-ancestors 'self'", source_response.getheader("Content-Security-Policy") or "")
         self.assertEqual(bad_status, 400)
         self.assertEqual(bad_payload["code"], ErrorCode.INVALID_PAYLOAD.value)
+
+    def test_file_page_image_route_returns_rendered_png(self) -> None:
+        png = b"\x89PNG\r\n\x1a\nrendered"
+        with patch.object(server_module, "file_page_image", return_value=({"name": "scan.pdf"}, png, 2, 4)) as mocked:
+            status, data, response = self.request_raw(
+                "GET",
+                "/api/file-page-image?fileId=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&page=2&scale=1.4",
+            )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(data, png)
+        self.assertEqual(response.getheader("Content-Type"), "image/png")
+        self.assertEqual(response.getheader("X-File-Page"), "2")
+        self.assertEqual(response.getheader("X-File-Page-Count"), "4")
+        self.assertIn("inline", response.getheader("Content-Disposition") or "")
+        mocked.assert_called_once_with("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", project_id=None, page="2", scale="1.4")
+
+    def test_file_page_layout_route_returns_word_coordinates(self) -> None:
+        layout = {
+            "ok": True,
+            "page": {
+                "index": 2,
+                "pageCount": 4,
+                "width": 200,
+                "height": 100,
+                "text": "hello",
+                "hasText": True,
+                "words": [{"text": "hello", "left": 10, "top": 20, "width": 12, "height": 5}],
+            },
+        }
+        with patch.object(server_module, "file_page_layout", return_value=layout) as mocked:
+            status, payload = self.request_json(
+                "GET",
+                "/api/file-page-layout?fileId=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&projectId=proj_123&page=2",
+            )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(cast(dict[str, Any], payload["page"])["words"][0]["text"], "hello")
+        mocked.assert_called_once_with("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", project_id="proj_123", page="2")
+
+    def test_file_page_search_route_returns_matches(self) -> None:
+        result = {
+            "ok": True,
+            "query": "beta",
+            "pageCount": 2,
+            "matches": [{"page": 2, "snippet": "second beta", "index": 0}],
+            "truncated": False,
+        }
+        with patch.object(server_module, "file_page_search", return_value=result) as mocked:
+            status, payload = self.request_json(
+                "GET",
+                "/api/file-page-search?fileId=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&query=beta",
+            )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(cast(list[dict[str, Any]], payload["matches"])[0]["page"], 2)
+        mocked.assert_called_once_with("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", project_id=None, query="beta")
 
     def test_fetch_url_route_returns_extracted_page(self) -> None:
         page = {"url": "https://example.com/", "contentType": "text/html", "text": "Example page", "charCount": 12}
@@ -386,7 +507,7 @@ class ServerIntegrationTests(unittest.TestCase):
             payload["uploadLimits"],
             {"fileMaxBytes": 200_000_000, "requestMaxBytes": 220_000_000, "maxFiles": server_module.MAX_MULTIPART_FILES},
         )
-        self.assertEqual(payload["ocr"], {"enabled": server_module.settings.ocr.enabled, "mode": "balanced", "localOnly": True})
+        self.assertEqual(payload["ocr"], {"enabled": server_module.settings.ocr.enabled, "mode": "balanced", "localOnly": False})
 
     def test_pwa_icon_static_assets_are_served_with_image_types(self) -> None:
         for path, expected_type in [
@@ -453,14 +574,25 @@ class ServerIntegrationTests(unittest.TestCase):
             f"--{boundary}\r\n"
             'Content-Disposition: form-data; name="ocrEnabled"\r\n\r\n'
             "1\r\n"
+            f"--{boundary}\r\n"
+            'Content-Disposition: form-data; name="apiKey"\r\n\r\n'
+            "sk-upload\r\n"
             f"--{boundary}--\r\n"
         ).encode("utf-8")
 
-        def fake_extract(filename: str, content_type: str, data: bytes, *, ocr_enabled: bool) -> dict[str, object]:
+        def fake_extract(
+            filename: str,
+            content_type: str,
+            data: bytes,
+            *,
+            ocr_enabled: bool,
+            ocr_api_key: str,
+        ) -> dict[str, object]:
             self.assertEqual(filename, "scan.pdf")
             self.assertEqual(content_type, "application/pdf")
             self.assertEqual(data, b"%PDF")
             self.assertTrue(ocr_enabled)
+            self.assertEqual(ocr_api_key, "sk-upload")
             return {"name": filename, "fileId": "a" * 32, "kind": "pdf", "charCount": 3, "chunkCount": 1}
 
         with patch.object(server_module, "extract_uploaded_file", side_effect=fake_extract):
@@ -528,11 +660,19 @@ class ServerIntegrationTests(unittest.TestCase):
             f"--{boundary}--\r\n"
         ).encode("utf-8")
 
-        def fake_extract(filename: str, content_type: str, data: bytes, *, ocr_enabled: bool) -> dict[str, object]:
+        def fake_extract(
+            filename: str,
+            content_type: str,
+            data: bytes,
+            *,
+            ocr_enabled: bool,
+            ocr_api_key: str,
+        ) -> dict[str, object]:
             self.assertEqual(filename, "note.txt")
             self.assertEqual(content_type, "text/plain")
             self.assertEqual(data, b"shared note")
             self.assertFalse(ocr_enabled)
+            self.assertEqual(ocr_api_key, "")
             return {"name": filename, "fileId": "b" * 32, "kind": "text", "charCount": 11, "chunkCount": 1}
 
         with patch.object(server_module, "extract_uploaded_file", side_effect=fake_extract):
@@ -605,5 +745,3 @@ class FakeStream:
 
 if __name__ == "__main__":
     unittest.main()
-
-

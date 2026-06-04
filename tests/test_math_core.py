@@ -235,6 +235,19 @@ $$`, { streaming: true });
             """
         )
 
+    def test_generated_download_images_render_inline(self) -> None:
+        run_markdown_renderer(
+            r"""
+            const html = context.formatContent("![Launch.svg](/api/download?id=96c1bd73a3f9e6d462808416d0ae3e56)");
+            assert.ok(html.includes('class="generated-image generated-mindmap"'));
+            assert.ok(html.includes('<img src="/api/download?id=96c1bd73a3f9e6d462808416d0ae3e56&inline=1"'));
+            assert.ok(html.includes('alt="Launch.svg"'));
+            assert.ok(html.includes('class="download-link"'));
+            assert.ok(html.includes('data-download-id="96c1bd73a3f9e6d462808416d0ae3e56"'));
+            assert.ok(!html.includes('!<a'));
+            """
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

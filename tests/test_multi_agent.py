@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import threading
+from typing import Any
 from unittest.mock import patch
 
 from deepseek_mobile.core.config import MULTI_AGENT_TIMEOUT_SECONDS
@@ -95,9 +96,9 @@ def test_agent_tools_for_per_role_v124() -> None:
 
 
 def test_run_agent_researcher_payload_includes_search_and_fetch() -> None:
-    captured: dict[str, object] = {}
+    captured: dict[str, Any] = {}
 
-    def fake_call(payload: dict[str, object], **kwargs: object) -> dict[str, object]:
+    def fake_call(payload: dict[str, Any], **kwargs: object) -> dict[str, Any]:
         captured["payload"] = payload
         captured["kwargs"] = kwargs
         return {"content": "agent summary", "usage": {"prompt_cache_hit_tokens": 12, "prompt_cache_miss_tokens": 3}}
@@ -132,9 +133,9 @@ def test_run_agent_researcher_payload_includes_search_and_fetch() -> None:
 
 
 def test_run_agent_coder_can_use_file_tools_but_not_search() -> None:
-    captured: dict[str, object] = {}
+    captured: dict[str, Any] = {}
 
-    def fake_call(payload: dict[str, object], **_: object) -> dict[str, object]:
+    def fake_call(payload: dict[str, Any], **_: object) -> dict[str, Any]:
         captured["payload"] = payload
         return {"content": "coder summary"}
 
@@ -161,9 +162,9 @@ def test_run_agent_coder_can_use_file_tools_but_not_search() -> None:
 
 
 def test_run_agent_reasoner_and_critic_have_no_tools() -> None:
-    captured_payloads: list[dict[str, object]] = []
+    captured_payloads: list[dict[str, Any]] = []
 
-    def fake_call(payload: dict[str, object], **_: object) -> dict[str, object]:
+    def fake_call(payload: dict[str, Any], **_: object) -> dict[str, Any]:
         captured_payloads.append(payload)
         return {"content": "summary"}
 
@@ -184,9 +185,9 @@ def test_run_agent_reasoner_and_critic_have_no_tools() -> None:
 
 
 def test_run_agent_researcher_search_disabled_when_payload_search_off() -> None:
-    captured: dict[str, object] = {}
+    captured: dict[str, Any] = {}
 
-    def fake_call(payload: dict[str, object], **_: object) -> dict[str, object]:
+    def fake_call(payload: dict[str, Any], **_: object) -> dict[str, Any]:
         captured["payload"] = payload
         return {"content": "summary"}
 
@@ -289,7 +290,7 @@ def test_run_agent_returns_structured_fields() -> None:
         "## 完整分析\nfull text"
     )
 
-    def fake_call(payload: dict[str, object], **_: object) -> dict[str, object]:
+    def fake_call(payload: dict[str, Any], **_: object) -> dict[str, Any]:
         return {"content": raw}
 
     budget = SearchBudget(total_limit=8, per_key_limit=2)
@@ -439,7 +440,7 @@ def test_module_no_longer_exposes_truncation_helpers() -> None:
 def test_run_agent_does_not_truncate_long_output() -> None:
     long_text = "L" * 50_000
 
-    def fake_call(payload: dict[str, object], **_: object) -> dict[str, object]:
+    def fake_call(payload: dict[str, Any], **_: object) -> dict[str, Any]:
         return {"content": long_text}
 
     budget = SearchBudget(total_limit=8, per_key_limit=2)
@@ -465,13 +466,13 @@ def test_run_agent_does_not_truncate_long_output() -> None:
 def test_planner_does_not_emit_content_events_to_main_reply() -> None:
     """Planner 的 JSON 拆解结果走 reasoning + agent 事件，不能再 emit 普通 content。"""
 
-    def fake_call(payload: dict[str, object], **_: object) -> dict[str, object]:
+    def fake_call(payload: dict[str, Any], **_: object) -> dict[str, Any]:
         system = str(payload.get("systemPrompt") or "")
         if system == multi_agent.PLANNER_SYSTEM:
             return {"content": '{"agents":[{"id":"reasoner","task":"reason"}]}'}
         return {"content": "worker raw output"}
 
-    def fake_stream(payload: dict[str, object], emit_event, **_) -> None:
+    def fake_stream(payload: dict[str, Any], emit_event, **_) -> None:
         system = str(payload.get("systemPrompt") or "")
         if system == multi_agent.PLANNER_SYSTEM:
             # 模拟 Planner 流式：reasoning + JSON content
@@ -484,7 +485,7 @@ def test_planner_does_not_emit_content_events_to_main_reply() -> None:
             # worker
             emit_event({"type": "content", "text": "worker chunk"})
 
-    events: list[dict[str, object]] = []
+    events: list[dict[str, Any]] = []
     with patch.object(multi_agent, "call_deepseek", side_effect=fake_call), patch.object(
         multi_agent, "stream_deepseek", side_effect=fake_stream
     ):
@@ -518,13 +519,13 @@ def test_planner_does_not_emit_content_events_to_main_reply() -> None:
 def test_stream_multi_agent_routes_worker_content_to_agent_delta() -> None:
     """worker 的 content 必须走 agent_delta（带 phase），不能再拼进主聊天正文。"""
 
-    def fake_call(payload: dict[str, object], **_: object) -> dict[str, object]:
+    def fake_call(payload: dict[str, Any], **_: object) -> dict[str, Any]:
         system = str(payload.get("systemPrompt") or "")
         if system == multi_agent.PLANNER_SYSTEM:
             return {"content": '{"agents":[{"id":"reasoner","task":"reason"},{"id":"critic","task":"review"}]}'}
         return {"content": "worker output"}
 
-    def fake_stream(payload: dict[str, object], emit_event, **_) -> None:
+    def fake_stream(payload: dict[str, Any], emit_event, **_) -> None:
         system = str(payload.get("systemPrompt") or "")
         if system == multi_agent.PLANNER_SYSTEM:
             emit_event({"type": "content", "text": '{"agents":[{"id":"reasoner","task":"reason"},{"id":"critic","task":"review"}]}'})
@@ -535,7 +536,7 @@ def test_stream_multi_agent_routes_worker_content_to_agent_delta() -> None:
             emit_event({"type": "content", "text": "## 摘要\n"})
             emit_event({"type": "content", "text": "worker chunk"})
 
-    events: list[dict[str, object]] = []
+    events: list[dict[str, Any]] = []
     with patch.object(multi_agent, "call_deepseek", side_effect=fake_call), patch.object(
         multi_agent, "stream_deepseek", side_effect=fake_stream
     ):
@@ -562,13 +563,13 @@ def test_stream_multi_agent_forwards_search_as_agent_search_with_phase() -> None
     """worker 阶段产生的 search 事件必须转成 agent_search 带 phase。"""
     captured_search_payload = {"results": [{"url": "https://x", "title": "x"}], "rounds": []}
 
-    def fake_call(payload: dict[str, object], **_: object) -> dict[str, object]:
+    def fake_call(payload: dict[str, Any], **_: object) -> dict[str, Any]:
         system = str(payload.get("systemPrompt") or "")
         if system == multi_agent.PLANNER_SYSTEM:
             return {"content": '{"agents":[{"id":"researcher","task":"r"}]}'}
         return {"content": "summary"}
 
-    def fake_stream(payload: dict[str, object], emit_event, **_) -> None:
+    def fake_stream(payload: dict[str, Any], emit_event, **_) -> None:
         system = str(payload.get("systemPrompt") or "")
         if system == multi_agent.PLANNER_SYSTEM:
             emit_event({"type": "content", "text": '{"agents":[{"id":"researcher","task":"r"}]}'})
@@ -580,7 +581,7 @@ def test_stream_multi_agent_forwards_search_as_agent_search_with_phase() -> None
             emit_event({"type": "content", "text": "researched content"})
             emit_event({"type": "done", "search": captured_search_payload})
 
-    events: list[dict[str, object]] = []
+    events: list[dict[str, Any]] = []
     with patch.object(multi_agent, "call_deepseek", side_effect=fake_call), patch.object(
         multi_agent, "stream_deepseek", side_effect=fake_stream
     ):
@@ -609,12 +610,12 @@ def test_stream_multi_agent_forwards_search_as_agent_search_with_phase() -> None
 def test_run_agent_routes_worker_reasoning_to_agent_card() -> None:
     """v1.2.5：worker reasoning 不能再混进全局 reasoning 区。"""
 
-    def fake_stream(payload: dict[str, object], emit_event, **_: object) -> None:
+    def fake_stream(payload: dict[str, Any], emit_event, **_: object) -> None:
         emit_event({"type": "reasoning", "text": "coder thought"})
         emit_event({"type": "content", "text": "## 摘要\ncoder summary"})
         emit_event({"type": "done"})
 
-    events: list[dict[str, object]] = []
+    events: list[dict[str, Any]] = []
     budget = SearchBudget(total_limit=8, per_key_limit=2)
     with patch.object(multi_agent, "stream_deepseek", side_effect=fake_stream):
         multi_agent._run_agent_once(
@@ -636,12 +637,12 @@ def test_run_agent_routes_worker_reasoning_to_agent_card() -> None:
 def test_run_agent_routes_system_note_to_agent_note() -> None:
     """v1.2.6：worker 工具状态提示独立成 note，便于前端简洁模式隐藏。"""
 
-    def fake_stream(payload: dict[str, object], emit_event, **_: object) -> None:
+    def fake_stream(payload: dict[str, Any], emit_event, **_: object) -> None:
         emit_event({"type": "system_note", "text": "正在调用本地工具：search_files"})
         emit_event({"type": "content", "text": "## 摘要\ncoder summary"})
         emit_event({"type": "done"})
 
-    events: list[dict[str, object]] = []
+    events: list[dict[str, Any]] = []
     budget = SearchBudget(total_limit=8, per_key_limit=2)
     with patch.object(multi_agent, "stream_deepseek", side_effect=fake_stream):
         multi_agent._run_agent_once(
@@ -666,7 +667,7 @@ def test_execute_agent_tier_parallelizes_only_middle_layer() -> None:
     captured_prior_lengths: dict[str, int] = {}
 
     def fake_run_agent(
-        payload: dict[str, object],
+        payload: dict[str, Any],
         *,
         agent_id: str,
         task: str,
@@ -693,7 +694,7 @@ def test_execute_agent_tier_parallelizes_only_middle_layer() -> None:
         }
 
     tier = [{"id": "coder", "task": "code"}, {"id": "reasoner", "task": "reason"}]
-    events: list[dict[str, object]] = []
+    events: list[dict[str, Any]] = []
     with patch.object(multi_agent, "run_agent", side_effect=fake_run_agent):
         outputs = multi_agent.execute_agent_tier(
             {"apiKey": "k", "model": "m", "messages": [{"role": "user", "content": "q"}]},
@@ -715,7 +716,7 @@ def test_parallel_middle_agent_delta_events_keep_phase_isolated() -> None:
     both_started = threading.Event()
 
     def fake_run_agent(
-        payload: dict[str, object],
+        payload: dict[str, Any],
         *,
         agent_id: str,
         task: str,
@@ -750,7 +751,7 @@ def test_parallel_middle_agent_delta_events_keep_phase_isolated() -> None:
         }
 
     tier = [{"id": "coder", "task": "code"}, {"id": "reasoner", "task": "reason"}]
-    events: list[dict[str, object]] = []
+    events: list[dict[str, Any]] = []
     with patch.object(multi_agent, "run_agent", side_effect=fake_run_agent):
         multi_agent.execute_agent_tier(
             {"apiKey": "k", "model": "m", "messages": [{"role": "user", "content": "q"}]},
@@ -769,7 +770,7 @@ def test_parallel_middle_agent_delta_events_keep_phase_isolated() -> None:
 def test_stream_multi_agent_returns_immediately_when_cancelled() -> None:
     cancel_event = threading.Event()
     cancel_event.set()
-    events: list[dict[str, object]] = []
+    events: list[dict[str, Any]] = []
 
     multi_agent.stream_multi_agent(
         {"apiKey": "k", "model": "expert", "messages": [{"role": "user", "content": "q"}]},
@@ -786,9 +787,9 @@ def test_execute_tool_calls_skips_execution_when_cancel_event_set() -> None:
     标准的取消错误体——前端拿到的是一致的"已取消"信号，而不是部分跑了一半。"""
     cancel_event = threading.Event()
     cancel_event.set()
-    real_calls: list[dict[str, object]] = []
+    real_calls: list[dict[str, Any]] = []
 
-    def fake_execute_tool_call(tool_call: dict[str, object], **_: object) -> dict[str, object]:
+    def fake_execute_tool_call(tool_call: dict[str, Any], **_: object) -> dict[str, Any]:
         real_calls.append(tool_call)
         return {"ok": True, "tool": tools.tool_call_name(tool_call), "result": {}}
 
@@ -819,7 +820,7 @@ def test_parallel_middle_tier_drops_agent_delta_after_cancel() -> None:
     started: list[str] = []
 
     def fake_run_agent(
-        payload: dict[str, object],
+        payload: dict[str, Any],
         *,
         agent_id: str,
         task: str,
@@ -874,7 +875,7 @@ def test_parallel_middle_tier_drops_agent_delta_after_cancel() -> None:
     driver.start()
 
     tier = [{"id": "coder", "task": "code"}, {"id": "reasoner", "task": "reason"}]
-    events: list[dict[str, object]] = []
+    events: list[dict[str, Any]] = []
     try:
         with patch.object(multi_agent, "run_agent", side_effect=fake_run_agent):
             multi_agent.execute_agent_tier(
@@ -956,10 +957,10 @@ def test_agent_cache_for_diagnostics_marks_missing_agent_usage_as_no_data() -> N
 def test_stream_multi_agent_emits_agent_events_and_done() -> None:
     plan_json = '{"agents":[{"id":"reasoner","task":"reason"},{"id":"critic","task":"review"}]}'
 
-    def fake_call(payload: dict[str, object], **_: object) -> dict[str, object]:
+    def fake_call(payload: dict[str, Any], **_: object) -> dict[str, Any]:
         return {"content": plan_json}
 
-    def fake_stream(payload: dict[str, object], emit_event, **_) -> None:
+    def fake_stream(payload: dict[str, Any], emit_event, **_) -> None:
         system = str(payload.get("systemPrompt") or "")
         if system == multi_agent.PLANNER_SYSTEM:
             # Planner 走流式 → 喂回 JSON content
@@ -969,7 +970,7 @@ def test_stream_multi_agent_emits_agent_events_and_done() -> None:
         else:
             emit_event({"type": "content", "text": "worker chunk"})
 
-    events: list[dict[str, object]] = []
+    events: list[dict[str, Any]] = []
     with patch.object(multi_agent, "call_deepseek", side_effect=fake_call), patch.object(
         multi_agent, "stream_deepseek", side_effect=fake_stream
     ):
@@ -1008,10 +1009,10 @@ def test_stream_multi_agent_emits_agent_events_and_done() -> None:
 def test_stream_multi_agent_aggregates_agent_cache_usage() -> None:
     plan_json = '{"agents":[{"id":"reasoner","task":"reason"},{"id":"critic","task":"review"}]}'
 
-    def fake_call(payload: dict[str, object], **_: object) -> dict[str, object]:
+    def fake_call(payload: dict[str, Any], **_: object) -> dict[str, Any]:
         return {"content": plan_json}
 
-    def fake_stream(payload: dict[str, object], emit_event, **_) -> None:
+    def fake_stream(payload: dict[str, Any], emit_event, **_) -> None:
         system = str(payload.get("systemPrompt") or "")
         if system == multi_agent.PLANNER_SYSTEM:
             emit_event({"type": "content", "text": plan_json})
@@ -1029,7 +1030,7 @@ def test_stream_multi_agent_aggregates_agent_cache_usage() -> None:
         emit_event({"type": "content", "text": "worker chunk"})
         emit_event({"type": "done", "usage": usage})
 
-    events: list[dict[str, object]] = []
+    events: list[dict[str, Any]] = []
     with patch.object(multi_agent, "call_deepseek", side_effect=fake_call), patch.object(
         multi_agent, "stream_deepseek", side_effect=fake_stream
     ):
@@ -1061,9 +1062,9 @@ def test_synthesizer_system_contains_prompt_injection_reminder() -> None:
 
 
 def test_run_agent_search_clause_matches_role() -> None:
-    captured: list[dict[str, object]] = []
+    captured: list[dict[str, Any]] = []
 
-    def fake_call(payload: dict[str, object], **_: object) -> dict[str, object]:
+    def fake_call(payload: dict[str, Any], **_: object) -> dict[str, Any]:
         captured.append(payload)
         return {"content": "summary"}
 
@@ -1132,7 +1133,7 @@ def test_search_source_note_returns_empty_without_results() -> None:
 
 
 def test_run_agent_appends_sources_only_for_researcher() -> None:
-    def fake_call_with_search(payload: dict[str, object], **_: object) -> dict[str, object]:
+    def fake_call_with_search(payload: dict[str, Any], **_: object) -> dict[str, Any]:
         return {
             "content": "researched summary",
             "search": {"results": [{"title": "Foo", "url": "https://foo.example"}]},
@@ -1163,7 +1164,7 @@ def test_run_agent_appends_sources_only_for_researcher() -> None:
 def test_run_agent_retries_once_on_failure() -> None:
     call_count = {"n": 0}
 
-    def fake_call(payload: dict[str, object], **_: object) -> dict[str, object]:
+    def fake_call(payload: dict[str, Any], **_: object) -> dict[str, Any]:
         call_count["n"] += 1
         if call_count["n"] == 1:
             raise RuntimeError("transient network error")
@@ -1184,7 +1185,7 @@ def test_run_agent_retries_once_on_failure() -> None:
 
 
 def test_run_agent_raises_after_exhausting_retries() -> None:
-    def fake_call(payload: dict[str, object], **_: object) -> dict[str, object]:
+    def fake_call(payload: dict[str, Any], **_: object) -> dict[str, Any]:
         raise RuntimeError("persistent failure")
 
     budget = SearchBudget(total_limit=8, per_key_limit=2)
@@ -1202,9 +1203,9 @@ def test_run_agent_raises_after_exhausting_retries() -> None:
 
 
 def test_run_agent_puts_prior_outputs_after_history_for_cache_friendliness() -> None:
-    captured: dict[str, object] = {}
+    captured: dict[str, Any] = {}
 
-    def fake_call(payload: dict[str, object], **_: object) -> dict[str, object]:
+    def fake_call(payload: dict[str, Any], **_: object) -> dict[str, Any]:
         captured["payload"] = payload
         return {"content": "summary"}
 
@@ -1352,7 +1353,7 @@ def test_stream_agent_plan_token_gate_skips_later_tiers_but_always_synthesizes()
         emit_event({"type": "content", "text": "final"})
         emit_event({"type": "done", "usage": {"total_tokens": 50}})
 
-    events: list[dict[str, object]] = []
+    events: list[dict[str, Any]] = []
     with patch.object(multi_agent, "run_agent", side_effect=fake_run_agent), patch.object(
         multi_agent, "stream_deepseek", side_effect=fake_stream
     ):
@@ -1406,7 +1407,7 @@ def test_stream_agent_plan_high_budget_runs_all_tiers() -> None:
         emit_event({"type": "content", "text": "final"})
         emit_event({"type": "done", "usage": {"total_tokens": 50}})
 
-    events: list[dict[str, object]] = []
+    events: list[dict[str, Any]] = []
     with patch.object(multi_agent, "run_agent", side_effect=fake_run_agent), patch.object(
         multi_agent, "stream_deepseek", side_effect=fake_stream
     ):
@@ -1460,9 +1461,9 @@ def test_worker_payload_downgrade_to_flash_disables_thinking() -> None:
 
 
 def test_planner_payload_follows_configured_model_and_thinking() -> None:
-    captured: dict[str, object] = {}
+    captured: dict[str, Any] = {}
 
-    def fake_call(call_payload: dict[str, object], **_) -> dict[str, object]:
+    def fake_call(call_payload: dict[str, Any], **_) -> dict[str, Any]:
         captured.update(call_payload)
         return {"content": "{}"}
 
@@ -1479,12 +1480,12 @@ def test_planner_payload_follows_configured_model_and_thinking() -> None:
 def test_synthesize_answer_streams_when_emit_event_provided() -> None:
     fake_outputs = [{"id": "reasoner", "name": "推理 Agent", "task": "推理", "summary": "前置结论"}]
 
-    def fake_stream(payload: dict[str, object], emit_event, **_) -> None:
+    def fake_stream(payload: dict[str, Any], emit_event, **_) -> None:
         emit_event({"type": "content", "text": "hello "})
         emit_event({"type": "content", "text": "world"})
         emit_event({"type": "done", "content": "ignored by relay"})
 
-    events: list[dict[str, object]] = []
+    events: list[dict[str, Any]] = []
     with patch.object(multi_agent, "stream_deepseek", side_effect=fake_stream):
         result = multi_agent.synthesize_answer(
             {"apiKey": "k", "model": "expert", "messages": [{"role": "user", "content": "q"}]},
@@ -1502,11 +1503,11 @@ def test_synthesize_answer_streams_when_emit_event_provided() -> None:
 def test_stream_synthesis_emits_visible_fallback_when_only_reasoning_returns() -> None:
     fake_outputs = [{"id": "reasoner", "name": "推理 Agent", "task": "推理", "summary": "前置结论"}]
 
-    def fake_stream(payload: dict[str, object], emit_event, **_) -> None:
+    def fake_stream(payload: dict[str, Any], emit_event, **_) -> None:
         emit_event({"type": "reasoning", "text": "只返回了思考过程"})
         emit_event({"type": "done", "usage": {"prompt_cache_hit_tokens": 1}})
 
-    events: list[dict[str, object]] = []
+    events: list[dict[str, Any]] = []
     with patch.object(multi_agent, "stream_deepseek", side_effect=fake_stream):
         multi_agent.stream_synthesis_for_outputs(
             {"apiKey": "k", "model": "expert", "messages": [{"role": "user", "content": "q"}]},
@@ -1527,8 +1528,8 @@ def test_stream_synthesis_emits_visible_fallback_when_only_reasoning_returns() -
 # ---------------------------------------------------------------------------
 
 
-def _worker_output(agent_id: str, **extra: object) -> dict[str, object]:
-    base: dict[str, object] = {
+def _worker_output(agent_id: str, **extra: object) -> dict[str, Any]:
+    base: dict[str, Any] = {
         "id": agent_id,
         "name": multi_agent.AGENT_PROFILES.get(agent_id, {}).get("name", agent_id),
         "task": "原始子任务",
@@ -1575,14 +1576,14 @@ def test_run_critic_revision_reruns_named_worker_and_replaces_output() -> None:
         _worker_output("critic", risks="修订建议：coder"),
     ]
     plan = [{"id": "coder", "task": "原始子任务"}, {"id": "critic", "task": "复核"}]
-    captured: dict[str, object] = {}
+    captured: dict[str, Any] = {}
 
     def fake_run_agent(payload, *, agent_id, task, search_budget, prior_outputs=None, emit_event=None, **_):
         captured["agent_id"] = agent_id
         captured["task"] = task
         return _worker_output("coder", content="coder v2", summary="修订后结论", usage={"total_tokens": 222})
 
-    events: list[dict[str, object]] = []
+    events: list[dict[str, Any]] = []
     token_budget = TokenBudget(total_limit=2_000_000)
     with patch.object(multi_agent, "run_agent", side_effect=fake_run_agent) as mock_run:
         result = multi_agent.run_critic_revision(
@@ -1634,7 +1635,7 @@ def test_run_critic_revision_skips_when_token_budget_exhausted() -> None:
     agent_outputs = [_worker_output("coder"), _worker_output("critic", risks="修订建议：coder")]
     token_budget = TokenBudget(total_limit=10)
     token_budget.record(50)  # 已超预算
-    events: list[dict[str, object]] = []
+    events: list[dict[str, Any]] = []
     with patch.object(multi_agent, "run_agent") as mock_run:
         result = multi_agent.run_critic_revision(
             {"apiKey": "k"},
@@ -1667,7 +1668,7 @@ def test_run_critic_revision_skips_when_target_not_in_outputs() -> None:
 
 def test_run_critic_revision_keeps_original_output_on_rerun_failure() -> None:
     agent_outputs = [_worker_output("coder", content="coder v1"), _worker_output("critic", risks="修订建议：coder")]
-    events: list[dict[str, object]] = []
+    events: list[dict[str, Any]] = []
 
     def boom(*_args, **_kwargs):
         raise RuntimeError("rerun failed")
@@ -1706,7 +1707,7 @@ def test_stream_agent_plan_runs_critic_revision_once_then_synthesizes() -> None:
         emit_event({"type": "content", "text": "final"})
         emit_event({"type": "done", "usage": {"total_tokens": 50}})
 
-    events: list[dict[str, object]] = []
+    events: list[dict[str, Any]] = []
     with patch.object(multi_agent, "run_agent", side_effect=fake_run_agent), patch.object(
         multi_agent, "stream_deepseek", side_effect=fake_stream
     ):
@@ -1776,7 +1777,7 @@ def test_layered_plan_without_deps_matches_legacy_role_tiers() -> None:
 
 
 def test_dependency_layers_topological_grouping_and_order() -> None:
-    plan = [
+    plan: list[dict[str, Any]] = [
         {"id": "researcher", "task": "r"},
         {"id": "coder", "task": "c", "depends_on": ["researcher"]},
         {"id": "reasoner", "task": "x", "depends_on": ["researcher"]},
@@ -1855,7 +1856,7 @@ def test_execute_agent_tier_parallel_flag_runs_full_layer_concurrently() -> None
 
 
 def test_stream_agent_plan_dag_mode_runs_layers_in_dependency_order() -> None:
-    plan = [
+    plan: list[dict[str, Any]] = [
         {"id": "researcher", "task": "r"},
         {"id": "coder", "task": "c", "depends_on": ["researcher"]},
         {"id": "reasoner", "task": "x", "depends_on": ["researcher"]},

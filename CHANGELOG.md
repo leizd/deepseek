@@ -8,6 +8,7 @@
 
 - **图片视觉理解（多模态）**：上传图片后默认直接交给 `deepseek-v4-pro` 视觉模型理解（读图、看图答题、识别公式 / 图表），不再只靠 OCR 提取纯文字。前端只给本轮最新提问的图片附上 base64，后端在消息组装层（`normalize_chat_messages`）把它转成 OpenAI 兼容的多模态 `content`（`text` + `image_url`）并强制走 v4-pro；普通对话和多 Agent worker 共用同一组装路径，两者都能读图。历史轮的图片退回 OCR 文字摘要，省 token 且保持长历史的 prompt cache 前缀稳定。OCR（Tesseract + OpenCV 预处理）保留为视觉不可用 / 纯文字提取时的降级路径。`/api/chat` 请求体上限相应放宽到 16 MB。
 - **生成 PPT（`create_pptx` 工具）**：新增 function-calling 工具，模型识别“做 PPT / 幻灯片 / 演示文稿”意图时调用，按传入的标题 + 分页大纲用 `python-pptx` 渲染真实 `.pptx`，存入 `.generated/`，通过新增的 `GET /api/download?id=...`（沿用 `require_api_auth` 鉴权、32 位十六进制 id 防路径遍历、6 小时 TTL 清理）交付，模型在回复里以 Markdown 链接给出下载地址——无需任何前端改动。新增依赖 `python-pptx`。
+- **豆包式文档阅读工作台**：上传 PDF / 图片 / 文本类附件后点「预览」，宽屏会切换成左侧文档对话、右侧原文逐页阅读的分栏工作台。新增一组只读接口支撑原样阅读：`GET /api/file-source`（原文件原样返回）、`GET /api/file-page-image`（PDF 逐页 PNG，PyMuPDF→pdf2image 兜底）、`GET /api/file-page-layout`（按页文字归一化坐标，叠加透明可选文字层）、`GET /api/file-page-search`（跨页关键字搜索与高亮跳转）、`POST /api/file-page-text`（按页文本）、`POST /api/file-reader`（不支持原样预览时的分段文本回退）。阅读栏支持翻页 / 页码跳转 / 缩放 / 目录缩略图 / 搜索 / 全屏 / 下载，选中文字弹出「解释 / 翻译 / 复制 / 问问豆包」，并支持截图框选区域转成图片附件提问、翻译全文与一键总结 / 大纲 / 追问 / 脑图。新增依赖 `PyMuPDF`。
 
 ### 优化
 
@@ -110,13 +111,13 @@
 
 ### 修复
 
-- 修复模型主动调用 `web_search` 后 DeepSeek prompt cache 命中率偏低的问题：后端现在会把上游随机 `tool_call_id` 替换为稳定 ID，并把工具参数 JSON 规范化，避免第二轮请求在工具调用消息处过早分叉。
+- 修复模型主动调用 `web_search` 后 DeepSeek prompt cache 命中率偏低的问题：后端现在会保留上游原始 `tool_call_id` 和参数 JSON，让第二轮请求能匹配上一轮模型输出末尾的缓存前缀，避免在工具调用消息处过早分叉。
 - `web_search` 单轮工具查询现在会使用 `.search-cache`；同一查询命中缓存时不再重新请求 Tavily，工具结果更稳定，也减少搜索结果细微变化打断后续 DeepSeek 前缀缓存。
 - 传给模型的联网搜索工具结果会移除 `cached` 这类本地状态字段，并使用稳定 JSON 序列化；前端搜索进度和诊断仍保留缓存命中状态。
 
 ### 测试
 
-- 新增联网搜索工具交换稳定性测试，覆盖稳定 `tool_call_id`、规范化参数和移除模型侧波动字段。
+- 新增联网搜索工具交换稳定性测试，覆盖保留上游 `tool_call_id`、原始参数和移除模型侧波动字段。
 - 新增 `search_single_round(use_cache=True)` 测试，覆盖工具搜索读取/写入 `.search-cache`。
 - Service Worker 缓存版本更新到 `deepseek-mobile-v161`。
 

@@ -14,7 +14,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from types import ModuleType
 from pathlib import Path
 from typing import Any, Callable
-from urllib.parse import parse_qs, unquote, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qs, quote, unquote, urlencode, urlsplit, urlunsplit
 
 from deepseek_mobile.core.config import (
     APP_VERSION,
@@ -43,7 +43,17 @@ from deepseek_mobile.services.agent_runs import (
 )
 from deepseek_mobile.services.multi_agent import stream_multi_agent
 from deepseek_mobile.core.errors import AppError, ErrorCode
-from deepseek_mobile.services.files import cleanup_file_cache, extract_uploaded_file, load_cached_file
+from deepseek_mobile.services.files import (
+    cached_file_source,
+    cleanup_file_cache,
+    extract_uploaded_file,
+    file_page_image,
+    file_page_layout,
+    file_page_search,
+    file_page_text,
+    file_reader_window,
+    load_cached_file,
+)
 from deepseek_mobile.services.memory import (
     clear_memories,
     delete_memories_by_query,
@@ -54,7 +64,7 @@ from deepseek_mobile.services.memory import (
     normalize_memory_scope,
     upsert_memory,
 )
-from deepseek_mobile.services.presentations import resolve_generated_file, save_generated_file_to_downloads
+from deepseek_mobile.services.generated_files import download_descriptor, resolve_generated_file, save_generated_file_to_downloads
 from deepseek_mobile.services.projects import add_project_files, create_project, delete_project, list_projects
 from deepseek_mobile.services.reminders import create_reminder, delete_reminder, due_reminders, load_reminders
 from deepseek_mobile.services.title_generator import generate_title_payload
@@ -75,7 +85,16 @@ SHARE_TARGET_TTL_SECONDS = 30 * 60
 MAX_SHARE_FIELD_CHARS = 12_000
 _SHARE_TARGET_LOCK = threading.RLock()
 _SHARE_TARGETS: dict[str, tuple[float, dict[str, Any]]] = {}
-GET_ROUTES: dict[str, str] = {"/api/config": "handle_config", "/api/memory": "handle_memory_list", "/api/share-target": "handle_share_target", "/api/download": "handle_download"}
+GET_ROUTES: dict[str, str] = {
+    "/api/config": "handle_config",
+    "/api/memory": "handle_memory_list",
+    "/api/share-target": "handle_share_target",
+    "/api/download": "handle_download",
+    "/api/file-page-image": "handle_file_page_image",
+    "/api/file-page-layout": "handle_file_page_layout",
+    "/api/file-page-search": "handle_file_page_search",
+    "/api/file-source": "handle_file_source",
+}
 POST_ROUTES: dict[str, tuple[str, str]] = {
     "/share-target": ("Share target error", "handle_share_target_post"),
     "/api/auth/logout": ("Auth error", "handle_auth_logout"),
@@ -83,6 +102,8 @@ POST_ROUTES: dict[str, tuple[str, str]] = {
     "/api/download-save": ("Download error", "handle_download_save"),
     "/api/file-text": ("File parse error", "handle_file_text"),
     "/api/file-chunk": ("File chunk error", "handle_file_chunk"),
+    "/api/file-page-text": ("File page text error", "handle_file_page_text"),
+    "/api/file-reader": ("File reader error", "handle_file_reader"),
     "/api/fetch-url": ("URL fetch error", "handle_fetch_url"),
     "/api/project-files": ("Project file parse error", "handle_project_file_text"),
     "/api/compress-context": ("Context compress error", "handle_context_compress"),
@@ -175,22 +196,37 @@ class DeepSeekMobileHandler(SimpleHTTPRequestHandler):
         return str(candidate)
 
     def end_headers(self) -> None:
+        path = urlsplit(getattr(self, "path", "")).path
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
-        self.send_header(
-            "Content-Security-Policy",
-            "default-src 'self'; "
-            "script-src 'self'; "
-            "style-src 'self' 'unsafe-inline'; "
-            "img-src 'self' data: http: https:; "
-            "font-src 'self'; "
-            "connect-src 'self'; "
-            "object-src 'none'; "
-            "base-uri 'self'; "
-            "frame-ancestors 'none'",
-        )
-        self.send_header("X-Frame-Options", "DENY")
-        path = urlsplit(getattr(self, "path", "")).path
+        if path == "/api/file-source":
+            self.send_header(
+                "Content-Security-Policy",
+                "default-src 'self'; "
+                "script-src 'self'; "
+                "style-src 'self' 'unsafe-inline'; "
+                "img-src 'self' data:; "
+                "font-src 'self'; "
+                "connect-src 'self'; "
+                "object-src 'self'; "
+                "base-uri 'self'; "
+                "frame-ancestors 'self'",
+            )
+            self.send_header("X-Frame-Options", "SAMEORIGIN")
+        else:
+            self.send_header(
+                "Content-Security-Policy",
+                "default-src 'self'; "
+                "script-src 'self'; "
+                "style-src 'self' 'unsafe-inline'; "
+                "img-src 'self' data: http: https:; "
+                "font-src 'self'; "
+                "connect-src 'self'; "
+                "object-src 'none'; "
+                "base-uri 'self'; "
+                "frame-ancestors 'none'",
+            )
+            self.send_header("X-Frame-Options", "DENY")
         cache_control = "no-store" if path.startswith("/api/") else "no-cache"
         self.send_header("Cache-Control", cache_control)
         super().end_headers()
@@ -295,7 +331,7 @@ class DeepSeekMobileHandler(SimpleHTTPRequestHandler):
                 "ocr": {
                     "enabled": settings.ocr.enabled,
                     "mode": settings.ocr.mode,
-                    "localOnly": True,
+                    "localOnly": False,
                 },
                 "computerUrl": computer_url,
                 "phoneUrl": phone_url,
@@ -366,20 +402,80 @@ class DeepSeekMobileHandler(SimpleHTTPRequestHandler):
         self.write_json({"memories": load_memories()})
 
     def handle_download(self) -> None:
-        # serve 由 create_pptx 工具生成的 .pptx。已过 require_api_auth（GET_ROUTES 分支统一鉴权）；
-        # id 经 resolve_generated_file 校验为 32 位十六进制，杜绝路径遍历。
-        file_id = parse_qs(urlsplit(self.path).query).get("id", [""])[0]
+        # serve 由 create_pptx / create_document / create_mindmap 工具生成的 .pptx / .docx / .pdf / .svg。已过 require_api_auth
+        # （GET_ROUTES 分支统一鉴权）；id 经 resolve_generated_file 校验为 32 位十六进制，杜绝路径遍历；
+        # MIME 与下载文件名按实际文件后缀派生。
+        query = parse_qs(urlsplit(self.path).query)
+        file_id = query.get("id", [""])[0]
         path = resolve_generated_file(file_id)
         if path is None:
             raise AppError("文件不存在或已过期", code=ErrorCode.NOT_FOUND, status=404)
         data = path.read_bytes()
+        media_type, download_name = download_descriptor(path)
         self.send_response(200)
-        self.send_header("Content-Type", "application/vnd.openxmlformats-officedocument.presentationml.presentation")
-        self.send_header("Content-Disposition", 'attachment; filename="presentation.pptx"')
+        self.send_header("Content-Type", media_type)
+        disposition = "inline" if path.suffix.lower() == ".svg" and str(query.get("inline", [""])[0]).lower() in {"1", "true"} else "attachment"
+        self.send_header("Content-Disposition", f'{disposition}; filename="{download_name}"')
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(data)
+
+    def handle_file_source(self) -> None:
+        query = parse_qs(urlsplit(self.path).query)
+        file_id = query.get("fileId", [""])[0]
+        project_id = query.get("projectId", [""])[0] or None
+        cached, path = cached_file_source(file_id, project_id=project_id)
+        data = path.read_bytes()
+        media_type = original_file_media_type(cached)
+        filename = clean_filename(str(cached.get("name") or "document"))
+        disposition = "attachment" if str(query.get("download", [""])[0]).lower() in {"1", "true"} else "inline"
+        self.send_response(200)
+        self.send_header("Content-Type", media_type)
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Content-Disposition", content_disposition_header(disposition, filename))
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def handle_file_page_image(self) -> None:
+        query = parse_qs(urlsplit(self.path).query)
+        file_id = query.get("fileId", [""])[0]
+        project_id = query.get("projectId", [""])[0] or None
+        page = query.get("page", ["1"])[0]
+        scale = query.get("scale", [""])[0]
+        cached, data, rendered_page, page_count = file_page_image(file_id, project_id=project_id, page=page, scale=scale)
+        filename = clean_filename(str(cached.get("name") or "document"))
+        self.send_response(200)
+        self.send_header("Content-Type", "image/png")
+        self.send_header("X-File-Page", str(rendered_page))
+        self.send_header("X-File-Page-Count", str(page_count))
+        self.send_header("Content-Disposition", content_disposition_header("inline", f"{Path(filename).stem or 'document'}-page-{rendered_page}.png"))
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def handle_file_page_layout(self) -> None:
+        query = parse_qs(urlsplit(self.path).query)
+        self.write_json(
+            file_page_layout(
+                query.get("fileId", [""])[0],
+                project_id=query.get("projectId", [""])[0] or None,
+                page=query.get("page", ["1"])[0],
+            )
+        )
+
+    def handle_file_page_search(self) -> None:
+        query = parse_qs(urlsplit(self.path).query)
+        self.write_json(
+            file_page_search(
+                query.get("fileId", [""])[0],
+                project_id=query.get("projectId", [""])[0] or None,
+                query=query.get("query", [""])[0],
+            )
+        )
 
     def handle_download_save(self) -> None:
         payload = self.read_json_body()
@@ -444,7 +540,8 @@ class DeepSeekMobileHandler(SimpleHTTPRequestHandler):
         run_id, action = parse_agent_run_action(path)
         body = self.read_json_body()
         stored = load_agent_run(run_id)
-        runtime_payload = merge_runtime_payload(stored.get("requestPayload") if isinstance(stored.get("requestPayload"), dict) else {}, body.get("payload"))
+        stored_payload = stored.get("requestPayload")
+        runtime_payload = merge_runtime_payload(stored_payload if isinstance(stored_payload, dict) else {}, body.get("payload"))
         runtime_payload["agentMode"] = True
         preflight_deepseek_payload(runtime_payload)
         if action == "plan":
@@ -528,7 +625,7 @@ class DeepSeekMobileHandler(SimpleHTTPRequestHandler):
         return body
 
     def handle_file_text(self) -> None:
-        files, ocr_enabled = self.read_multipart_files()
+        files, ocr_enabled, ocr_api_key = self.read_multipart_files()
         if not files:
             raise AppError("No file uploaded", code=ErrorCode.INVALID_PAYLOAD)
         extracted_files = []
@@ -536,7 +633,13 @@ class DeepSeekMobileHandler(SimpleHTTPRequestHandler):
         for file_info in files:
             try:
                 extracted_files.append(
-                    extract_uploaded_file(file_info["filename"], file_info["content_type"], file_info["data"], ocr_enabled=ocr_enabled)
+                    extract_uploaded_file(
+                        file_info["filename"],
+                        file_info["content_type"],
+                        file_info["data"],
+                        ocr_enabled=ocr_enabled,
+                        ocr_api_key=ocr_api_key,
+                    )
                 )
             except AppError as exc:
                 errors.append({"name": file_info["filename"], "error": str(exc), "code": exc.code.value, "status": exc.status})
@@ -548,10 +651,10 @@ class DeepSeekMobileHandler(SimpleHTTPRequestHandler):
 
     def handle_project_file_text(self) -> None:
         project_id = parse_qs(urlsplit(self.path).query).get("projectId", [""])[0]
-        files, ocr_enabled = self.read_multipart_files()
+        files, ocr_enabled, ocr_api_key = self.read_multipart_files()
         if not files:
             raise AppError("No file uploaded", code=ErrorCode.INVALID_PAYLOAD)
-        documents = add_project_files(project_id, files, ocr_enabled=ocr_enabled)
+        documents = add_project_files(project_id, files, ocr_enabled=ocr_enabled, ocr_api_key=ocr_api_key)
         self.write_json({"ok": True, "documents": documents})
 
     def handle_file_chunk(self) -> None:
@@ -582,6 +685,27 @@ class DeepSeekMobileHandler(SimpleHTTPRequestHandler):
             }
         )
 
+    def handle_file_reader(self) -> None:
+        payload = self.read_json_body()
+        self.write_json(
+            file_reader_window(
+                str(payload.get("fileId") or ""),
+                project_id=str(payload.get("projectId") or "") or None,
+                chunk_start=payload.get("chunkStart") or 1,
+                chunk_count=payload.get("chunkCount") or 6,
+            )
+        )
+
+    def handle_file_page_text(self) -> None:
+        payload = self.read_json_body()
+        self.write_json(
+            file_page_text(
+                str(payload.get("fileId") or ""),
+                project_id=str(payload.get("projectId") or "") or None,
+                page=payload.get("page") or 1,
+            )
+        )
+
     def handle_fetch_url(self) -> None:
         payload = self.read_json_body()
         self.write_json({"ok": True, "page": fetch_url(str(payload.get("url") or ""))})
@@ -610,6 +734,7 @@ class DeepSeekMobileHandler(SimpleHTTPRequestHandler):
                         file_info["content_type"],
                         file_info["data"],
                         ocr_enabled=settings.ocr.enabled,
+                        ocr_api_key=first_form_value(fields, "apiKey"),
                     )
                 )
             except AppError as exc:
@@ -733,12 +858,12 @@ class DeepSeekMobileHandler(SimpleHTTPRequestHandler):
                 )
         self.write_json({"results": results[:50]})
 
-    def read_multipart_files(self) -> tuple[list[dict[str, Any]], bool]:
+    def read_multipart_files(self) -> tuple[list[dict[str, Any]], bool, str]:
         fields, uploads = self.read_multipart_form()
         ocr_enabled = settings.ocr.enabled
         for value in fields.get("ocrEnabled", []):
             ocr_enabled = str(value).strip().lower() in {"1", "true", "yes", "on"}
-        return uploads, ocr_enabled
+        return uploads, ocr_enabled, first_form_value(fields, "apiKey")
 
     def read_multipart_form(self) -> tuple[dict[str, list[str]], list[dict[str, Any]]]:
         content_type = self.headers.get("Content-Type", "")
@@ -1040,6 +1165,33 @@ def allowed_cors_origin(origin: str, port: int) -> str:
     if host not in allowed_auth_hosts():
         return ""
     return origin
+
+
+def original_file_media_type(cached: dict[str, Any]) -> str:
+    kind = str(cached.get("kind") or "").lower()
+    raw_type = str(cached.get("type") or "").split(";", 1)[0].strip().lower()
+    if kind == "pdf" or raw_type == "application/pdf":
+        return "application/pdf"
+    if kind == "image" and raw_type.startswith("image/") and raw_type not in {"image/svg+xml"}:
+        return raw_type
+    if raw_type.startswith("text/") and raw_type != "text/html":
+        return f"{raw_type}; charset=utf-8"
+    if kind in {"txt", "text", "md", "csv", "json", "xml", "log", "py", "js", "ts", "css"}:
+        return "text/plain; charset=utf-8"
+    if raw_type in {
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    }:
+        return raw_type
+    return "application/octet-stream"
+
+
+def content_disposition_header(disposition: str, filename: str) -> str:
+    safe_name = clean_filename(filename)
+    ascii_name = safe_name.encode("ascii", errors="ignore").decode("ascii") or "document"
+    ascii_name = ascii_name.replace('"', "")
+    return f'{disposition}; filename="{ascii_name}"; filename*=UTF-8\'\'{quote(safe_name)}'
 
 
 def auth_token_from_headers(authorization: str, cookie_header: str) -> str:

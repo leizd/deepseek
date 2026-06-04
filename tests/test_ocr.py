@@ -1,14 +1,30 @@
 from __future__ import annotations
 
+import json
 import os
 import sys
 import unittest
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
+from typing import Any
 from unittest.mock import patch
 
 import deepseek_mobile.services.ocr as ocr
 from deepseek_mobile.core.errors import AppError, ErrorCode
+
+
+class FakeResponse:
+    def __init__(self, payload: dict[str, Any]) -> None:
+        self._data = json.dumps(payload).encode("utf-8")
+
+    def __enter__(self) -> "FakeResponse":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return self._data
 
 
 class OcrTests(unittest.TestCase):
@@ -34,6 +50,51 @@ class OcrTests(unittest.TestCase):
 
     def test_select_lang_prefers_formula_language_when_available(self) -> None:
         self.assertEqual(ocr._select_lang({"eng", "equ"}), "eng+equ")
+
+    def test_deepseek_api_engine_extracts_image_text(self) -> None:
+        response = {
+            "choices": [
+                {
+                    "message": {
+                        "content": " API OCR text ",
+                    }
+                }
+            ]
+        }
+
+        with patch.object(ocr.urllib.request, "urlopen", return_value=FakeResponse(response)) as urlopen:
+            engine = ocr.DeepSeekApiOcrEngine(api_key="sk-test")
+            text = engine.extract_image(b"\x89PNG\r\n\x1a\nimage")
+
+        self.assertEqual(text, "API OCR text")
+        request = urlopen.call_args.args[0]
+        self.assertEqual(request.get_header("Authorization"), "Bearer sk-test")
+        body = json.loads(request.data.decode("utf-8"))
+        self.assertEqual(body["model"], "deepseek-v4-pro")
+        content = body["messages"][0]["content"]
+        self.assertEqual(content[0]["type"], "text")
+        self.assertEqual(content[1]["type"], "image_url")
+        self.assertTrue(content[1]["image_url"]["url"].startswith("data:image/png;base64,"))
+
+    def test_deepseek_api_engine_reports_empty_text(self) -> None:
+        response = {"choices": [{"message": {"content": "No readable text."}}]}
+
+        with patch.object(ocr.urllib.request, "urlopen", return_value=FakeResponse(response)):
+            engine = ocr.DeepSeekApiOcrEngine(api_key="sk-test")
+            with self.assertRaises(AppError) as cm:
+                engine.extract_image(b"\x89PNG\r\n\x1a\nimage")
+
+        self.assertEqual(cm.exception.code, ErrorCode.OCR_EMPTY)
+        self.assertEqual(cm.exception.status, 422)
+
+    def test_extract_image_ocr_prefers_deepseek_api_result(self) -> None:
+        deepseek = SimpleNamespace(name="deepseek-api", extract_image=lambda data: " api text ")
+        tesseract = SimpleNamespace(name="tesseract", extract_image=lambda data: "much longer local text")
+
+        with patch.object(ocr, "_ocr_engine_candidates", return_value=([deepseek, tesseract], [])):
+            text = ocr.extract_image_ocr(b"\x89PNG")
+
+        self.assertEqual(text, "api text")
 
     def test_formula_command_args_replace_image_placeholder(self) -> None:
         args = ocr._formula_command_args('pix2tex "{image}" --json', Path(r"C:\tmp\formula image.png"))
@@ -178,7 +239,7 @@ class OcrTests(unittest.TestCase):
         self.assertEqual(ocr._clean_formula_ocr_output(r"\mathrm{Cov}(U,V)"), r"\mathrm{Cov}(U,V)")
 
     def test_formula_regions_use_tesseract_word_boxes(self) -> None:
-        data = {
+        data: dict[str, list[Any]] = {
             "text": ["设二维随机变量", "(X,Y)", "服从", "D", "上的均匀分布", "{(x力10和xz和3,0和7和3)"],
             "left": [10, 180, 240, 300, 330, 470],
             "top": [20, 20, 20, 20, 20, 20],
@@ -260,7 +321,7 @@ class OcrTests(unittest.TestCase):
                 return f" image {len(data)} "
 
         java_module = ModuleType("java")
-        java_module.jclass = lambda name: FakeBridge
+        setattr(java_module, "jclass", lambda name: FakeBridge)
 
         with patch.dict(sys.modules, {"java": java_module}):
             engine = ocr.AndroidMlKitEngine()
@@ -273,6 +334,11 @@ class OcrTests(unittest.TestCase):
 
         with (
             patch.dict(os.environ, {"DEEPSEEK_ANDROID_APP": "1"}),
+            patch.object(
+                ocr,
+                "DeepSeekApiOcrEngine",
+                side_effect=AppError("no key", code=ErrorCode.OCR_UNAVAILABLE, status=415),
+            ),
             patch.object(ocr, "AndroidMlKitEngine", return_value=fake_engine),
             patch.object(ocr, "TesseractEngine") as tesseract,
         ):
@@ -281,6 +347,7 @@ class OcrTests(unittest.TestCase):
         self.assertIs(engine, fake_engine)
         tesseract.assert_not_called()
 
+    @unittest.skipUnless(os.name == "nt", "Windows-only OCR fallback path")
     def test_windows_ocr_engine_uses_temp_image_file(self) -> None:
         with (
             patch.object(ocr.os, "name", "nt"),
@@ -294,6 +361,7 @@ class OcrTests(unittest.TestCase):
         temp_path = run_ocr.call_args.args[0]
         self.assertFalse(temp_path.exists())
 
+    @unittest.skipUnless(os.name == "nt", "Windows-only OCR fallback path")
     def test_powershell_path_uses_windows_system_fallback(self) -> None:
         with (
             patch.object(ocr.os, "name", "nt"),
@@ -314,6 +382,11 @@ class OcrTests(unittest.TestCase):
 
         with (
             patch.dict(os.environ, {}, clear=True),
+            patch.object(
+                ocr,
+                "DeepSeekApiOcrEngine",
+                side_effect=AppError("no key", code=ErrorCode.OCR_UNAVAILABLE, status=415),
+            ),
             patch.object(ocr.os, "name", "nt"),
             patch.object(
                 ocr,

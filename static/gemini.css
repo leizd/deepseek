@@ -163,6 +163,38 @@ body.gemini-ui .send-button:hover {
   background: var(--accent-hover);
 }
 
+/* Doubao-style document reader workspace overrides the general Gemini home skin. */
+body.gemini-ui.file-reader-workspace-open .app-shell {
+  background: #ffffff;
+}
+
+body.gemini-ui.file-reader-workspace-open .composer {
+  border-color: #e3e5e8;
+  border-radius: 30px;
+  background: #ffffff;
+  box-shadow: 0 12px 36px rgba(31, 35, 41, 0.10), 0 2px 8px rgba(31, 35, 41, 0.06);
+}
+
+body.gemini-ui.file-reader-workspace-open #promptInput {
+  font-size: 23px;
+}
+
+body.gemini-ui.file-reader-workspace-open .tool-chip,
+body.gemini-ui.file-reader-workspace-open .tool-chip[aria-pressed="true"] {
+  border-color: transparent;
+  background: transparent;
+  color: #1f2329;
+}
+
+body.gemini-ui.file-reader-workspace-open .send-button {
+  background: #f4f5f7;
+  color: #111827;
+}
+
+body.gemini-ui.file-reader-workspace-open .send-button:hover {
+  background: #eceff3;
+}
+
 /* --- Side panels / cards pick up the M3 surfaces automatically via tokens;
  *     nudge a couple of rounded-corner accents toward Gemini's softer radii. --- */
 body.gemini-ui .history-panel,

@@ -69,6 +69,8 @@ PRESENTATION_CREATE_RE = re.compile(r"做|制作|生成|创建|帮我|给我|出
 PRESENTATION_REFUSAL_RE = re.compile(r"(?:无法|不能|没有.*能力|不能直接|无法直接).{0,40}(?:pptx|PPT|幻灯片|演示文稿|文件)", re.IGNORECASE)
 
 
+MINDMAP_KEYWORDS_RE = re.compile(r"思维导图|腦圖|脑图|mind\s*map|mindmap", re.IGNORECASE)
+MINDMAP_CREATE_RE = re.compile(r"画|畫|做|生成|创建|建立|绘制|梳理|整理|导出|create|make|draw|generate|build|map", re.IGNORECASE)
 CURRENT_TIME_CONTEXT_HEADER = "[Current time]"
 
 
@@ -86,10 +88,15 @@ def raise_if_cancelled(cancel_event: threading.Event | None = None) -> None:
 
 
 def force_final_answer_without_tools(body: dict[str, Any]) -> dict[str, Any]:
+    # 达到工具轮次上限后让模型直接作答。保留 tools 数组——它在 prompt 前缀里，删掉会让这次
+    # （上下文体量最大的）请求整段 cache miss；改用 tool_choice="none" 来禁止继续调用工具。
     messages = list(body.get("messages") or [])
     messages.append({"role": "user", "content": TOOL_BUDGET_EXHAUSTED_PROMPT})
-    next_body = {key: value for key, value in body.items() if key != "tools"}
-    next_body["messages"] = messages
+    next_body = {**body, "messages": messages}
+    if next_body.get("tools"):
+        next_body["tool_choice"] = "none"
+    else:
+        next_body.pop("tool_choice", None)
     return next_body
 
 
@@ -243,8 +250,9 @@ def build_deepseek_request(
     if tools_enabled:
         request_tools = tools_for_payload(payload)
         request_body["tools"] = request_tools
-        if should_force_create_pptx(payload) and has_create_pptx_tool(request_tools):
-            request_body["tool_choice"] = {"type": "function", "function": {"name": "create_pptx"}}
+        forced_tool = forced_artifact_tool_name(payload, request_tools)
+        if forced_tool:
+            request_body["tool_choice"] = {"type": "function", "function": {"name": forced_tool}}
         else:
             request_body["tool_choice"] = "auto"
 
@@ -322,16 +330,31 @@ def presentation_intent_requested(payload: dict[str, Any]) -> bool:
 
 
 def should_force_create_pptx(payload: dict[str, Any]) -> bool:
-    if payload.get("toolsEnabled") is False:
-        return False
-    allowed = payload.get("allowedTools")
-    if isinstance(allowed, list) and "create_pptx" not in {str(item) for item in allowed}:
-        return False
     return presentation_intent_requested(payload)
 
 
 def has_create_pptx_tool(tools: list[dict[str, Any]]) -> bool:
     return any(str(tool.get("function", {}).get("name") or "") == "create_pptx" for tool in tools)
+
+
+def mindmap_intent_requested(payload: dict[str, Any]) -> bool:
+    query = latest_user_query(payload)
+    if not query or not MINDMAP_KEYWORDS_RE.search(query):
+        return False
+    return bool(MINDMAP_CREATE_RE.search(query))
+
+
+def forced_artifact_tool_name(payload: dict[str, Any], tools: list[dict[str, Any]]) -> str:
+    if payload.get("toolsEnabled") is False:
+        return ""
+    available = {str(tool.get("function", {}).get("name") or "") for tool in tools}
+    allowed = payload.get("allowedTools")
+    allowed_names = {str(item) for item in allowed} if isinstance(allowed, list) else available
+    if presentation_intent_requested(payload) and "create_pptx" in available and "create_pptx" in allowed_names:
+        return "create_pptx"
+    if mindmap_intent_requested(payload) and "create_mindmap" in available and "create_mindmap" in allowed_names:
+        return "create_mindmap"
+    return ""
 
 
 def normalize_reasoning_effort(value: Any) -> str:
@@ -718,8 +741,11 @@ def usage_int(usage: dict[str, Any], *names: str) -> int:
     for name in names:
         if name not in usage or usage.get(name) in (None, ""):
             continue
+        raw_usage = usage.get(name)
+        if raw_usage is None:
+            continue
         try:
-            return max(0, int(usage.get(name)))
+            return max(0, int(raw_usage))
         except (TypeError, ValueError):
             continue
     return 0
@@ -756,10 +782,15 @@ def diagnostics_with_tools(diagnostics: dict[str, Any], *, count: int, names: li
 
 
 def pptx_result_from_messages(body: dict[str, Any]) -> dict[str, Any] | None:
+    artifact = terminal_artifact_result_from_messages(body)
+    if artifact and artifact[0] == "create_pptx":
+        return artifact[1]
+    return None
+
+
+def terminal_artifact_result_from_messages(body: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
     for message in reversed(list(body.get("messages") or [])):
         if not isinstance(message, dict) or message.get("role") != "tool":
-            continue
-        if str(message.get("name") or "") != "create_pptx":
             continue
         try:
             data = json.loads(str(message.get("content") or ""))
@@ -767,9 +798,12 @@ def pptx_result_from_messages(body: dict[str, Any]) -> dict[str, Any] | None:
             continue
         if not isinstance(data, dict) or data.get("ok") is not True:
             continue
+        tool = str(data.get("tool") or message.get("name") or "")
+        if tool not in {"create_pptx", "create_document", "create_mindmap"}:
+            continue
         result = data.get("result")
         if isinstance(result, dict) and download_url_has_pptx_id(str(result.get("downloadUrl") or "")):
-            return result
+            return tool, result
     return None
 
 
@@ -778,15 +812,49 @@ def response_has_pptx_link(content: str) -> bool:
 
 
 def pptx_link_text(result: dict[str, Any], *, base_url: str = "") -> str:
+    return artifact_link_text("create_pptx", result, base_url=base_url)
+
+
+def artifact_link_text(tool: str, result: dict[str, Any], *, base_url: str = "") -> str:
     url = absolute_download_url(str(result.get("downloadUrl") or ""), base_url=base_url)
-    filename = str(result.get("filename") or "presentation.pptx")
+    filename = str(
+        result.get("filename")
+        or ("presentation.pptx" if tool == "create_pptx" else "mindmap.svg" if tool == "create_mindmap" else "document.docx")
+    )
+    outline = result.get("outline")
+    titles: list[str] = []
+    if isinstance(outline, list):
+        for item in outline[:6]:
+            if not isinstance(item, dict):
+                continue
+            title = str(item.get("title") or item.get("heading") or item.get("label") or "").strip()
+            if title:
+                titles.append(title)
+    inventory = f" Main items: {', '.join(titles)}." if titles else ""
+    if tool == "create_mindmap":
+        try:
+            node_count = int(result.get("nodeCount") or 0)
+        except (TypeError, ValueError):
+            node_count = 0
+        count_text = f"{node_count} nodes. " if node_count else ""
+        return (
+            f"Mind map SVG generated. {count_text}{inventory} Download link is valid for 6 hours.\n\n"
+            f"![{filename}]({url})"
+        )
+    if tool == "create_document":
+        format_label = "PDF" if str(result.get("format") or "").lower() == "pdf" else "Word"
+        try:
+            section_count = int(result.get("sectionCount") or 0)
+        except (TypeError, ValueError):
+            section_count = 0
+        count_text = f"{section_count} sections. " if section_count else ""
+        return f"{format_label} document generated: [{filename}]({url}). {count_text}{inventory} Download link is valid for 6 hours."
     try:
         slide_count = int(result.get("slideCount") or 0)
     except (TypeError, ValueError):
         slide_count = 0
-    count_text = f"共 {slide_count} 页，" if slide_count else ""
-    return f"已生成可下载 PPT：[{filename}]({url})。{count_text}下载链接 6 小时内有效。"
-
+    count_text = f"{slide_count} slides. " if slide_count else ""
+    return f"PPT generated: [{filename}]({url}). {count_text}{inventory} Download link is valid for 6 hours."
 
 def download_url_has_pptx_id(value: str) -> bool:
     return bool(re.search(r"(?:https?://[^)\s]+)?/api/download\?[^)\s#]*\bid=[0-9a-f]{32}", str(value or ""), flags=re.IGNORECASE))
@@ -879,11 +947,19 @@ def append_tool_exchange(
 ) -> dict[str, Any]:
     raise_if_cancelled(cancel_event)
     messages = list(body.get("messages") or [])
-    assistant_payload = {
+    assistant_payload: dict[str, Any] = {
         "role": "assistant",
-        "content": str(assistant_message.get("content") or ""),
         "tool_calls": tool_calls,
     }
+    if "content" in assistant_message:
+        content = assistant_message.get("content")
+        assistant_payload["content"] = content if content is None or isinstance(content, str) else str(content)
+    else:
+        assistant_payload["content"] = ""
+    # 必须回填上一轮的 reasoning_content，不能为了 prompt cache 省略它：
+    # DeepSeek V4-Pro thinking 模式下，带 tool_calls 的 assistant 消息在后续请求里若缺少
+    # reasoning_content，上游会直接报错 “The reasoning_content in the thinking mode must be
+    # passed back to the API.”，整个带工具调用的回合会失败。这是该模式工具调用协议的必需部分。
     reasoning = assistant_message.get("reasoning_content") or assistant_message.get("reasoning")
     if reasoning:
         assistant_payload["reasoning_content"] = str(reasoning)
@@ -933,7 +1009,11 @@ def merge_stream_tool_call_deltas(accumulator: dict[int, dict[str, Any]], deltas
 
 
 def finalized_stream_tool_calls(accumulator: dict[int, dict[str, Any]]) -> list[dict[str, Any]]:
-    return normalize_tool_calls([accumulator[index] for index in sorted(accumulator)], stable_ids=True, canonical_arguments=True)
+    # Preserve the upstream tool_call ids and argument JSON exactly for the
+    # immediate tool-followup request. DeepSeek prompt cache can reuse the
+    # prefix ending at the previous model output only when the assistant
+    # tool_calls we send back match that output byte-for-byte in substance.
+    return normalize_tool_calls([accumulator[index] for index in sorted(accumulator)])
 
 
 def call_deepseek(
@@ -961,6 +1041,7 @@ def call_deepseek(
     response_json: dict[str, Any] = {}
     answer: dict[str, Any] = {}
     usage_totals: dict[str, Any] = {}
+    local_final_content = ""
     for tool_round in range(max_tool_rounds + 2):
         request = request_with_body(prepared, body, accept="application/json")
         try:
@@ -974,7 +1055,7 @@ def call_deepseek(
             raise AppError(f"Cannot reach DeepSeek API: {exc.reason}", code=code, status=502) from exc
         usage_totals = merge_usage_totals(usage_totals, response_json.get("usage") or {})
         answer = first_response_message(response_json)
-        tool_calls = normalize_tool_calls(answer.get("tool_calls"), stable_ids=True, canonical_arguments=True)
+        tool_calls = normalize_tool_calls(answer.get("tool_calls"))
         if not tool_calls:
             break
         if tool_round >= max_tool_rounds:
@@ -991,9 +1072,17 @@ def call_deepseek(
             default_memory_scope=default_memory_scope,
             web_search_callback=perform_web_search if search_tool_enabled(payload) else None,
         )
+        artifact = terminal_artifact_result_from_messages(body)
+        if artifact:
+            local_final_content = artifact_link_text(artifact[0], artifact[1], base_url=pptx_download_base_url(payload))
+            answer = {"content": local_final_content}
+            break
     usage = usage_totals or response_json.get("usage") or {}
     search_data = current_search_data()
-    final_content, fallback_created = ensure_pptx_response(payload, str(answer.get("content") or ""), body)
+    if local_final_content:
+        final_content, fallback_created = local_final_content, False
+    else:
+        final_content, fallback_created = ensure_pptx_response(payload, str(answer.get("content") or ""), body)
     if fallback_created:
         tool_call_count += 1
         seen_tool_names.append("create_pptx")
@@ -1058,6 +1147,7 @@ def stream_deepseek(
         tool_call_count = 0
         seen_tool_names: list[str] = []
         memory_suggestions: list[dict[str, Any]] = []
+        local_final_content = ""
         perform_web_search, current_search_data = web_search_callback_for_turn(
             payload,
             search_data,
@@ -1153,12 +1243,23 @@ def stream_deepseek(
                 web_search_callback=perform_web_search if search_tool_enabled(payload) else None,
                 cancel_event=cancel_event,
             )
+            artifact = terminal_artifact_result_from_messages(body)
+            if artifact:
+                emit_checked({"type": "system_note", "text": "本地文件已生成，正在返回下载链接。\n\n"})
+                local_final_content = artifact_link_text(artifact[0], artifact[1], base_url=pptx_download_base_url(payload))
+                delta = f"\n\n{local_final_content}" if content.strip() else local_final_content
+                content += delta
+                emit_checked({"type": "content", "text": delta})
+                break
             emit_checked({"type": "system_note", "text": "本地工具调用完成，继续生成回答。\n\n"})
 
         raise_if_cancelled(cancel_event)
         search_data = current_search_data()
         search_for_response = search_for_client(search_data) if search_data else search_for_response
-        final_content, fallback_created = ensure_pptx_response(payload, content, body, strip_refusal=False)
+        if local_final_content:
+            final_content, fallback_created = content, False
+        else:
+            final_content, fallback_created = ensure_pptx_response(payload, content, body, strip_refusal=False)
         if final_content != content:
             delta = final_content[len(content) :] if final_content.startswith(content) else f"\n\n{final_content}"
             content = final_content
