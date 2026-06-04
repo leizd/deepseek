@@ -271,7 +271,8 @@ def apply_event_snapshot(run: dict[str, Any], event: dict[str, Any]) -> None:
         return
     if event_type == "error":
         run["status"] = "failed"
-        run["diagnostics"] = {**(run.get("diagnostics") if isinstance(run.get("diagnostics"), dict) else {}), "error": str(event.get("error") or "")}
+        existing_diagnostics = run.get("diagnostics")
+        run["diagnostics"] = {**(existing_diagnostics if isinstance(existing_diagnostics, dict) else {}), "error": str(event.get("error") or "")}
         return
     if event_type == "agent_reset":
         phase = str(event.get("phase") or "")
@@ -403,6 +404,16 @@ def should_confirm_plan(payload: dict[str, Any], *, confirm_plan: bool, agent_pr
     return len(query) > 1800
 
 
+def _event_emitter(run_id: str) -> Callable[[dict[str, Any]], None]:
+    """包一个返回 None 的事件回调；append_event 返回 dict，直接当 emit_event 传会与
+    Callable[..., None] 形参不符。这里只触发副作用、丢弃返回值。"""
+
+    def emit(event: dict[str, Any]) -> None:
+        append_event(run_id, event)
+
+    return emit
+
+
 def start_planned_run(run_id: str, runtime_payload: dict[str, Any], *, confirm_plan: bool, agent_preset: str) -> None:
     try:
         validate_deepseek_payload(runtime_payload)
@@ -411,7 +422,7 @@ def start_planned_run(run_id: str, runtime_payload: dict[str, Any], *, confirm_p
         user_query = latest_user_query(runtime_payload)
         leader_plan_started = time.monotonic()
         append_agent_event(run_id, phase="leader", status="running", name="Leader", text="正在拆解问题并分配 Agent...")
-        plan, label = plan_for_preset(runtime_payload, agent_preset, lambda event: append_event(run_id, event))
+        plan, label = plan_for_preset(runtime_payload, agent_preset, _event_emitter(run_id))
         append_event(run_id, {"type": "agent_plan", "plan": plan, "label": label})
         append_agent_event(
             run_id,
@@ -462,7 +473,7 @@ def execute_plan(
         selected_model=selected_model,
         user_query=user_query,
         search_budget=search_budget,
-        emit_event=lambda event: append_event(run_id, event),
+        emit_event=_event_emitter(run_id),
         token_budget=token_budget,
     )
 
@@ -497,7 +508,7 @@ def rerun_agent(run_id: str, runtime_payload: dict[str, Any], *, agent_id: str, 
                 task=task,
                 search_budget=search_budget,
                 prior_outputs=prior_outputs,
-                emit_event=lambda event: append_event(run_id, event),
+                emit_event=_event_emitter(run_id),
             )
             output["duration_ms"] = elapsed_ms(started)
             append_event(run_id, {"type": "agent_output", "phase": agent_id, "output": output})
@@ -546,12 +557,12 @@ def resynthesize_outputs(run_id: str, runtime_payload: dict[str, Any], *, select
         user_query,
         agent_outputs,
         search_budget=search_budget,
-        emit_event=lambda event: append_event(run_id, event),
+        emit_event=_event_emitter(run_id),
     )
 
 
 def append_agent_event(run_id: str, **kwargs: Any) -> None:
-    emit_agent_event(lambda event: append_event(run_id, event), **kwargs)
+    emit_agent_event(_event_emitter(run_id), **kwargs)
 
 
 def task_for_agent(plan: list[Any], agent_id: str) -> str:
@@ -562,7 +573,8 @@ def task_for_agent(plan: list[Any], agent_id: str) -> str:
 
 
 def outputs_in_plan_order(run: dict[str, Any]) -> list[dict[str, Any]]:
-    outputs = run.get("agentOutputs") if isinstance(run.get("agentOutputs"), dict) else {}
+    raw_outputs = run.get("agentOutputs")
+    outputs = raw_outputs if isinstance(raw_outputs, dict) else {}
     plan = safe_agent_plan({"agents": run.get("plan") or []})
     ordered: list[dict[str, Any]] = []
     seen: set[str] = set()

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import unittest
 from datetime import datetime, timezone
+from typing import Any
 from unittest.mock import patch
 
 import deepseek_mobile.services.deepseek_client as deepseek_client
@@ -104,7 +105,7 @@ class DeepSeekRequestTests(unittest.TestCase):
         self.assertEqual(req.body["model"], "deepseek-v4-flash")
 
     def test_stream_deepseek_error_event_includes_code(self) -> None:
-        events: list[dict[str, object]] = []
+        events: list[dict[str, Any]] = []
 
         stream_deepseek({"messages": [{"role": "user", "content": "hi"}]}, events.append)
 
@@ -316,7 +317,7 @@ class DeepSeekRequestTests(unittest.TestCase):
             "rounds": [{"round": 1, "status": "done", "query": "docs", "answer": "", "results": []}],
             "cached": False,
         }
-        progress: list[dict[str, object]] = []
+        progress: list[dict[str, Any]] = []
 
         def fake_single_round(
             query: str,
@@ -327,7 +328,7 @@ class DeepSeekRequestTests(unittest.TestCase):
             tavily_api_key: str,
             progress_callback: object,
             use_cache: bool = False,
-        ) -> dict[str, object]:
+        ) -> dict[str, Any]:
             assert callable(progress_callback)
             progress_callback({"round": round_index, "query": query, "status": "done", "results": []})
             return {"query": query, "round": round_index, "intent": intent, "citation_offset": citation_offset, "results": [], "status": "done"}
@@ -352,7 +353,7 @@ class DeepSeekRequestTests(unittest.TestCase):
         self.assertTrue(progress)
 
     def test_web_search_callback_stops_at_turn_limit(self) -> None:
-        progress: list[dict[str, object]] = []
+        progress: list[dict[str, Any]] = []
 
         def fake_single_round(
             query: str,
@@ -363,7 +364,7 @@ class DeepSeekRequestTests(unittest.TestCase):
             tavily_api_key: str,
             progress_callback: object,
             use_cache: bool = False,
-        ) -> dict[str, object]:
+        ) -> dict[str, Any]:
             assert callable(progress_callback)
             return {"query": query, "round": round_index, "intent": intent, "citation_offset": citation_offset, "results": [], "status": "done"}
 
@@ -966,7 +967,7 @@ class DeepSeekRequestTests(unittest.TestCase):
             tavily_api_key: str,
             progress_callback: object,
             use_cache: bool = False,
-        ) -> dict[str, object]:
+        ) -> dict[str, Any]:
             return {
                 "query": query,
                 "round": round_index,
@@ -1063,7 +1064,7 @@ class DeepSeekRequestTests(unittest.TestCase):
             "usage": {"prompt_cache_hit_tokens": 50, "prompt_cache_miss_tokens": 50},
             "choices": [{"delta": {"content": "answer"}}],
         }
-        events: list[dict[str, object]] = []
+        events: list[dict[str, Any]] = []
         with patch("urllib.request.urlopen", return_value=FakeStream([f"data: {json.dumps(chunk)}\n".encode("utf-8"), b"data: [DONE]\n"])):
             stream_deepseek({"apiKey": "test", "model": "expert", "messages": [{"role": "user", "content": "Question"}]}, events.append)
 
@@ -1114,7 +1115,7 @@ class DeepSeekRequestTests(unittest.TestCase):
             },
             "choices": [{"delta": {"content": "120"}}],
         }
-        events: list[dict[str, object]] = []
+        events: list[dict[str, Any]] = []
         with patch(
             "urllib.request.urlopen",
             side_effect=[
@@ -1179,7 +1180,7 @@ class DeepSeekRequestTests(unittest.TestCase):
             "slideCount": 2,
             "downloadUrl": "/api/download?id=" + "1" * 32,
         }
-        events: list[dict[str, object]] = []
+        events: list[dict[str, Any]] = []
         with (
             patch("urllib.request.urlopen", return_value=FakeStream([f"data: {json.dumps(tool_delta)}\n".encode("utf-8"), b"data: [DONE]\n"])) as mocked,
             patch("deepseek_mobile.services.tools.create_presentation", return_value=ppt_result),
@@ -1218,7 +1219,7 @@ class DeepSeekRequestTests(unittest.TestCase):
             "model": "deepseek-v4-pro",
             "choices": [{"delta": {"content": "ok"}}],
         }
-        events: list[dict[str, object]] = []
+        events: list[dict[str, Any]] = []
         with patch(
             "urllib.request.urlopen",
             side_effect=[
@@ -1256,7 +1257,7 @@ class DeepSeekRequestTests(unittest.TestCase):
             "rounds": [],
             "cached": False,
         }
-        events: list[dict[str, object]] = []
+        events: list[dict[str, Any]] = []
         with (
             patch.object(deepseek_client, "search_multiple", return_value=search_data),
             patch("urllib.request.urlopen", return_value=FakeStream([f"data: {json.dumps(chunk)}\n".encode("utf-8"), b"data: [DONE]\n"])),
@@ -1281,7 +1282,7 @@ class DeepSeekRequestTests(unittest.TestCase):
         self.assertNotIn("多轮搜索", str(done["reasoning"]))
 
     def test_stream_deepseek_converts_sse_error_event(self) -> None:
-        events: list[dict[str, object]] = []
+        events: list[dict[str, Any]] = []
 
         with patch("urllib.request.urlopen", return_value=FakeStream([b"event: error\n", b'data: {"error":{"message":"stream failed"}}\n'])):
             stream_deepseek({"apiKey": "test", "model": "expert", "messages": [{"role": "user", "content": "Question"}]}, events.append)
@@ -1291,7 +1292,7 @@ class DeepSeekRequestTests(unittest.TestCase):
         self.assertEqual(events[-1]["code"], ErrorCode.UPSTREAM_FAILURE.value)
 
     def test_force_final_answer_keeps_tools_stable_and_appends_hint(self) -> None:
-        body = {
+        body: dict[str, Any] = {
             "model": "expert",
             "tools": [{"type": "function"}],
             "tool_choice": "auto",

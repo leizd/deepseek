@@ -6,6 +6,7 @@ import sys
 import unittest
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
+from typing import Any
 from unittest.mock import patch
 
 import deepseek_mobile.services.ocr as ocr
@@ -13,7 +14,7 @@ from deepseek_mobile.core.errors import AppError, ErrorCode
 
 
 class FakeResponse:
-    def __init__(self, payload: dict[str, object]) -> None:
+    def __init__(self, payload: dict[str, Any]) -> None:
         self._data = json.dumps(payload).encode("utf-8")
 
     def __enter__(self) -> "FakeResponse":
@@ -238,7 +239,7 @@ class OcrTests(unittest.TestCase):
         self.assertEqual(ocr._clean_formula_ocr_output(r"\mathrm{Cov}(U,V)"), r"\mathrm{Cov}(U,V)")
 
     def test_formula_regions_use_tesseract_word_boxes(self) -> None:
-        data = {
+        data: dict[str, list[Any]] = {
             "text": ["设二维随机变量", "(X,Y)", "服从", "D", "上的均匀分布", "{(x力10和xz和3,0和7和3)"],
             "left": [10, 180, 240, 300, 330, 470],
             "top": [20, 20, 20, 20, 20, 20],
@@ -320,7 +321,7 @@ class OcrTests(unittest.TestCase):
                 return f" image {len(data)} "
 
         java_module = ModuleType("java")
-        java_module.jclass = lambda name: FakeBridge
+        setattr(java_module, "jclass", lambda name: FakeBridge)
 
         with patch.dict(sys.modules, {"java": java_module}):
             engine = ocr.AndroidMlKitEngine()

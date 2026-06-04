@@ -163,7 +163,7 @@ class CachedFileTests(unittest.TestCase):
         # 使用对象流/压缩 xref 的 PDF，其 `/Type /Page` 不在原始字节里，仅靠字节正则
         # 会漏数（退化成 1 页）。count_pdf_pages 必须用真实解析器拿到正确总页数。
         try:
-            import fitz  # type: ignore[import-untyped]
+            import fitz
         except ImportError:
             self.skipTest("PyMuPDF not available")
         document = fitz.open()

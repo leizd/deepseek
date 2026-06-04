@@ -387,8 +387,7 @@ def count_pdf_pages(data: bytes) -> int:
 def _pdf_page_count_via_parser(data: bytes) -> int:
     """用真实解析器返回 PDF 总页数（含无文字的扫描页）；不可用时返回 0。"""
     try:
-        import fitz  # type: ignore[import-untyped]
-
+        import fitz
         document = fitz.open(stream=data, filetype="pdf")
         try:
             return int(getattr(document, "page_count", 0) or len(document))
@@ -407,6 +406,11 @@ def _pdf_page_count_via_parser(data: bytes) -> int:
         except Exception:
             continue
     return 0
+
+
+def _cached_chunk_list(cached: dict[str, Any]) -> list[Any]:
+    raw = cached.get("chunks")
+    return raw if isinstance(raw, list) else []
 
 
 def page_texts_for_cache(kind: str, data: bytes, text: str, *, page_count: int = 0) -> list[dict[str, Any]]:
@@ -684,7 +688,7 @@ def file_page_text(
         page_text = page_text_from_cached_chunks(cached, requested_page=requested_page, page_count=page_count)
     return {
         "ok": True,
-        "file": _reader_file_payload(cached, file_id, project_id, len(cached.get("chunks") if isinstance(cached.get("chunks"), list) else [])),
+        "file": _reader_file_payload(cached, file_id, project_id, len(_cached_chunk_list(cached))),
         "page": {
             "index": requested_page,
             "pageCount": page_count,
@@ -756,7 +760,7 @@ def file_page_layout(
     page_count = max(cached_page_count, int(layout.get("pageCount") or 0), int(layout.get("index") or 0), 1)
     return {
         "ok": True,
-        "file": _reader_file_payload(cached, file_id, project_id, len(cached.get("chunks") if isinstance(cached.get("chunks"), list) else [])),
+        "file": _reader_file_payload(cached, file_id, project_id, len(_cached_chunk_list(cached))),
         "page": {
             **layout,
             "pageCount": page_count,
@@ -785,7 +789,7 @@ def file_page_search(
     if not page_texts:
         page_texts = fallback_page_texts_from_text(page_text_from_cached_chunks(cached, requested_page=1, page_count=1), page_count=page_count)
 
-    matches = []
+    matches: list[dict[str, Any]] = []
     needle = search_query.casefold()
     for page_item in page_texts:
         page_number = int(page_item.get("page") or 0)
@@ -816,7 +820,7 @@ def file_page_search(
 
     return {
         "ok": True,
-        "file": _reader_file_payload(cached, file_id, project_id, len(cached.get("chunks") if isinstance(cached.get("chunks"), list) else [])),
+        "file": _reader_file_payload(cached, file_id, project_id, len(_cached_chunk_list(cached))),
         "query": search_query,
         "pageCount": page_count,
         "matches": matches,
@@ -838,8 +842,7 @@ def render_pdf_page_layout(data: bytes, page: int) -> dict[str, Any]:
 
 
 def _render_pdf_page_layout_pymupdf(data: bytes, page: int) -> dict[str, Any]:
-    import fitz  # type: ignore[import-untyped]
-
+    import fitz
     document = fitz.open(stream=data, filetype="pdf")
     try:
         page_count = int(getattr(document, "page_count", 0) or len(document))
@@ -917,8 +920,7 @@ def render_pdf_page_png(data: bytes, page: int, scale: float) -> tuple[bytes, in
 
 
 def _render_pdf_page_png_pymupdf(data: bytes, page: int, scale: float) -> tuple[bytes, int, int]:
-    import fitz  # type: ignore[import-untyped]
-
+    import fitz
     document = fitz.open(stream=data, filetype="pdf")
     try:
         page_count = int(getattr(document, "page_count", 0) or len(document))
@@ -936,8 +938,7 @@ def _render_pdf_page_png_pymupdf(data: bytes, page: int, scale: float) -> tuple[
 
 
 def _render_pdf_page_png_pdf2image(data: bytes, page: int, scale: float) -> tuple[bytes, int, int]:
-    import pdf2image  # type: ignore[import-untyped]
-
+    import pdf2image
     rendered_page = max(1, int(page))
     dpi = max(72, min(288, int(round(96 * float(scale)))))
     images = pdf2image.convert_from_bytes(data, dpi=dpi, fmt="png", first_page=rendered_page, last_page=rendered_page)
@@ -1028,7 +1029,7 @@ def _reader_file_payload(cached: dict[str, Any], file_id: str, project_id: str |
 def _reader_chunk_payload(chunk: dict[str, Any], *, fallback_index: int) -> dict[str, Any]:
     raw_index = chunk.get("index")
     try:
-        display_index = int(raw_index) + 1
+        display_index = int(raw_index) + 1 if raw_index is not None else fallback_index + 1
     except (TypeError, ValueError):
         display_index = fallback_index + 1
     return {

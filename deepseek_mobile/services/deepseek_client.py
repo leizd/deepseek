@@ -741,8 +741,11 @@ def usage_int(usage: dict[str, Any], *names: str) -> int:
     for name in names:
         if name not in usage or usage.get(name) in (None, ""):
             continue
+        raw_usage = usage.get(name)
+        if raw_usage is None:
+            continue
         try:
-            return max(0, int(usage.get(name)))
+            return max(0, int(raw_usage))
         except (TypeError, ValueError):
             continue
     return 0
@@ -944,7 +947,7 @@ def append_tool_exchange(
 ) -> dict[str, Any]:
     raise_if_cancelled(cancel_event)
     messages = list(body.get("messages") or [])
-    assistant_payload = {
+    assistant_payload: dict[str, Any] = {
         "role": "assistant",
         "tool_calls": tool_calls,
     }

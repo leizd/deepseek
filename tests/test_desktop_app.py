@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 from types import ModuleType, SimpleNamespace
+from typing import Any
 from unittest.mock import patch
 
 import deepseek_mobile.desktop_app as desktop_app
@@ -39,7 +40,7 @@ def test_desktop_app_shuts_down_after_window_error() -> None:
 
 def test_open_app_window_uses_pywebview() -> None:
     fake_webview = ModuleType("webview")
-    calls: list[tuple[str, object]] = []
+    calls: list[tuple[Any, ...]] = []
 
     def create_window(*args: object, **kwargs: object) -> None:
         calls.append(("create_window", args, kwargs))

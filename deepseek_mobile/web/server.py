@@ -540,7 +540,8 @@ class DeepSeekMobileHandler(SimpleHTTPRequestHandler):
         run_id, action = parse_agent_run_action(path)
         body = self.read_json_body()
         stored = load_agent_run(run_id)
-        runtime_payload = merge_runtime_payload(stored.get("requestPayload") if isinstance(stored.get("requestPayload"), dict) else {}, body.get("payload"))
+        stored_payload = stored.get("requestPayload")
+        runtime_payload = merge_runtime_payload(stored_payload if isinstance(stored_payload, dict) else {}, body.get("payload"))
         runtime_payload["agentMode"] = True
         preflight_deepseek_payload(runtime_payload)
         if action == "plan":

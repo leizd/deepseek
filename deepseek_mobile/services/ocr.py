@@ -15,7 +15,7 @@ import tempfile
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 from deepseek_mobile.core.config import DEEPSEEK_TIMEOUT_SECONDS, DEEPSEEK_URL, settings
 from deepseek_mobile.core.errors import AppError, ErrorCode
@@ -318,11 +318,11 @@ def _limit_pil_image_pixels(image: object) -> object:
 
     scale = math.sqrt(max_pixels / float(pixels))
     target = (max(1, int(width * scale)), max(1, int(height * scale)))
-    resampling = getattr(getattr(Image, "Resampling", Image), "LANCZOS", Image.BICUBIC)
+    resampling = getattr(getattr(Image, "Resampling", Image), "LANCZOS", getattr(Image, "BICUBIC", 3))
     return image.resize(target, resampling)
 
 
-def _upscale_gray_for_ocr(gray: object, cv2: object) -> object:
+def _upscale_gray_for_ocr(gray: Any, cv2: Any) -> Any:
     height, width = gray.shape
     short_side = min(height, width)
     if 0 < short_side < OCR_UPSCALE_TARGET:
@@ -331,19 +331,19 @@ def _upscale_gray_for_ocr(gray: object, cv2: object) -> object:
     return gray
 
 
-def _white_background(binary: object, cv2: object, np: object) -> object:
+def _white_background(binary: Any, cv2: Any, np: Any) -> Any:
     # Tesseract 期望黑字白底；若白像素不足一半（深色背景白字截图），整体反相。
     return cv2.bitwise_not(binary) if float(np.mean(binary)) < 127.0 else binary
 
 
-def _adaptive_block_size(gray: object) -> int:
+def _adaptive_block_size(gray: Any) -> int:
     height, width = gray.shape
     block = max(15, min(height, width) // 18)
     block = min(75, block)
     return block + 1 if block % 2 == 0 else block
 
 
-def _deskew_gray(gray: object, cv2: object, np: object) -> object | None:
+def _deskew_gray(gray: Any, cv2: Any, np: Any) -> Any | None:
     try:
         coords = np.column_stack(np.where(gray < 245))
         if len(coords) < 24:
@@ -363,8 +363,8 @@ def _deskew_gray(gray: object, cv2: object, np: object) -> object | None:
         return None
 
 
-def _arrays_to_unique_images(arrays: list[object], Image: object) -> list[object]:
-    images: list[object] = []
+def _arrays_to_unique_images(arrays: list[Any], Image: Any) -> list[Any]:
+    images: list[Any] = []
     seen: set[bytes] = set()
     for array in arrays:
         try:
@@ -471,26 +471,23 @@ def normalize_ocr_text(value: str) -> str:
 def _normalize_formula_symbols(line: str) -> str:
     if not any(char in line for char in "＝＋－＊／（）［］｛｝｜，．"):
         return line
-    return line.translate(
-        str.maketrans(
-            {
-                "＝": "=",
-                "＋": "+",
-                "－": "-",
-                "＊": "*",
-                "／": "/",
-                "（": "(",
-                "）": ")",
-                "［": "[",
-                "］": "]",
-                "｛": "{",
-                "｝": "}",
-                "｜": "|",
-                "，": ",",
-                "．": ".",
-            }
-        )
-    )
+    translations: dict[str, str | int | None] = {
+        "＝": "=",
+        "＋": "+",
+        "－": "-",
+        "＊": "*",
+        "／": "/",
+        "（": "(",
+        "）": ")",
+        "［": "[",
+        "］": "]",
+        "｛": "{",
+        "｝": "}",
+        "｜": "|",
+        "，": ",",
+        "．": ".",
+    }
+    return line.translate(str.maketrans(translations))
 
 
 def _math_symbol_count(line: str) -> int:
@@ -948,7 +945,7 @@ def _region_from_formula_words(
     return (max(0, left - pad_x), max(0, top - pad_y), min(width, right + pad_x), min(height, bottom + pad_y))
 
 
-def _extract_formula_snippets_from_image(image: object, tesseract: object, lang: str) -> list[str]:
+def _extract_formula_snippets_from_image(image: object, tesseract: Any, lang: str) -> list[str]:
     command = _ocr_formula_command()
     if not command or _ocr_mode() == "fast":
         return []
@@ -1257,7 +1254,7 @@ class TesseractEngine:
         except Exception:
             available = set()
 
-        self._pdf2image = pdf2image
+        self._pdf2image: Any = pdf2image
         self._tesseract = pytesseract
         self._lang = _select_lang(available)
 
@@ -1475,9 +1472,9 @@ def _with_error_details(message: str, details: list[str]) -> str:
 
 def _pdf_page_images(pdf_bytes: bytes, engines: list[OCREngine]) -> list[object]:
     for engine in engines:
-        pdf2image = getattr(engine, "_pdf2image", None)
-        if pdf2image is not None:
-            return list(pdf2image.convert_from_bytes(pdf_bytes, dpi=_ocr_pdf_dpi(), fmt="png"))
+        engine_pdf2image = getattr(engine, "_pdf2image", None)
+        if engine_pdf2image is not None:
+            return list(engine_pdf2image.convert_from_bytes(pdf_bytes, dpi=_ocr_pdf_dpi(), fmt="png"))
     try:
         import pdf2image
     except ModuleNotFoundError as exc:

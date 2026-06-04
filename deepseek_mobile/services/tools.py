@@ -878,7 +878,7 @@ def _compact_mindmap_outline(nodes: list[Any], *, depth: int = 0) -> list[dict[s
     for item in nodes[:30]:
         if not isinstance(item, dict):
             continue
-        entry = {"label": str(item.get("label") or "")[:80]}
+        entry: dict[str, Any] = {"label": str(item.get("label") or "")[:80]}
         children = item.get("children")
         if isinstance(children, list) and children:
             entry["children"] = _compact_mindmap_outline(children, depth=depth + 1)
@@ -1040,7 +1040,8 @@ def project_document_for_tool(document: dict[str, Any]) -> dict[str, Any]:
 
 def read_file_chunk_tool(file_id: str, *, chunk_index: int, project_id: str = "") -> dict[str, Any]:
     cached = load_cached_file(str(file_id or ""), project_id=str(project_id or "").strip() or None)
-    chunks = cached.get("chunks") if isinstance(cached.get("chunks"), list) else []
+    raw_chunks = cached.get("chunks")
+    chunks = raw_chunks if isinstance(raw_chunks, list) else []
     index = max(1, int(chunk_index or 1)) - 1
     if index >= len(chunks):
         raise AppError("Chunk not found", code=ErrorCode.NOT_FOUND, status=404)
@@ -1184,8 +1185,11 @@ def generate_chart(chart_type: str, title: str, data: Any) -> dict[str, Any]:
         if not isinstance(item, dict):
             continue
         label = str(item.get("label") or "").strip()[:80]
+        raw_value = item.get("value")
+        if raw_value is None:
+            continue
         try:
-            value = float(item.get("value"))
+            value = float(raw_value)
         except (TypeError, ValueError):
             continue
         if label:
@@ -1431,9 +1435,12 @@ class LockedHTTPConnection(http.client.HTTPConnection):
         self.resolved_address = target.address
 
     def connect(self) -> None:
-        self.sock = socket.create_connection((self.resolved_address, self.port), self.timeout, self.source_address)
-        if self._tunnel_host:
-            self._tunnel()
+        # `source_address` / `_tunnel_host` / `_tunnel` 是 CPython HTTPConnection 的内部成员，
+        # typeshed 未对外暴露；用 Any 别名访问以保留原始连接逻辑（含代理隧道兜底）。
+        internals: Any = self
+        self.sock = socket.create_connection((self.resolved_address, self.port), self.timeout, internals.source_address)
+        if internals._tunnel_host:
+            internals._tunnel()
 
 
 class LockedHTTPSConnection(http.client.HTTPSConnection):
@@ -1442,10 +1449,11 @@ class LockedHTTPSConnection(http.client.HTTPSConnection):
         self.resolved_address = target.address
 
     def connect(self) -> None:
-        self.sock = socket.create_connection((self.resolved_address, self.port), self.timeout, self.source_address)
-        if self._tunnel_host:
-            self._tunnel()
-        self.sock = self._context.wrap_socket(self.sock, server_hostname=self.host)
+        internals: Any = self
+        self.sock = socket.create_connection((self.resolved_address, self.port), self.timeout, internals.source_address)
+        if internals._tunnel_host:
+            internals._tunnel()
+        self.sock = internals._context.wrap_socket(self.sock, server_hostname=self.host)
 
 
 def public_http_connection(target: PublicUrlTarget, timeout: float) -> http.client.HTTPConnection:

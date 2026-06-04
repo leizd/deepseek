@@ -217,6 +217,8 @@ const state = {
   projectUploading: false,
   historySearch: "",
   activeActivityMessageId: "",
+  activeSearchMessageId: "",
+  activeDiagnosticsMessageId: "",
   fileReader: null,
   quoteDraft: null,
   selectionQuoteCandidate: null,
@@ -263,6 +265,8 @@ let historyMenuRoot = null;
 const appShell = document.querySelector(".app-shell");
 const chatLog = document.querySelector("#chatLog");
 const chatForm = document.querySelector("#chatForm");
+const composerFooter = document.querySelector(".composer-footer");
+const composerTools = document.querySelector(".composer-tools");
 const promptInput = document.querySelector("#promptInput");
 const fileInput = document.querySelector("#fileInput");
 const attachmentList = document.querySelector("#attachmentList");
@@ -469,6 +473,7 @@ function setupEvents() {
   window.addEventListener("beforeunload", stopSpeechPlayback);
   document.addEventListener("selectionchange", onSelectionChange);
   document.addEventListener("click", onGeneratedDownloadDocumentClick, true);
+  document.addEventListener("click", onDocumentClickCloseReaderMenus);
   document.addEventListener("pointerup", scheduleSelectionRefresh, { passive: true });
   document.addEventListener("mouseup", scheduleSelectionRefresh, { passive: true });
   document.addEventListener("keyup", scheduleSelectionRefresh, { passive: true });
@@ -683,7 +688,9 @@ function setupEvents() {
     closeHistoryMenu();
   });
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") closeHistoryMenu();
+    if (event.key !== "Escape" || !activeHistoryMenu) return;
+    closeHistoryMenu({ restoreFocus: true });
+    event.preventDefault();
   });
   if (historySearchInput) {
     historySearchInput.addEventListener("input", () => {
@@ -780,6 +787,7 @@ function setupEvents() {
   }
   if (commandPaletteList) {
     commandPaletteList.addEventListener("click", onCommandPaletteClick);
+    commandPaletteList.addEventListener("keydown", onCommandPaletteListKeydown);
   }
   if (closeFilePreviewButton) {
     closeFilePreviewButton.addEventListener("click", closeFilePreview);
@@ -1016,6 +1024,7 @@ function setupSettings() {
 }
 
 function onGlobalKeydown(event) {
+  if (event.defaultPrevented) return;
   const key = event.key;
   const modifier = event.ctrlKey || event.metaKey;
 
@@ -1032,11 +1041,6 @@ function onGlobalKeydown(event) {
   }
 
   if (key === "Escape") {
-    if (isSelectionPopoverOpen()) {
-      event.preventDefault();
-      hideSelectionPopover();
-      return;
-    }
     if (isConfirmDialogOpen()) {
       event.preventDefault();
       resolveConfirmDialog(false);
@@ -1055,6 +1059,15 @@ function onGlobalKeydown(event) {
     if (isCommandPaletteOpen()) {
       event.preventDefault();
       closeCommandPalette();
+      return;
+    }
+    if (closeOpenReaderMenus()) {
+      event.preventDefault();
+      return;
+    }
+    if (isSelectionPopoverOpen()) {
+      event.preventDefault();
+      hideSelectionPopover();
       return;
     }
     if (state.busy) {
@@ -1226,8 +1239,18 @@ function onCommandPaletteKeydown(event) {
     closeCommandPalette();
     return;
   }
+  if (event.key === "ArrowDown") {
+    event.preventDefault();
+    focusCommandPaletteItem(0);
+    return;
+  }
+  if (event.key === "ArrowUp") {
+    event.preventDefault();
+    focusCommandPaletteItem(-1);
+    return;
+  }
   if (event.key !== "Enter") return;
-  const first = commandPaletteList?.querySelector("button[data-command-id]");
+  const first = commandPaletteButtons()[0];
   if (!first) return;
   event.preventDefault();
   runCommandPaletteItem(first.dataset.commandId || "");
@@ -1238,6 +1261,39 @@ function onCommandPaletteClick(event) {
   const button = target?.closest("button[data-command-id]");
   if (!button) return;
   runCommandPaletteItem(button.dataset.commandId || "");
+}
+
+function commandPaletteButtons() {
+  return Array.from(commandPaletteList?.querySelectorAll?.("button[data-command-id]") || []);
+}
+
+function focusCommandPaletteItem(index) {
+  const items = commandPaletteButtons();
+  if (!items.length) return;
+  const normalized = index < 0 ? items.length - 1 : Math.min(index, items.length - 1);
+  items[normalized].focus({ preventScroll: true });
+}
+
+function onCommandPaletteListKeydown(event) {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    closeCommandPalette();
+    return;
+  }
+  if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+  const items = commandPaletteButtons();
+  if (!items.length) return;
+  const currentIndex = Math.max(0, items.indexOf(document.activeElement));
+  const nextIndex =
+    event.key === "Home"
+      ? 0
+      : event.key === "End"
+        ? items.length - 1
+        : event.key === "ArrowDown"
+          ? (currentIndex + 1) % items.length
+          : (currentIndex - 1 + items.length) % items.length;
+  items[nextIndex].focus({ preventScroll: true });
+  event.preventDefault();
 }
 
 function runCommandPaletteItem(id) {
@@ -2106,6 +2162,7 @@ function renderActiveSeekChip() {
   if (activeSeekChip) activeSeekChip.hidden = !seek;
   if (!seek) {
     syncPromptPlaceholder();
+    syncPanelTriggerStates();
     return;
   }
   if (!activeSeekChip) return;
@@ -2113,6 +2170,7 @@ function renderActiveSeekChip() {
   activeSeekChip.title = seek.description || seek.instructions;
   activeSeekChip.dataset.accent = seek.accent || "blue";
   syncPromptPlaceholder();
+  syncPanelTriggerStates();
 }
 
 function syncPromptPlaceholder() {
@@ -2140,10 +2198,14 @@ function renderActiveProjectChip() {
   const project = activeProject();
   if (activeProjectRow) activeProjectRow.hidden = !project;
   if (activeProjectChip) activeProjectChip.hidden = !project;
-  if (!project || !activeProjectChip) return;
+  if (!project || !activeProjectChip) {
+    syncPanelTriggerStates();
+    return;
+  }
   const count = Array.isArray(project.documents) ? project.documents.length : 0;
   activeProjectChip.textContent = `项目 · ${project.name} · ${count} 份文档`;
   activeProjectChip.title = "当前对话会自动检索这个项目的文档库";
+  syncPanelTriggerStates();
 }
 
 function renderSeekPanel() {
@@ -3214,8 +3276,8 @@ function openMemoryPanel(memories) {
   renderMemoryPanel(memories);
   memoryPanel.classList.add("open");
   memoryPanel.setAttribute("aria-hidden", "false");
-  setBackdropVisible(true);
   activateFocusTrap(memoryPanel);
+  syncBackdrop();
 }
 
 function closeMemoryPanel() {
@@ -3395,11 +3457,13 @@ async function saveMemorySuggestion(suggestion, replaceIds = []) {
 function openDiagnosticsPanelForMessage(messageId) {
   const message = state.messages.find((item) => item.id === messageId);
   if (!message) return;
+  state.activeDiagnosticsMessageId = message.id;
   openDiagnosticsPanel(message);
 }
 
 function openDiagnosticsPanel(message) {
   if (!diagnosticsPanel || !diagnosticsPanelList) return;
+  state.activeDiagnosticsMessageId = message?.id || state.activeDiagnosticsMessageId || "";
   closeHistory();
   closeSettings();
   closeSeekPanel();
@@ -3410,12 +3474,13 @@ function openDiagnosticsPanel(message) {
   renderDiagnosticsPanel(message);
   diagnosticsPanel.classList.add("open");
   diagnosticsPanel.setAttribute("aria-hidden", "false");
-  setBackdropVisible(true);
   activateFocusTrap(diagnosticsPanel);
+  syncBackdrop();
 }
 
 function closeDiagnosticsPanel() {
   if (!diagnosticsPanel) return;
+  state.activeDiagnosticsMessageId = "";
   diagnosticsPanel.classList.remove("open");
   diagnosticsPanel.setAttribute("aria-hidden", "true");
   deactivateFocusTrap(diagnosticsPanel);
@@ -4816,6 +4881,8 @@ function renderAssistantActions(message) {
     diagnosticsButton.type = "button";
     diagnosticsButton.className = "assistant-menu-action";
     diagnosticsButton.dataset.diagnosticsMessage = message.id;
+    diagnosticsButton.setAttribute("aria-controls", diagnosticsPanel?.id || "");
+    diagnosticsButton.setAttribute("aria-expanded", "false");
     diagnosticsButton.textContent = "诊断";
     menu.append(diagnosticsButton);
   }
@@ -5004,6 +5071,7 @@ function renderModelTabs() {
       title.textContent = state.thinkingEnabled ? "使用快速思考模式开始对话" : "使用快速模式开始对话";
     }
   }
+  syncFileReaderComposerToolStates();
 }
 
 function setModel(model) {
@@ -5036,7 +5104,9 @@ function renderSearchToggle() {
   const active = state.searchMode !== "off" && state.hasSearch;
   searchToggleButton.classList.toggle("active", active);
   searchToggleButton.classList.toggle("force", state.searchMode === "on" && state.hasSearch);
-  searchToggleButton.disabled = !state.hasSearch;
+  searchToggleButton.disabled = state.offlineMode;
+  searchToggleButton.classList.toggle("unavailable", !state.hasSearch);
+  searchToggleButton.setAttribute("aria-disabled", String(!state.hasSearch));
   searchToggleButton.setAttribute("aria-pressed", String(active));
   const label = searchToggleButton.querySelector("span");
   if (label) {
@@ -5045,7 +5115,13 @@ function renderSearchToggle() {
     else if (state.searchMode === "on") label.textContent = "强制搜索";
     else label.textContent = "自动搜索";
   }
-  searchToggleButton.title = state.searchMode === "on" ? "本轮总是联网搜索" : state.searchMode === "auto" ? "由模型决定本轮是否联网" : "关闭联网搜索";
+  searchToggleButton.title = !state.hasSearch
+    ? "配置 Tavily API Key 后可启用联网搜索"
+    : state.searchMode === "on"
+      ? "本轮总是联网搜索"
+      : state.searchMode === "auto"
+        ? "由模型决定本轮是否联网"
+        : "关闭联网搜索";
 }
 
 function renderAgentModeButton() {
@@ -6880,6 +6956,8 @@ function renderSourceChips(results, messageId) {
     more.type = "button";
     more.className = "reasoning-source-chip reasoning-source-more";
     more.dataset.searchResults = messageId;
+    more.setAttribute("aria-controls", "searchPanel");
+    more.setAttribute("aria-expanded", "false");
     more.textContent = `+${results.length - visible.length}`;
     chips.append(more);
   }
@@ -7153,11 +7231,13 @@ function renderSearchInlineResults(search, messageId) {
     viewAll.type = "button";
     viewAll.className = "search-view-all";
     viewAll.dataset.searchResults = messageId;
+    viewAll.setAttribute("aria-controls", "searchPanel");
+    viewAll.setAttribute("aria-expanded", "false");
     viewAll.textContent = "查看全部";
     viewAll.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      openSearchPanel(search);
+      openSearchPanel(search, { messageId });
     });
     row.append(viewAll);
   }
@@ -7530,6 +7610,7 @@ function onHistoryTitleKeydown(event) {
   if (event.key !== "Escape") return;
   const input = event.target.closest("input[data-title-input]");
   if (!input) return;
+  event.preventDefault();
   state.editingConversationId = null;
   renderHistoryList();
 }
@@ -7640,14 +7721,15 @@ function getHistoryMenuRoot() {
     </button>
   `;
   document.body.append(root);
-  root.addEventListener("click", (event) => {
+  root.addEventListener("click", async (event) => {
     const target = event.target instanceof Element ? event.target : event.target?.parentElement;
     const item = target?.closest(".history-menu-item");
     if (!item || !activeHistoryMenu) return;
     const conversationId = activeHistoryMenu.conversationId;
     closeHistoryMenu();
-    handleHistoryMenuAction(conversationId, item.dataset.action);
+    await handleHistoryMenuAction(conversationId, item.dataset.action);
   });
+  root.addEventListener("keydown", onHistoryMenuKeydown);
   historyMenuRoot = root;
   return root;
 }
@@ -7683,17 +7765,101 @@ function openHistoryMenu(anchorButton, positionAnchor = anchorButton) {
   anchorButton.setAttribute("aria-expanded", "true");
   anchorButton.classList.add("is-open");
   activeHistoryMenu = { conversationId, anchor: anchorButton, root };
+  window.setTimeout(() => {
+    if (activeHistoryMenu?.root !== root) return;
+    focusWithoutScroll(firstVisibleHistoryMenuItem(root));
+  }, 0);
 }
 
-function closeHistoryMenu() {
+function closeHistoryMenu({ restoreFocus = false } = {}) {
   if (!activeHistoryMenu) return;
+  const anchor = activeHistoryMenu.anchor;
   activeHistoryMenu.root.hidden = true;
-  activeHistoryMenu.anchor.setAttribute("aria-expanded", "false");
-  activeHistoryMenu.anchor.classList.remove("is-open");
+  anchor.setAttribute("aria-expanded", "false");
+  anchor.classList.remove("is-open");
   activeHistoryMenu = null;
+  if (restoreFocus) focusWithoutScroll(anchor);
 }
 
-function handleHistoryMenuAction(conversationId, action) {
+function focusWithoutScroll(element) {
+  if (!element?.focus) return;
+  try {
+    element.focus({ preventScroll: true });
+  } catch {
+    element.focus();
+  }
+}
+
+function menuKeyboardItems(menu) {
+  return Array.from(menu?.querySelectorAll?.('[role="menuitem"]') || []).filter((item) => {
+    if (item.hidden || item.disabled) return false;
+    return item.getClientRects?.().length > 0;
+  });
+}
+
+function focusFirstMenuItem(menu) {
+  window.setTimeout(() => focusWithoutScroll(menuKeyboardItems(menu)[0]), 0);
+}
+
+function handleMenuKeyboard(event, menu, { onEscape = null } = {}) {
+  if (event.key === "Escape") {
+    onEscape?.();
+    event.preventDefault();
+    return true;
+  }
+  if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return false;
+  const items = menuKeyboardItems(menu);
+  if (!items.length) return false;
+  const current = items.indexOf(document.activeElement);
+  const nextIndex =
+    event.key === "Home"
+      ? 0
+      : event.key === "End"
+        ? items.length - 1
+        : event.key === "ArrowDown"
+          ? current >= 0
+            ? (current + 1) % items.length
+            : 0
+          : current >= 0
+            ? (current - 1 + items.length) % items.length
+            : items.length - 1;
+  focusWithoutScroll(items[nextIndex]);
+  event.preventDefault();
+  return true;
+}
+
+function visibleHistoryMenuItems(root = historyMenuRoot) {
+  return Array.from(root?.querySelectorAll?.(".history-menu-item") || []).filter((item) => !item.hidden);
+}
+
+function firstVisibleHistoryMenuItem(root = historyMenuRoot) {
+  return visibleHistoryMenuItems(root)[0] || null;
+}
+
+function onHistoryMenuKeydown(event) {
+  if (!activeHistoryMenu) return;
+  if (event.key === "Escape") {
+    closeHistoryMenu({ restoreFocus: true });
+    event.preventDefault();
+    return;
+  }
+  if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+  const items = visibleHistoryMenuItems(activeHistoryMenu.root);
+  if (!items.length) return;
+  const currentIndex = Math.max(0, items.indexOf(document.activeElement));
+  const nextIndex =
+    event.key === "Home"
+      ? 0
+      : event.key === "End"
+        ? items.length - 1
+        : event.key === "ArrowDown"
+          ? (currentIndex + 1) % items.length
+          : (currentIndex - 1 + items.length) % items.length;
+  focusWithoutScroll(items[nextIndex]);
+  event.preventDefault();
+}
+
+async function handleHistoryMenuAction(conversationId, action) {
   switch (action) {
     case "favorite":
       toggleConversationFavorite(conversationId);
@@ -7708,9 +7874,26 @@ function handleHistoryMenuAction(conversationId, action) {
       regenerateTitle(conversationId);
       break;
     case "delete":
-      deleteConversation(conversationId);
+      await confirmAndDeleteConversation(conversationId);
       break;
   }
+}
+
+async function confirmAndDeleteConversation(id) {
+  const conversation = state.conversations.find((item) => item.id === id);
+  if (!conversation) return;
+  const title = conversation.title || "新对话";
+  if (
+    !(await confirmAction({
+      title: "删除对话？",
+      message: `删除「${title}」？这不会删除项目文档库。`,
+      okText: "删除",
+      danger: true,
+    }))
+  ) {
+    return;
+  }
+  deleteConversation(id);
 }
 
 function conversationsForHistory() {
@@ -7909,8 +8092,8 @@ function openHistory() {
   renderHistoryList();
   historyPanel.classList.add("open");
   historyPanel.setAttribute("aria-hidden", "false");
-  setBackdropVisible(true);
   activateFocusTrap(historyPanel);
+  syncBackdrop();
 }
 
 function closeHistory() {
@@ -7937,8 +8120,8 @@ function openSettings() {
   closeActivityPanel();
   settingsPanel.classList.add("open");
   settingsPanel.setAttribute("aria-hidden", "false");
-  setBackdropVisible(true);
   activateFocusTrap(settingsPanel);
+  syncBackdrop();
 }
 
 function closeSettings() {
@@ -7961,8 +8144,8 @@ function openSeekPanel() {
   renderSeekPanel();
   seekPanel.classList.add("open");
   seekPanel.setAttribute("aria-hidden", "false");
-  setBackdropVisible(true);
   activateFocusTrap(seekPanel);
+  syncBackdrop();
 }
 
 function closeSeekPanel() {
@@ -7986,8 +8169,8 @@ function openProjectPanel() {
   renderProjectPanel();
   projectPanel.classList.add("open");
   projectPanel.setAttribute("aria-hidden", "false");
-  setBackdropVisible(true);
   activateFocusTrap(projectPanel);
+  syncBackdrop();
 }
 
 function closeProjectPanel() {
@@ -8019,13 +8202,16 @@ function shouldShowFileReaderWorkspace() {
 }
 
 function syncFileReaderWorkspaceState({ renderWorkspace = true } = {}) {
-  const active = shouldShowFileReaderWorkspace();
-  document.body.classList.toggle("file-reader-workspace-open", active);
-  appShell?.classList.toggle("is-empty", state.messages.length === 0 && !active);
+  const readerActive = isFileReaderPromptContext();
+  const renderPlaceholder = shouldShowFileReaderWorkspace();
+  document.body.classList.toggle("file-reader-workspace-open", readerActive);
+  appShell?.classList.toggle("is-empty", state.messages.length === 0 && !renderPlaceholder);
   syncPromptPlaceholder();
-  if (active && renderWorkspace) {
+  syncFileReaderComposerTools(readerActive);
+  syncFileReaderComposerInputState(readerActive);
+  if (renderPlaceholder && renderWorkspace) {
     renderFileReaderWorkspace();
-  } else if (!active) {
+  } else if (!renderPlaceholder) {
     removeFileReaderWorkspace();
   }
 }
@@ -8038,6 +8224,119 @@ function removeFileReaderWorkspace() {
   } else {
     workspace.remove();
   }
+}
+
+function syncFileReaderComposerTools(active = shouldShowFileReaderWorkspace()) {
+  if (!composerFooter) return;
+  let tools = composerFooter.querySelector("[data-file-reader-composer-tools]");
+  if (!active) {
+    tools?.remove();
+    return;
+  }
+  if (!tools) {
+    tools = renderFileReaderComposerTools();
+    composerFooter.insertBefore(tools, composerTools || composerFooter.firstChild);
+  }
+  syncFileReaderComposerToolStates(tools);
+}
+
+function renderFileReaderComposerTools() {
+  const tools = document.createElement("div");
+  tools.className = "file-reader-composer-tools";
+  tools.dataset.fileReaderComposerTools = "true";
+  tools.setAttribute("aria-label", "文档阅读快捷工具");
+  const divider = () => {
+    const line = document.createElement("span");
+    line.className = "file-reader-composer-divider";
+    line.setAttribute("aria-hidden", "true");
+    return line;
+  };
+  tools.append(
+    createFileReaderComposerTool("attach", "添加附件", "plus", "添加附件", () => openFilePicker(), { iconOnly: true }),
+    divider(),
+    createFileReaderComposerTool("quick", "快速", "bolt", "切换为快速模式", () => {
+      setModel(modelRoutes.fast);
+      showToast("已切换为快速模式");
+    }),
+    divider(),
+    createFileReaderComposerTool("coding", "编程", "code", "使用编程助手", () => {
+      const nextId = state.activeSeekId === "preset-coding" ? "" : "preset-coding";
+      setActiveSeek(nextId);
+      showToast(nextId ? "已切换为编程助手" : "已退出编程助手");
+    }),
+    createFileReaderComposerTool("research", "深入研究", "research", "使用研究分析助手", () => {
+      const nextId = state.activeSeekId === "preset-research" ? "" : "preset-research";
+      setActiveSeek(nextId);
+      showToast(nextId ? "已切换为研究分析" : "已退出研究分析");
+    }),
+    renderFileReaderComposerMoreMenu()
+  );
+  return tools;
+}
+
+function createFileReaderComposerTool(id, label, icon, title, onClick, { iconOnly = false } = {}) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "file-reader-composer-tool";
+  button.dataset.fileReaderComposerTool = id;
+  button.title = title || label;
+  button.setAttribute("aria-label", label);
+  button.innerHTML = `${originalToolbarIcon(icon)}${iconOnly ? "" : `<span>${label}</span>`}`;
+  button.addEventListener("click", onClick);
+  return button;
+}
+
+function syncFileReaderComposerToolStates(tools = composerFooter?.querySelector?.("[data-file-reader-composer-tools]")) {
+  if (!tools) return;
+  const quick = tools.querySelector('[data-file-reader-composer-tool="quick"]');
+  const coding = tools.querySelector('[data-file-reader-composer-tool="coding"]');
+  const research = tools.querySelector('[data-file-reader-composer-tool="research"]');
+  quick?.classList.toggle("active", state.model === modelRoutes.fast && !state.thinkingEnabled);
+  coding?.classList.toggle("active", state.activeSeekId === "preset-coding");
+  research?.classList.toggle("active", state.activeSeekId === "preset-research");
+}
+
+function renderFileReaderComposerMoreMenu() {
+  const wrap = document.createElement("div");
+  wrap.className = "file-reader-composer-more";
+  const button = createFileReaderComposerTool("more", "更多", "more", "更多文档阅读工具", () => {
+    toggleFileReaderFloatingMenu(wrap, button, menu);
+  });
+  button.setAttribute("aria-haspopup", "menu");
+  button.setAttribute("aria-expanded", "false");
+
+  const menu = document.createElement("div");
+  menu.className = "file-reader-composer-more-menu";
+  menu.dataset.readerRole = "composerMoreMenu";
+  menu.setAttribute("role", "menu");
+  menu.hidden = true;
+  for (const action of fileReaderQuickActions()) {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.setAttribute("role", "menuitem");
+    item.dataset.fileReaderAction = action.id;
+    item.innerHTML = `${originalToolbarIcon(action.icon)}<span>${action.label}</span>`;
+    item.addEventListener("click", () => {
+      closeFileReaderFloatingMenu(wrap);
+      runFileReaderQuickAction(action.id);
+    });
+    menu.append(item);
+  }
+  wrap.addEventListener("keydown", (event) => {
+    handleMenuKeyboard(event, menu, {
+      onEscape: () => {
+        closeFileReaderFloatingMenu(wrap);
+        focusWithoutScroll(button);
+      },
+    });
+  });
+  wrap.append(button, menu);
+  return wrap;
+}
+
+function syncFileReaderComposerInputState(active = isFileReaderPromptContext()) {
+  const hasInput = Boolean(active && promptInput?.value?.trim());
+  document.body.classList.toggle("file-reader-composer-has-input", hasInput);
 }
 
 function renderFileReaderWorkspace() {
@@ -8083,10 +8382,73 @@ function renderFileReaderWorkspaceTopbar() {
     button?.setAttribute?.("aria-pressed", String(!pressed));
     showToast(pressed ? "已开启阅读提示音" : "已静音阅读提示音");
   });
-  const more = createFileReaderWorkspaceIconButton("更多", "more", () => showToast("更多文档操作已放在右侧阅读栏"));
-  right.append(mute, more, desktop);
+  right.append(mute, renderFileReaderWorkspaceMoreMenu(), desktop);
   topbar.append(left, right);
   return topbar;
+}
+
+function renderFileReaderWorkspaceMoreMenu() {
+  const wrap = document.createElement("div");
+  wrap.className = "file-reader-workspace-more";
+  const button = createFileReaderWorkspaceIconButton("更多", "more", () => {
+    toggleFileReaderFloatingMenu(wrap, button, menu);
+  });
+  button.setAttribute("aria-haspopup", "menu");
+  button.setAttribute("aria-expanded", "false");
+
+  const menu = document.createElement("div");
+  menu.className = "file-reader-workspace-more-menu";
+  menu.dataset.readerRole = "workspaceMoreMenu";
+  menu.setAttribute("role", "menu");
+  menu.hidden = true;
+  for (const action of fileReaderQuickActions()) {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.setAttribute("role", "menuitem");
+    item.dataset.fileReaderAction = action.id;
+    item.innerHTML = `${originalToolbarIcon(action.icon)}<span>${action.label}</span>`;
+    item.addEventListener("click", () => {
+      closeFileReaderFloatingMenu(wrap);
+      runFileReaderQuickAction(action.id);
+    });
+    menu.append(item);
+  }
+  wrap.addEventListener("keydown", (event) => {
+    handleMenuKeyboard(event, menu, {
+      onEscape: () => {
+        closeFileReaderFloatingMenu(wrap);
+        focusWithoutScroll(button);
+      },
+    });
+  });
+  wrap.append(button, menu);
+  return wrap;
+}
+
+function toggleFileReaderFloatingMenu(wrap, button, menu, open = null) {
+  const shouldOpen = open ?? menu.hidden;
+  closeFileReaderFloatingMenus({ except: wrap });
+  button.setAttribute("aria-expanded", String(shouldOpen));
+  menu.hidden = !shouldOpen;
+  if (shouldOpen) focusFirstMenuItem(menu);
+}
+
+function closeFileReaderFloatingMenu(wrap) {
+  const button = wrap?.querySelector?.('button[aria-expanded="true"], button[aria-haspopup="menu"]');
+  const menu = wrap?.querySelector?.('[data-reader-role="composerMoreMenu"], [data-reader-role="workspaceMoreMenu"]');
+  button?.setAttribute?.("aria-expanded", "false");
+  if (menu) menu.hidden = true;
+}
+
+function closeFileReaderFloatingMenus({ except = null } = {}) {
+  let closed = false;
+  document.querySelectorAll?.(".file-reader-composer-more, .file-reader-workspace-more")?.forEach((wrap) => {
+    if (except && wrap === except) return;
+    const wasOpen = wrap.querySelector?.('button[aria-expanded="true"]');
+    closeFileReaderFloatingMenu(wrap);
+    closed = Boolean(wasOpen) || closed;
+  });
+  return closed;
 }
 
 function renderFileReaderWorkspaceFileCard(attachment) {
@@ -8191,12 +8553,20 @@ function fileReaderWorkspaceMeta(attachment) {
 
 function fileReaderWorkspaceSummaryHtml(attachment) {
   const preview = fileReaderWorkspacePreviewText(attachment);
+  const name = escapeHtml(fileReaderWorkspaceDisplayTitle(attachment));
+  const kind = fileReaderWorkspaceKindLabel(attachment);
   if (preview) {
-    return `我已打开 <strong>${escapeHtml(attachment.name || "这篇文档")}</strong>，可以围绕全文总结、解释、翻译和截图提问。当前可读片段显示：${escapeHtml(
+    return `<strong>${name}</strong> 是当前打开的 <strong>${kind}</strong> 文档，已进入左右分栏阅读：右侧保留原文页码、缩放、搜索、翻译和截图提问，左侧用于沉淀摘要与连续追问。当前可读片段显示 <strong>${escapeHtml(
       preview
-    )}`;
+    )}</strong>；你可以继续让 DeepSeek 详细总结全文、提炼大纲、核对公式表格，或围绕选中的原文片段继续追问。`;
   }
-  return `我已打开 <strong>${escapeHtml(attachment.name || "这篇文档")}</strong>，可以围绕右侧原文进行总结、解释、翻译和截图提问。你可以直接选中文本或点击下方快捷问题继续阅读。`;
+  return `<strong>${name}</strong> 已进入文档阅读状态：右侧保留原样预览和页码控制，左侧可以继续发消息、总结全文、提炼大纲、翻译或基于截图提问。你也可以直接选中原文片段，然后用浮层里的 <strong>问问 DeepSeek</strong> 继续追问。`;
+}
+
+function fileReaderWorkspaceDisplayTitle(attachment) {
+  const raw = String(attachment?.name || "这篇文档").trim() || "这篇文档";
+  const withoutExt = raw.replace(/\.[a-z0-9]{1,8}$/i, "");
+  return withoutExt.replace(/[_\s]+/g, "-");
 }
 
 function fileReaderWorkspacePreviewText(attachment) {
@@ -8584,28 +8954,156 @@ function renderOriginalInlineSelectionToolbar() {
     ["explain", "解释"],
     ["translate", "翻译"],
     ["copy", "复制"],
-    ["ask", "问问豆包"],
+    ["ask", "问问 DeepSeek"],
   ]) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.dataset.originalTextAction = action;
-    decorateOriginalActionButton(button, action, label);
-    button.addEventListener("click", handleOriginalTextAction);
-    toolbar.append(button);
+    toolbar.append(renderOriginalActionControl(action, label, "text"));
   }
   return toolbar;
 }
 
+function renderOriginalActionControl(action, label, source) {
+  const button = document.createElement("button");
+  button.type = "button";
+  if (source === "region") {
+    button.dataset.originalRegionAction = action;
+  } else {
+    button.dataset.originalTextAction = action;
+  }
+  decorateOriginalActionButton(button, action, label);
+  if (action !== "translate") {
+    button.addEventListener("click", source === "region" ? handleOriginalRegionToolbarClick : handleOriginalTextAction);
+    return button;
+  }
+
+  const wrap = document.createElement("span");
+  wrap.className = "file-original-translate-wrap";
+  const menu = renderOriginalTranslateMenu(source, button);
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    toggleOriginalTranslateMenu(wrap, button, menu);
+  });
+  wrap.addEventListener("keydown", (event) => {
+    handleMenuKeyboard(event, menu, {
+      onEscape: () => {
+        closeOriginalTranslateMenus();
+        focusWithoutScroll(button);
+      },
+    });
+  });
+  wrap.append(button, menu);
+  return wrap;
+}
+
+function renderOriginalTranslateMenu(source, anchor) {
+  const menu = document.createElement("div");
+  menu.className = "file-original-translate-menu";
+  menu.dataset.readerRole = source === "region" ? "regionTranslateMenu" : "textTranslateMenu";
+  menu.setAttribute("role", "menu");
+  menu.hidden = true;
+  for (const option of originalTranslateOptions()) {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.setAttribute("role", "menuitem");
+    item.dataset.translateTarget = option.id;
+    item.innerHTML = `<span>${option.label}</span><small>${option.hint}</small>`;
+    item.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      closeOriginalTranslateMenus();
+      if (source === "region") {
+        runOriginalRegionAction("translate", option.id);
+      } else {
+        runOriginalTextAction("translate", option.id);
+      }
+    });
+    menu.append(item);
+  }
+  anchor.setAttribute("aria-haspopup", "menu");
+  anchor.setAttribute("aria-expanded", "false");
+  return menu;
+}
+
+function toggleOriginalTranslateMenu(wrap, button, menu, open = null) {
+  const nextOpen = open ?? menu.hidden;
+  closeOriginalTranslateMenus();
+  wrap.classList.toggle("open", nextOpen);
+  button.setAttribute("aria-expanded", String(nextOpen));
+  menu.hidden = !nextOpen;
+  if (nextOpen) focusFirstMenuItem(menu);
+}
+
+function closeOriginalTranslateMenus(root = filePreviewText) {
+  let closed = false;
+  root?.querySelectorAll?.(".file-original-translate-wrap.open")?.forEach((wrap) => {
+    closed = true;
+    wrap.classList.remove("open");
+    wrap.querySelector?.('button[aria-expanded="true"]')?.setAttribute("aria-expanded", "false");
+    const menu = wrap.querySelector?.(".file-original-translate-menu");
+    if (menu) menu.hidden = true;
+  });
+  root?.querySelectorAll?.(".file-original-pdf-command-wrap.open")?.forEach((wrap) => {
+    closed = true;
+    wrap.classList.remove("open");
+    wrap.querySelector?.('button[aria-expanded="true"]')?.setAttribute("aria-expanded", "false");
+    const menu = wrap.querySelector?.(".file-original-translate-menu");
+    if (menu) menu.hidden = true;
+  });
+  return closed;
+}
+
+function closeOpenReaderMenus() {
+  let closed = closeFileReaderFloatingMenus();
+  closed = closeOriginalTranslateMenus() || closed;
+  if (state.fileReader?.originalMoreOpen) {
+    toggleOriginalMoreMenu(false);
+    closed = true;
+  }
+  return closed;
+}
+
+function onDocumentClickCloseReaderMenus(event) {
+  const target = event.target instanceof Element ? event.target : event.target?.parentElement;
+  if (
+    target?.closest?.(
+      ".file-reader-composer-more, .file-reader-workspace-more, .file-original-translate-wrap, .file-original-pdf-command-wrap, .file-original-more-wrap"
+    )
+  ) {
+    return;
+  }
+  closeOpenReaderMenus();
+}
+
+function originalTranslateOptions() {
+  return [
+    { id: "zh", label: "翻译成中文", hint: "保留术语与编号" },
+    { id: "en", label: "翻译成英文", hint: "适合英文阅读" },
+    { id: "bilingual", label: "中英对照", hint: "逐段双语整理" },
+  ];
+}
+
 function decorateOriginalActionButton(button, action, label) {
   button.classList.add("file-original-action-button");
+  if (action === "translate") {
+    button.classList.add("has-chevron");
+    button.setAttribute("aria-haspopup", "menu");
+  }
   const icon = originalToolbarIcon(action);
   if (icon) {
     const iconWrap = document.createElement("span");
     iconWrap.className = "file-original-action-button-icon";
     iconWrap.innerHTML = icon;
     const labelWrap = document.createElement("span");
+    labelWrap.className = "file-original-action-button-label";
     labelWrap.textContent = label;
     button.append(iconWrap, labelWrap);
+    if (action === "translate") {
+      const chevron = document.createElement("span");
+      chevron.className = "file-original-action-button-chevron";
+      chevron.setAttribute("aria-hidden", "true");
+      chevron.innerHTML = originalToolbarIcon("chevronDown");
+      button.append(chevron);
+    }
     return;
   }
   button.textContent = label;
@@ -8645,12 +9143,7 @@ function renderOriginalPdfInnerToolbar(attachment, sourceUrl, downloadUrl) {
   center.className = "file-original-pdf-toolbar-group file-original-pdf-toolbar-center";
   center.dataset.readerRole = "pdfToolbarCenter";
   center.append(
-    createOriginalToolbarButton("翻译全文", {
-      className: "file-original-pdf-command-button",
-      icon: originalToolbarIcon("translate"),
-      text: "翻译全文",
-      onClick: translateFileReaderDocument,
-    }),
+    renderOriginalDocumentTranslateControl(),
     createOriginalToolbarButton("截图提问", {
       className: "file-original-pdf-command-button",
       icon: originalToolbarIcon("scissors"),
@@ -8669,6 +9162,14 @@ function renderOriginalPdfInnerToolbar(attachment, sourceUrl, downloadUrl) {
       pressed: Boolean(state.fileReader?.originalTextOpen),
       onClick: toggleOriginalTextLayer,
     }),
+    createOriginalToolbarButton("适配页面", {
+      className: "file-original-pdf-icon-button",
+      icon: originalToolbarIcon("fitPage"),
+      role: "fitPage",
+      pressed: (Number(state.fileReader?.originalZoom) || 100) === 100,
+      onClick: () => setOriginalReaderZoom(100),
+    }),
+    createOriginalToolbarSeparator(),
     createOriginalToolbarButton("搜索文档", {
       className: "file-original-pdf-icon-button",
       icon: originalToolbarIcon("search"),
@@ -8676,27 +9177,18 @@ function renderOriginalPdfInnerToolbar(attachment, sourceUrl, downloadUrl) {
       pressed: Boolean(state.fileReader?.originalSearchOpen),
       onClick: toggleOriginalSearchPanel,
     }),
-    createOriginalToolbarLink("新窗口打开", sourceUrl, {
-      className: "file-original-pdf-icon-link",
-      icon: originalToolbarIcon("external"),
-      target: "_blank",
-      role: "external",
-    }),
-    createOriginalToolbarButton("缩小", {
-      className: "file-original-pdf-icon-button",
-      icon: originalToolbarIcon("minus"),
-      onClick: () => zoomOriginalReader(-10),
-    }),
     createOriginalToolbarButton("放大", {
       className: "file-original-pdf-icon-button",
       icon: originalToolbarIcon("plus"),
       onClick: () => zoomOriginalReader(10),
     }),
+    createOriginalToolbarSeparator(),
     createOriginalToolbarLink("下载原文件", downloadUrl, {
       className: "file-original-pdf-icon-link",
       icon: originalToolbarIcon("download"),
       download: attachment?.name || "",
     }),
+    createOriginalToolbarSeparator(),
     createOriginalToolbarButton("全屏阅读", {
       className: "file-original-pdf-icon-button",
       icon: originalToolbarIcon("fullscreen"),
@@ -8706,23 +9198,45 @@ function renderOriginalPdfInnerToolbar(attachment, sourceUrl, downloadUrl) {
       className: "file-original-pdf-icon-button file-original-pdf-close-button",
       icon: originalToolbarIcon("close"),
       onClick: closeFilePreview,
+    }),
+    createOriginalToolbarLink("新窗口打开", sourceUrl, {
+      className: "file-original-pdf-icon-link",
+      icon: originalToolbarIcon("external"),
+      target: "_blank",
+      role: "external",
     })
   );
   const moreWrap = document.createElement("div");
   moreWrap.className = "file-original-more-wrap";
-  moreWrap.append(
-    createOriginalToolbarButton("更多操作", {
-      className: "file-original-pdf-icon-button",
-      icon: originalToolbarIcon("more"),
-      role: "more",
-      pressed: Boolean(state.fileReader?.originalMoreOpen),
-      onClick: toggleOriginalMoreMenu,
-    }),
-    renderOriginalMoreMenu(attachment, sourceUrl, downloadUrl)
-  );
+  const moreButton = createOriginalToolbarButton("更多操作", {
+    className: "file-original-pdf-icon-button",
+    icon: originalToolbarIcon("more"),
+    role: "more",
+    pressed: Boolean(state.fileReader?.originalMoreOpen),
+    onClick: toggleOriginalMoreMenu,
+  });
+  moreButton.setAttribute("aria-haspopup", "menu");
+  moreButton.setAttribute("aria-expanded", String(Boolean(state.fileReader?.originalMoreOpen)));
+  const moreMenu = renderOriginalMoreMenu(attachment, sourceUrl, downloadUrl);
+  moreWrap.addEventListener("keydown", (event) => {
+    handleMenuKeyboard(event, moreMenu, {
+      onEscape: () => {
+        toggleOriginalMoreMenu(false);
+        focusWithoutScroll(moreButton);
+      },
+    });
+  });
+  moreWrap.append(moreButton, moreMenu);
   right.append(moreWrap);
   bar.append(left, center, right);
   return bar;
+}
+
+function createOriginalToolbarSeparator() {
+  const separator = document.createElement("span");
+  separator.className = "file-original-pdf-separator";
+  separator.setAttribute("aria-hidden", "true");
+  return separator;
 }
 
 function renderOriginalMoreMenu(attachment, sourceUrl, downloadUrl) {
@@ -8895,14 +9409,9 @@ function renderOriginalTextLayer() {
     ["explain", "解释"],
     ["translate", "翻译"],
     ["copy", "复制"],
-    ["ask", "问问豆包"],
+    ["ask", "问问 DeepSeek"],
   ]) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.dataset.originalTextAction = action;
-    decorateOriginalActionButton(button, action, label);
-    button.addEventListener("click", handleOriginalTextAction);
-    actions.append(button);
+    actions.append(renderOriginalActionControl(action, label, "text"));
   }
   const body = document.createElement("div");
   body.className = "file-original-page-text-content";
@@ -8926,15 +9435,10 @@ function renderOriginalCaptureLayer() {
     ["explain", "解释"],
     ["translate", "翻译"],
     ["copy", "复制"],
-    ["ask", "问问豆包"],
+    ["ask", "问问 DeepSeek"],
     ["close", "关闭"],
   ]) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.dataset.originalRegionAction = action;
-    decorateOriginalActionButton(button, action, label);
-    button.addEventListener("click", handleOriginalRegionToolbarClick);
-    toolbar.append(button);
+    toolbar.append(renderOriginalActionControl(action, label, "region"));
   }
   layer.append(box, toolbar);
   layer.addEventListener("pointerdown", onOriginalCapturePointerDown);
@@ -8942,6 +9446,53 @@ function renderOriginalCaptureLayer() {
   layer.addEventListener("pointerup", onOriginalCapturePointerUp);
   layer.addEventListener("pointercancel", cancelOriginalCaptureDrag);
   return layer;
+}
+
+function renderOriginalDocumentTranslateControl() {
+  const wrap = document.createElement("span");
+  wrap.className = "file-original-pdf-command-wrap";
+  const button = createOriginalToolbarButton("翻译全文", {
+    className: "file-original-pdf-command-button file-original-pdf-command-button-chevron",
+    icon: originalToolbarIcon("translate"),
+    text: "翻译全文",
+  });
+  button.dataset.readerRole = "documentTranslate";
+  button.setAttribute("aria-haspopup", "menu");
+  button.setAttribute("aria-expanded", "false");
+  const menu = document.createElement("div");
+  menu.className = "file-original-translate-menu document";
+  menu.dataset.readerRole = "documentTranslateMenu";
+  menu.setAttribute("role", "menu");
+  menu.hidden = true;
+  for (const option of originalTranslateOptions()) {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.setAttribute("role", "menuitem");
+    item.dataset.translateTarget = option.id;
+    item.innerHTML = `<span>${option.label}</span><small>${option.hint}</small>`;
+    item.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      closeOriginalTranslateMenus();
+      translateFileReaderDocument(option.id);
+    });
+    menu.append(item);
+  }
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    toggleOriginalTranslateMenu(wrap, button, menu);
+  });
+  wrap.addEventListener("keydown", (event) => {
+    handleMenuKeyboard(event, menu, {
+      onEscape: () => {
+        closeOriginalTranslateMenus();
+        focusWithoutScroll(button);
+      },
+    });
+  });
+  wrap.append(button, menu);
+  return wrap;
 }
 
 function createOriginalToolbarButton(
@@ -9009,6 +9560,10 @@ function originalToolbarIcon(name) {
     text: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14"/><path d="M12 5v14"/><path d="M8 19h8"/></svg>',
     edit: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>',
     volumeOff: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10v4h4l5 4V6l-5 4H4Z"/><path d="m19 9-4 4"/><path d="m15 9 4 4"/></svg>',
+    fitPage: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3H5a2 2 0 0 0-2 2v2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M17 21h2a2 2 0 0 0 2-2v-2"/><path d="M8 8h8v8H8z"/></svg>',
+    bolt: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m13 2-8 12h6l-1 8 8-12h-6l1-8Z"/></svg>',
+    code: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 9-4 3 4 3"/><path d="m16 9 4 3-4 3"/><path d="m14 5-4 14"/></svg>',
+    research: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14v14H5z"/><path d="M8 9h8M8 13h5"/><path d="m14 16 4 4"/><circle cx="13.5" cy="15.5" r="2.5"/></svg>',
     explain: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h12v16H6z"/><path d="M9 8h6M9 12h6M9 16h3"/></svg>',
     copy: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
     ask: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14v11H8l-3 3z"/><path d="M9 10h6M9 14h4"/></svg>',
@@ -9021,6 +9576,7 @@ function originalToolbarIcon(name) {
     search: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m16.5 16.5 4.5 4.5"/></svg>',
     chevronLeft: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>',
     chevronRight: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>',
+    chevronDown: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>',
     minus: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/></svg>',
     plus: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>',
     external: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6"/><path d="m10 14 10-10"/><path d="M20 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h5"/></svg>',
@@ -9264,8 +9820,13 @@ function syncOriginalReaderControls() {
   if (textLayer) textLayer.setAttribute("aria-pressed", String(Boolean(reader.originalTextOpen)));
   const search = filePreviewText?.querySelector?.('[data-reader-role="search"]');
   if (search) search.setAttribute("aria-pressed", String(Boolean(reader.originalSearchOpen)));
+  const fitPage = filePreviewText?.querySelector?.('[data-reader-role="fitPage"]');
+  if (fitPage) fitPage.setAttribute("aria-pressed", String((Number(reader.originalZoom) || 100) === 100));
   const more = filePreviewText?.querySelector?.('[data-reader-role="more"]');
-  if (more) more.setAttribute("aria-pressed", String(Boolean(reader.originalMoreOpen)));
+  if (more) {
+    more.setAttribute("aria-pressed", String(Boolean(reader.originalMoreOpen)));
+    more.setAttribute("aria-expanded", String(Boolean(reader.originalMoreOpen)));
+  }
   const moreMenu = filePreviewText?.querySelector?.('[data-reader-role="moreMenu"]');
   if (moreMenu) moreMenu.hidden = !reader.originalMoreOpen;
   const searchPanel = filePreviewText?.querySelector?.(".file-original-search-panel");
@@ -9288,6 +9849,7 @@ function toggleOriginalSearchPanel(force = null) {
   const reader = state.fileReader;
   if (!reader) return;
   reader.originalSearchOpen = force === null ? !reader.originalSearchOpen : Boolean(force);
+  closeOriginalTranslateMenus();
   if (reader.originalSearchOpen) {
     reader.originalMoreOpen = false;
   }
@@ -9306,10 +9868,14 @@ function toggleOriginalMoreMenu(force = null) {
   const reader = state.fileReader;
   if (!reader) return;
   reader.originalMoreOpen = force === null ? !reader.originalMoreOpen : Boolean(force);
+  closeOriginalTranslateMenus();
   if (reader.originalMoreOpen) {
     hideOriginalPageSelectionToolbar();
   }
   syncOriginalReaderControls();
+  if (reader.originalMoreOpen) {
+    focusFirstMenuItem(filePreviewText?.querySelector?.('[data-reader-role="moreMenu"]'));
+  }
 }
 
 function handleOriginalSearchSubmit(event) {
@@ -9630,6 +10196,7 @@ function showOriginalPageSelectionToolbar() {
 function hideOriginalPageSelectionToolbar() {
   const toolbar = filePreviewText?.querySelector?.('[data-reader-role="inlineSelectionToolbar"]');
   if (!toolbar) return;
+  closeOriginalTranslateMenus(toolbar);
   toolbar.hidden = true;
   toolbar.removeAttribute("style");
 }
@@ -9676,7 +10243,7 @@ function handleOriginalTextAction(event) {
   runOriginalTextAction(action);
 }
 
-function runOriginalTextAction(action) {
+function runOriginalTextAction(action, translateTarget = "zh") {
   const reader = state.fileReader;
   const attachment = reader?.attachment;
   if (!attachment) return;
@@ -9692,7 +10259,7 @@ function runOriginalTextAction(action) {
   const clipped = text.length > 6000 ? `${text.slice(0, 6000)}\n[文本较长，已截取前 6000 字]` : text;
   const prompts = {
     explain: `请解释文档《${attachment.name || "附件"}》第 ${originalReaderCurrentPage()} 页中这段文字的含义：\n\n${clipped}`,
-    translate: `请翻译文档《${attachment.name || "附件"}》第 ${originalReaderCurrentPage()} 页中这段文字，保留术语、公式和编号：\n\n${clipped}`,
+    translate: originalTextTranslatePrompt(attachment, originalReaderCurrentPage(), clipped, translateTarget),
     ask: `请根据文档《${attachment.name || "附件"}》第 ${originalReaderCurrentPage()} 页中这段文字回答我的问题：\n\n${clipped}`,
   };
   appendFileReaderPrompt(attachment, prompts[action] || prompts.ask, "已把当前页文本加入本轮提问");
@@ -9763,7 +10330,13 @@ function quoteOriginalReaderSelection() {
 function zoomOriginalReader(delta) {
   const reader = state.fileReader;
   if (!reader?.attachment) return;
-  const nextZoom = Math.max(60, Math.min(180, (Number(reader.originalZoom) || 100) + delta));
+  setOriginalReaderZoom((Number(reader.originalZoom) || 100) + delta);
+}
+
+function setOriginalReaderZoom(value) {
+  const reader = state.fileReader;
+  if (!reader?.attachment) return;
+  const nextZoom = Math.max(60, Math.min(180, Number(value) || 100));
   if (nextZoom === (Number(reader.originalZoom) || 100)) return;
   reader.originalZoom = nextZoom;
   clearOriginalInlineSelection();
@@ -9788,14 +10361,47 @@ function zoomOriginalReader(delta) {
   if (image) image.style.transform = `scale(${nextZoom / 100})`;
 }
 
-function translateFileReaderDocument() {
+function translateFileReaderDocument(translateTarget = "zh") {
   const attachment = state.fileReader?.attachment;
   if (!attachment) return;
   appendFileReaderPrompt(
     attachment,
-    `请把这篇文档《${attachment.name || "附件"}》完整翻译成中文，保留标题、表格、编号和关键术语；如果原文已经是中文，请改为提炼英文关键词并给出中英对照。`,
+    originalDocumentTranslatePrompt(attachment, translateTarget),
     "已把翻译全文加入本轮提问"
   );
+}
+
+function originalDocumentTranslatePrompt(attachment, translateTarget = "zh") {
+  const name = attachment?.name || "附件";
+  if (translateTarget === "en") {
+    return `请把这篇文档《${name}》完整翻译成英文，保留标题、表格、编号、公式和关键术语；对专有名词给出一致译名。`;
+  }
+  if (translateTarget === "bilingual") {
+    return `请把这篇文档《${name}》整理成中英对照版本，按原文段落顺序输出，保留标题、表格、编号、公式和关键术语。`;
+  }
+  return `请把这篇文档《${name}》完整翻译成中文，保留标题、表格、编号和关键术语；如果原文已经是中文，请改为提炼英文关键词并给出中英对照。`;
+}
+
+function originalTextTranslatePrompt(attachment, page, text, translateTarget = "zh") {
+  const name = attachment?.name || "附件";
+  if (translateTarget === "en") {
+    return `请把文档《${name}》第 ${page} 页中这段文字翻译成英文，保留术语、公式和编号：\n\n${text}`;
+  }
+  if (translateTarget === "bilingual") {
+    return `请把文档《${name}》第 ${page} 页中这段文字整理成中英对照，保留术语、公式和编号：\n\n${text}`;
+  }
+  return `请把文档《${name}》第 ${page} 页中这段文字翻译成中文，保留术语、公式和编号：\n\n${text}`;
+}
+
+function originalRegionTranslatePrompt(attachment, page, translateTarget = "zh") {
+  const name = attachment?.name || "附件";
+  if (translateTarget === "en") {
+    return `请把文档《${name}》第 ${page} 页中我框选截图里的文字翻译成英文，保留术语和公式含义。`;
+  }
+  if (translateTarget === "bilingual") {
+    return `请把文档《${name}》第 ${page} 页中我框选截图里的文字整理成中英对照，保留术语和公式含义。`;
+  }
+  return `请把文档《${name}》第 ${page} 页中我框选截图里的文字翻译成中文，保留术语和公式含义。`;
 }
 
 function askOriginalReaderVisiblePage() {
@@ -9804,6 +10410,7 @@ function askOriginalReaderVisiblePage() {
   const reader = state.fileReader;
   if (!reader) return;
   hideOriginalPageSelectionToolbar();
+  closeOriginalTranslateMenus();
   reader.originalCaptureActive = true;
   reader.originalCaptureRegion = null;
   syncOriginalCaptureLayer();
@@ -9984,7 +10591,7 @@ function handleOriginalRegionToolbarClick(event) {
   runOriginalRegionAction(action);
 }
 
-async function runOriginalRegionAction(action) {
+async function runOriginalRegionAction(action, translateTarget = "zh") {
   const reader = state.fileReader;
   const attachment = reader?.attachment;
   const region = reader?.originalCaptureRegion;
@@ -9996,7 +10603,7 @@ async function runOriginalRegionAction(action) {
   }
   const prompts = {
     explain: `请解释文档《${attachment.name || "附件"}》第 ${originalReaderCurrentPage()} 页中我框选的截图内容。`,
-    translate: `请翻译文档《${attachment.name || "附件"}》第 ${originalReaderCurrentPage()} 页中我框选截图里的文字，保留术语和公式含义。`,
+    translate: originalRegionTranslatePrompt(attachment, originalReaderCurrentPage(), translateTarget),
     ask: `请根据文档《${attachment.name || "附件"}》第 ${originalReaderCurrentPage()} 页中我框选的截图回答我的问题。`,
   };
   try {
@@ -10071,6 +10678,7 @@ function originalRegionImageAttachment(attachment, region) {
 
 function clearOriginalCaptureRegion() {
   if (!state.fileReader) return;
+  closeOriginalTranslateMenus();
   state.fileReader.originalCaptureActive = false;
   state.fileReader.originalCaptureDrag = null;
   state.fileReader.originalCaptureRegion = null;
@@ -10112,6 +10720,11 @@ function onOriginalReaderKeydown(event) {
     return;
   }
   if (key !== "Escape") return;
+  if (filePreviewText?.querySelector?.(".file-original-translate-wrap.open, .file-original-pdf-command-wrap.open")) {
+    closeOriginalTranslateMenus();
+    event.preventDefault();
+    return;
+  }
   if (state.fileReader?.originalCaptureActive || state.fileReader?.originalCaptureRegion) {
     clearOriginalCaptureRegion();
     event.preventDefault();
@@ -10727,6 +11340,8 @@ function updateActivityTrigger(button, message) {
   button.dataset.activityMessage = message.id;
   button.title = "在右侧查看思考、搜索和 Agent 过程";
   button.setAttribute("aria-label", button.title);
+  button.setAttribute("aria-controls", activityPanel?.id || "");
+  button.setAttribute("aria-expanded", String(Boolean(isActivityPanelOpen() && state.activeActivityMessageId === message.id)));
   const label = button.querySelector("span");
   if (label) label.textContent = reasoningSummaryText(message);
 }
@@ -10769,8 +11384,8 @@ function openActivityPanel(messageId, { auto = false } = {}) {
     syncBackdrop();
   } else {
     document.body.classList.remove("activity-side-open");
-    setBackdropVisible(true);
     activateFocusTrap(activityPanel);
+    syncBackdrop();
   }
 }
 
@@ -10851,6 +11466,44 @@ function setBackdropVisible(visible) {
   }, hideDelay);
 }
 
+function setPanelTriggerState(control, panel, expanded = panel?.classList?.contains("open")) {
+  if (!control || !panel) return;
+  control.setAttribute("aria-controls", panel.id || "");
+  control.setAttribute("aria-expanded", String(Boolean(expanded)));
+}
+
+function syncPanelTriggerStates() {
+  setPanelTriggerState(historyButton, historyPanel, historyPanel?.classList.contains("open"));
+  setPanelTriggerState(historySettingsButton, settingsPanel, settingsPanel?.classList.contains("open"));
+  setPanelTriggerState(seekButton, seekPanel, seekPanel?.classList.contains("open"));
+  setPanelTriggerState(activeSeekChip, seekPanel, seekPanel?.classList.contains("open"));
+  setPanelTriggerState(projectButton, projectPanel, projectPanel?.classList.contains("open"));
+  setPanelTriggerState(activeProjectChip, projectPanel, projectPanel?.classList.contains("open"));
+  document.querySelectorAll?.("button[data-activity-message]")?.forEach((button) => {
+    button.setAttribute("aria-controls", activityPanel?.id || "");
+    button.setAttribute(
+      "aria-expanded",
+      String(Boolean(isActivityPanelOpen() && state.activeActivityMessageId === button.dataset.activityMessage))
+    );
+  });
+  document.querySelectorAll?.("button[data-search-results]")?.forEach((button) => {
+    button.setAttribute("aria-controls", searchPanel?.id || "searchPanel");
+    button.setAttribute(
+      "aria-expanded",
+      String(Boolean(searchPanel?.classList.contains("open") && state.activeSearchMessageId === button.dataset.searchResults))
+    );
+  });
+  document.querySelectorAll?.("button[data-diagnostics-message]")?.forEach((button) => {
+    button.setAttribute("aria-controls", diagnosticsPanel?.id || "");
+    button.setAttribute(
+      "aria-expanded",
+      String(
+        Boolean(diagnosticsPanel?.classList.contains("open") && state.activeDiagnosticsMessageId === button.dataset.diagnosticsMessage)
+      )
+    );
+  });
+}
+
 function syncBackdrop() {
   const hasHistoryModal = historyPanel.classList.contains("open") && !document.body.classList.contains("history-side-open");
   const hasSettings = settingsPanel.classList.contains("open");
@@ -10863,6 +11516,7 @@ function syncBackdrop() {
   const hasActivity = activityPanel?.classList.contains("open") && !shouldUseSideActivityPanel();
   const hasLightbox = isImageLightboxOpen();
   setBackdropVisible(Boolean(hasHistoryModal || hasSettings || hasSeek || hasProject || hasPreview || hasMemory || hasDiagnostics || hasSearch || hasActivity || hasLightbox));
+  syncPanelTriggerStates();
 }
 
 function ensureSearchPanel() {
@@ -10907,8 +11561,9 @@ function ensureSearchPanel() {
   return Boolean(searchPanel && searchPanelList);
 }
 
-function openSearchPanel(search) {
+function openSearchPanel(search, { messageId = "" } = {}) {
   if (!search || !ensureSearchPanel()) return;
+  state.activeSearchMessageId = String(messageId || "");
   closeSeekPanel();
   closeProjectPanel();
   closeFilePreview();
@@ -10918,15 +11573,15 @@ function openSearchPanel(search) {
   renderSearchPanel(search);
   searchPanel.classList.add("open");
   searchPanel.setAttribute("aria-hidden", "false");
-  setBackdropVisible(true);
   activateFocusTrap(searchPanel);
+  syncBackdrop();
 }
 
 function openSearchPanelForMessage(messageId) {
   const message = state.messages.find((item) => item.id === messageId);
   const search = searchPanelDataForMessage(message);
   if (!search) return;
-  openSearchPanel(search);
+  openSearchPanel(search, { messageId });
 }
 
 function searchPanelDataForMessage(message) {
@@ -10967,6 +11622,7 @@ function timelineSearchRoundsForPanel(message) {
 function closeSearchPanel() {
   ensureSearchPanel();
   if (!searchPanel) return;
+  state.activeSearchMessageId = "";
   searchPanel.classList.remove("open");
   searchPanel.setAttribute("aria-hidden", "true");
   deactivateFocusTrap(searchPanel);
@@ -11073,6 +11729,7 @@ function resizeComposer() {
   const isMobile = window.matchMedia?.("(max-width: 720px)")?.matches;
   const maxHeight = isMobile ? Math.min(viewportHeight * 0.4, 260) : Math.min(viewportHeight * 0.5, 360);
   promptInput.style.height = `${Math.min(promptInput.scrollHeight, Math.max(150, maxHeight))}px`;
+  syncFileReaderComposerInputState();
   updateJumpLatestOffset();
 }
 

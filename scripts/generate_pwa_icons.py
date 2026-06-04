@@ -38,6 +38,7 @@ def lerp(start: int, end: int, ratio: float) -> int:
 def gradient_square(size: int) -> Image.Image:
     image = Image.new("RGBA", (size, size), BRAND)
     pixels = image.load()
+    assert pixels is not None
     for y in range(size):
         vertical = y / max(1, size - 1)
         for x in range(size):
