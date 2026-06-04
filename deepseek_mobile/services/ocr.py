@@ -1143,7 +1143,7 @@ class DeepSeekApiOcrEngine:
                         continue
                     raise
                 if text.strip():
-                    pages.append(f"[PDF µЪ {index} Ті (OCR)]\n{text.strip()}")
+                    pages.append(f"[PDF 第 {index} 页 (OCR)]\n{text.strip()}")
         except AppError:
             raise
         except Exception as exc:

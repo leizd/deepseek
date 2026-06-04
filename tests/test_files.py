@@ -159,6 +159,28 @@ class CachedFileTests(unittest.TestCase):
         self.assertEqual(files.load_cached_file(file_id)["pageCount"], 2)
         self.assertEqual(file_reader_window(file_id)["file"]["pageCount"], 2)
 
+    def test_pdf_page_count_handles_compressed_object_streams(self) -> None:
+        # 使用对象流/压缩 xref 的 PDF，其 `/Type /Page` 不在原始字节里，仅靠字节正则
+        # 会漏数（退化成 1 页）。count_pdf_pages 必须用真实解析器拿到正确总页数。
+        try:
+            import fitz  # type: ignore[import-untyped]
+        except ImportError:
+            self.skipTest("PyMuPDF not available")
+        document = fitz.open()
+        for index in range(5):
+            page = document.new_page()
+            page.insert_text((72, 72), f"Page {index + 1} content")
+        try:
+            data = document.tobytes(garbage=4, deflate=True, use_objstms=1)
+        except TypeError:  # 旧版 PyMuPDF 无 use_objstms 参数
+            data = document.tobytes(garbage=4, deflate=True)
+        document.close()
+        # 前提：原始字节正则确实看不到 /Type /Page（否则这个回归用例没意义）
+        import re
+
+        self.assertEqual(len(re.findall(rb"/Type\s*/Page\b", data)), 0)
+        self.assertEqual(files.count_pdf_pages(data), 5)
+
     def test_file_page_text_returns_cached_page_text(self) -> None:
         chunks = files.chunk_text("first page\nsecond page")
         file_id = files.cache_file_chunks(

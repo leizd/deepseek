@@ -372,10 +372,41 @@ def infer_original_page_count(kind: str, data: bytes) -> int:
 def count_pdf_pages(data: bytes) -> int:
     if not data:
         return 0
+    # 优先用真实 PDF 解析器拿总页数：使用对象流/压缩 xref 的 PDF，其 `/Type /Page`
+    # 标记不会出现在原始字节里，下面的正则启发式会漏数，使多页 PDF 退化成 1 页
+    # （阅读器据此只渲染/翻第一页）。解析失败再回退到字节启发式。
+    parsed = _pdf_page_count_via_parser(data)
+    if parsed > 0:
+        return parsed
     matches = re.findall(rb"/Type\s*/Page\b", data)
     if matches:
         return len(matches)
     return 1 if data.lstrip().startswith(b"%PDF") else 0
+
+
+def _pdf_page_count_via_parser(data: bytes) -> int:
+    """用真实解析器返回 PDF 总页数（含无文字的扫描页）；不可用时返回 0。"""
+    try:
+        import fitz  # type: ignore[import-untyped]
+
+        document = fitz.open(stream=data, filetype="pdf")
+        try:
+            return int(getattr(document, "page_count", 0) or len(document))
+        finally:
+            close = getattr(document, "close", None)
+            if callable(close):
+                close()
+    except Exception:
+        pass
+    for module_name in ("pypdf", "PyPDF2"):
+        try:
+            module = __import__(module_name)
+            return len(module.PdfReader(io.BytesIO(data)).pages)
+        except ModuleNotFoundError:
+            continue
+        except Exception:
+            continue
+    return 0
 
 
 def page_texts_for_cache(kind: str, data: bytes, text: str, *, page_count: int = 0) -> list[dict[str, Any]]:

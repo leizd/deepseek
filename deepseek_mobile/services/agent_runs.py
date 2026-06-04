@@ -13,7 +13,7 @@ from typing import Any, Callable
 from deepseek_mobile.core.config import AGENT_RUNS_DIR, DEFAULT_MODEL
 from deepseek_mobile.core.errors import AppError, ErrorCode
 from deepseek_mobile.core.utils import latest_user_query, normalize_model_name
-from deepseek_mobile.services.deepseek_client import RequestCancelled, SearchBudget, raise_if_cancelled, validate_deepseek_payload
+from deepseek_mobile.services.deepseek_client import RequestCancelled, SearchBudget, validate_deepseek_payload
 from deepseek_mobile.services.multi_agent import (
     AGENT_PROFILES,
     leader_done_text,
