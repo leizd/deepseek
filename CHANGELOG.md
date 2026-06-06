@@ -2,6 +2,85 @@
 
 本项目使用类似 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的分组方式维护变更记录。未发布内容记录在 `[Unreleased]`，正式发版时迁移到具体版本。
 
+## [1.8.1]
+
+### 修复
+
+- **类型检查 / CI 收敛**：修复 1.7.5–1.8.0 批次新增服务在 `mypy .`（CI 必过项）下的 34 处类型错误，覆盖 `edge_inference`、`local_rag`、`observability`、`resiliency`、`semantic_cache`、`deepseek_client`、`agent_runs` 七个模块。主因是 `x.get(k) if isinstance(x.get(k), dict) else ...` 的双次取值破坏 mypy 类型收窄（改为先取局部变量再判类型）、ONNX 可选 embedding 路径下 session/tokenizer 的 None 守卫，以及 `int()/float()` 接收 `object` 入参的窄化标注。纯类型与静态检查层面的修复，运行时行为不变；`ruff`、`mypy`、全量 `pytest` 三项 CI 门禁均本地通过。
+
+## [1.8.0]
+
+### 新增
+
+- **Gateway & Resiliency**：新增 `deepseek_mobile.services.context_manager` 和 `deepseek_mobile.services.resiliency`，把 Prompt Cache 前缀稳定化与上游请求韧性收敛到 API 网关层。
+- **Context Manager**：DeepSeek 请求会固定 system prompt 前缀、按 `function.name` 稳定工具定义顺序，并用稳定 JSON 序列化请求体；当已有 `contextSummary` 时，会启用滑动窗口保留最近消息和尾部 dynamic context。
+- **SQLite 请求队列**：新增本地 `.request-queue/queue.sqlite3`，云端请求在打开前记录队列项；断网、超时、429、502、503、504 等可重试失败会进入 queued 状态并退避重试。
+- **网关状态 API**：新增 `GET /api/gateway/status`，`/api/config` 返回 `gateway.contextManager` 与 `gateway.requestQueue`；响应诊断新增 `contextManager` 和 `gatewayResiliency`。
+
+### 改进
+
+- 多 Agent worker 会捕获最终上游错误并走既有失败 Agent 降级路径，避免网关重试耗尽后留下空 worker 输出。
+- 前端诊断面板展示 Context Manager、滑动窗口丢弃数、Gateway attempt/retry 统计；Service Worker 缓存版本更新到 `deepseek-mobile-v180`。
+
+### 文档
+
+- README、API、架构、前端模块、APK 和安全说明同步补充 `.request-queue`、`/api/gateway/status`、稳定 prompt 前缀和移动端断网续跑边界。
+
+## [1.7.7]
+
+### 新增
+
+- **Agentic Workflow & Observability**：新增 `deepseek_mobile.services.observability`，用本地 `.traces/traces.sqlite3` 持久化普通聊天、端侧推理和多 Agent DAG 的 trace run/span。
+- **Local Tracing Dashboard**：响应诊断携带 `traceId`；前端助手消息更多菜单新增 `Trace`，可读取 `/api/traces/{traceId}` 并展示 waterfall、span 耗时、token、prompt cache 命中率和错误状态。
+- **Semantic Cache**：新增 `deepseek_mobile.services.semantic_cache`，在无工具、无搜索、无附件请求调用 DeepSeek 前计算本地 prompt embedding，命中 `.semantic-cache/cache.sqlite3` 且相似度超过 `SEMANTIC_CACHE_THRESHOLD`（默认 0.95）时直接返回本地缓存结果。
+- **可观测性 API**：新增 `GET /api/traces`、`GET /api/traces/{traceId}`、`GET /api/semantic-cache/status` 和 `POST /api/semantic-cache`；`/api/config` 返回 `tracing` 与 `semanticCache` 状态。
+
+### 改进
+
+- 多 Agent run 会共享同一个 `traceId`，Planner、worker、Critic 修订和 Synthesizer 的 DeepSeek 请求会落入同一条 trace，便于查看 DAG 节点瀑布图。
+- 语义缓存复用 Local RAG embedding 管线：默认哈希 embedding 零依赖，配置 ONNX Runtime 后可切到本地轻量 embedding 模型；带工具、联网搜索、附件和文件生成的请求会跳过缓存，避免错误复用带副作用或外部上下文的答案。
+
+### 文档
+
+- README、API、架构、前端模块、APK 和安全说明同步补充 `.traces`、`.semantic-cache`、Trace 按钮、语义缓存配置和本地数据边界。
+
+## [1.7.6]
+
+### 新增
+
+- **Local Data Infra**：新增 `deepseek_mobile.services.local_rag`，把 `.file-cache`、`.projects` 和 `.memory` 同步到本地 `.local-rag/rag.sqlite3`，形成统一的本地 RAG 数据层。
+- **内嵌轻量级向量数据库**：默认使用 SQLite 元数据表和本地 embedding JSON；安装 `requirements-rag.txt` 后可加载 `sqlite-vec` 并创建 `vec0` 虚表，用本地 KNN 查询替代纯 JSON 扫描。
+- **本地 Embedding 流水线**：默认保留无依赖哈希 embedding；配置 `LOCAL_RAG_EMBEDDING_PROVIDER=onnx`、`LOCAL_RAG_ONNX_MODEL_PATH`、`LOCAL_RAG_TOKENIZER_PATH` 后，可通过 ONNX Runtime + tokenizer 在本机生成 embedding。
+- **RAG 状态与重建接口**：新增 `GET /api/rag/status` 和 `POST /api/rag/reindex`，`/api/config` 返回 `localRag` 状态，便于查看索引数、embedding provider、sqlite-vec 可用性和最近错误。
+
+### 改进
+
+- `search_files` 工具改为本地向量索引优先、JSON 分块索引兜底，并在结果中返回 `retrieval.source`、`vectorScore` 和 `keywordScore` 诊断字段。
+- 附件上下文选择会优先参考本地 RAG 命中的 chunk，再保留原有关键词 + 向量混合排序与相邻 chunk 扩展。
+- 长期记忆保存、删除和替换后会同步本地 RAG 索引；检索长期记忆时会用本地向量命中给候选加权。
+
+### 文档
+
+- README、API、架构、APK 和安全说明同步补充 `.local-rag`、sqlite-vec、ONNX embedding、本地数据不出端边界和可选依赖。
+
+## [1.7.5]
+
+### 新增
+
+- **Edge Inference Infra**：新增 `deepseek_mobile.services.edge_inference`，通过可选 `llama-cpp-python` 或 MLC-LLM 后端在本地运行 DeepSeek-R1-Distill 1.5B/7B 等端侧模型；`requirements-edge.txt` 提供 llama.cpp 路径的可选依赖，MLC-LLM 保留为平台相关安装。
+- **端云协同路由**：`/api/chat` 新增 `edgeMode=auto|local|cloud`。自动模式会把简单闲聊、总结、改写、翻译等短任务路由到端侧模型；代码、数学、联网搜索、PPT / 文档 / 思维导图、多 Agent 和图片任务继续走云端 DeepSeek-V3/R1。
+- **本地模型生命周期与量化诊断**：新增 `EDGE_MODEL_PATH`、`EDGE_MODEL_NAME`、`EDGE_CHAT_FORMAT`、`EDGE_N_CTX`、`EDGE_N_THREADS`、`EDGE_N_GPU_LAYERS`、`EDGE_MAX_TOKENS` 等环境变量，支持 GGUF 动态路径配置、量化文件名识别、上下文窗口配置和模型卸载。
+- **端侧状态接口**：新增 `GET /api/edge/status` 与 `POST /api/edge/reload`，`/api/config` 同步返回 `edgeInference` 能力摘要，便于前端判断本地模型是否可用。
+
+### 改进
+
+- 云端 DeepSeek 请求遇到连接错误时，简单任务可自动回退到本地端侧模型；`diagnostics.edgeInference` 会记录本轮是否使用端侧、provider、路由原因、量化标记、上下文窗口和回退错误。
+- 前端普通聊天入口支持“没有云端 API Key 但本地模型可用”的场景；Agent Run、联网搜索、图片理解和标题生成仍保持云端能力要求。
+
+### 文档
+
+- README、API、架构、前端模块、APK 和安全说明同步补充端侧推理、端云路由、GGUF 本地模型路径和本地权重安全边界。
+
 ## [1.7.0]
 
 ### 新增
@@ -14,6 +93,7 @@
 
 - **PPT 生成接入 `slides` skill**：当用户要求制作 PPT / 幻灯片 / 演示文稿时，后端会在本轮动态上下文注入用户提供的 `slides` skill 参考（PowerPoint-style presentations，包含 pptxgenjs / artifact tool 路线），并把 `create_pptx` 工具说明标记为该 skill 的本地执行入口；普通聊天不注入这段上下文，保持 prompt cache 友好。
 - **搜索上限大幅放宽**：非 Agent 单轮对话 `web_search` 次数上限 5→15；多 Agent 每个 worker 搜索上限 5→15、整次任务总搜索预算 12→36；Tavily 单次返回结果数 5→15、注入模型上下文的结果数 8→24。复杂问题可检索更多来源，代价是 Tavily 调用量与 input token 同步上升。
+- **多 Agent DAG 更稳**：Planner 现在被明确要求让 Critic 等待所有非 Critic worker；后端即使遇到“只有部分 Agent 写了 `depends_on`”或 worker 依赖成环的计划，也会保持 Critic 最后复核，避免它早于待审查 worker 开跑。先确认计划工作台会保留 `depends_on`，预设计划也带上依赖关系，确认执行后不再丢掉 Leader 的 DAG 编排。
 - **本地轻量 OCR 增强**：新增 `OCR_MODE=fast|balanced|quality`、`OCR_PDF_DPI`、`OCR_MAX_IMAGE_PIXELS`、`OCR_FORMULA_CMD`、`OCR_FORMULA_TIMEOUT_SECONDS`。Tesseract 会生成多种 OpenCV 预处理候选（Otsu、自适应阈值、弱光增强、quality 倾斜校正），按多个 `psm` 重试并用可读字符评分选最佳结果；公式截图会额外受益于单行/原始行模式、保留词间距、可选 `equ` 公式语言包、数学符号友好的噪声过滤和评分。若本机安装 `pix2tex` / `latexocr` 或配置 `OCR_FORMULA_CMD`，后端会把公式 OCR 输出的 LaTeX 与 Tesseract/Windows OCR 一起评分择优；扫描 PDF 改为逐页处理，Tesseract 某页为空或失败时可继续用 Windows OCR 或公式命令兜底；Android ML Kit PDF 渲染 scale 提升到 3 并保留像素上限保护。OCR 结果会做基础结构整理，仍保持本机文字识别，不接入云端视觉。
 
 ### 修复

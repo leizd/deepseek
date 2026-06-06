@@ -5,24 +5,23 @@ import json
 import threading
 import unittest
 from http.cookies import SimpleCookie
-from http.server import ThreadingHTTPServer
 
 import deepseek_mobile.web.server as server_module
 from deepseek_mobile.core.errors import AppError, ErrorCode
 from deepseek_mobile.core.utils import url_with_token
-from deepseek_mobile.web.server import DeepSeekMobileHandler
+from deepseek_mobile.web.server import FastAPIServer
 
 
 class ErrorTests(unittest.TestCase):
-    def make_server(self) -> tuple[ThreadingHTTPServer, threading.Thread]:
-        server = ThreadingHTTPServer(("127.0.0.1", 0), DeepSeekMobileHandler)
+    def make_server(self) -> tuple[FastAPIServer, threading.Thread]:
+        server, _ = server_module.create_server(0, host="127.0.0.1")
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         return server, thread
 
     def request_json(
         self,
-        running_server: ThreadingHTTPServer,
+        running_server: FastAPIServer,
         method: str,
         path: str,
         *,

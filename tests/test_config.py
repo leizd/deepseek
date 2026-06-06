@@ -9,12 +9,21 @@ from deepseek_mobile.core.config import (
     DEFAULT_HOST,
     FILE_CACHE_DIR,
     FILE_CHUNK_CHARS,
+    GATEWAY_CONTEXT_MANAGER_ENABLED,
+    GATEWAY_CONTEXT_WINDOW_MESSAGES,
+    GATEWAY_REQUEST_QUEUE_DB,
+    GATEWAY_REQUEST_QUEUE_ENABLED,
+    GATEWAY_REQUEST_QUEUE_MAX_ATTEMPTS,
+    LOCAL_RAG_DB,
+    LOCAL_RAG_ENABLED,
     MAX_UPLOAD_BYTES,
     MAX_UPLOAD_FILE_BYTES,
     MODEL_ALIASES,
     MULTI_AGENT_TIMEOUT_SECONDS,
     SEARCH_RESULT_LIMIT,
     SEARCH_TOTAL_RESULT_LIMIT,
+    SEMANTIC_CACHE_DB,
+    TRACE_DB,
     Settings,
     AGENT_RUNS_DIR,
     AUTH_TOKEN_FILE,
@@ -25,7 +34,7 @@ from deepseek_mobile.core.config import (
 
 class ConfigTests(unittest.TestCase):
     def test_nested_settings_back_compat_constants_match(self) -> None:
-        self.assertEqual(settings.app_version, "1.7.0")
+        self.assertEqual(settings.app_version, "1.8.1")
         self.assertEqual(settings.default_host, "127.0.0.1")
         self.assertEqual(DEFAULT_HOST, settings.default_host)
         self.assertEqual(MULTI_AGENT_TIMEOUT_SECONDS, settings.multi_agent_timeout_seconds)
@@ -35,6 +44,15 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(FILE_CHUNK_CHARS, settings.files.chunk_chars)
         self.assertEqual(FILE_CACHE_DIR, settings.file_cache_dir)
         self.assertEqual(AGENT_RUNS_DIR, settings.agent_runs_dir)
+        self.assertEqual(LOCAL_RAG_DB, settings.local_rag_db)
+        self.assertEqual(LOCAL_RAG_ENABLED, settings.local_rag.enabled)
+        self.assertEqual(TRACE_DB, settings.traces_db)
+        self.assertEqual(SEMANTIC_CACHE_DB, settings.semantic_cache_db)
+        self.assertEqual(GATEWAY_REQUEST_QUEUE_DB, settings.request_queue_db)
+        self.assertEqual(GATEWAY_CONTEXT_MANAGER_ENABLED, settings.gateway.context_manager_enabled)
+        self.assertEqual(GATEWAY_CONTEXT_WINDOW_MESSAGES, settings.gateway.context_sliding_window_messages)
+        self.assertEqual(GATEWAY_REQUEST_QUEUE_ENABLED, settings.gateway.request_queue_enabled)
+        self.assertEqual(GATEWAY_REQUEST_QUEUE_MAX_ATTEMPTS, settings.gateway.request_queue_max_attempts)
         self.assertEqual(AUTH_TOKEN_FILE, settings.auth_token_file)
         self.assertEqual(MAX_UPLOAD_FILE_BYTES, 200_000_000)
         self.assertEqual(MAX_UPLOAD_BYTES, 220_000_000)
@@ -64,6 +82,41 @@ class ConfigTests(unittest.TestCase):
                 "TAVILY_TIMEOUT_SECONDS": "33",
                 "UPLOAD_FILE_MAX_BYTES": "123456",
                 "UPLOAD_MAX_BYTES": "234567",
+                "EDGE_INFERENCE_ENABLED": "1",
+                "EDGE_INFERENCE_PROVIDER": "llama_cpp",
+                "EDGE_MODEL_PATH": "C:\\models\\DeepSeek-R1-Distill-Qwen-1.5B-Q4_K_M.gguf",
+                "EDGE_MODEL_NAME": "DeepSeek-R1-Distill-Qwen-1.5B",
+                "EDGE_ALLOW_MODEL_PATH_OVERRIDE": "1",
+                "EDGE_N_CTX": "8192",
+                "EDGE_N_THREADS": "8",
+                "EDGE_N_GPU_LAYERS": "20",
+                "EDGE_MAX_TOKENS": "2048",
+                "EDGE_TEMPERATURE": "0.2",
+                "EDGE_TOP_P": "0.9",
+                "LOCAL_RAG_ENABLED": "1",
+                "LOCAL_RAG_BACKEND": "sqlite",
+                "LOCAL_RAG_EMBEDDING_PROVIDER": "onnx",
+                "LOCAL_RAG_ONNX_MODEL_PATH": "C:\\models\\bge-micro.onnx",
+                "LOCAL_RAG_TOKENIZER_PATH": "C:\\models\\tokenizer.json",
+                "LOCAL_RAG_EMBEDDING_DIMENSIONS": "384",
+                "LOCAL_RAG_EMBEDDING_MAX_TOKENS": "512",
+                "LOCAL_RAG_SEARCH_LIMIT": "36",
+                "TRACE_ENABLED": "0",
+                "TRACE_INPUT_CHARS": "999999",
+                "TRACE_OUTPUT_CHARS": "500",
+                "TRACE_LIST_LIMIT": "5",
+                "SEMANTIC_CACHE_ENABLED": "0",
+                "SEMANTIC_CACHE_THRESHOLD": "0.97",
+                "SEMANTIC_CACHE_TTL_SECONDS": "120",
+                "SEMANTIC_CACHE_MAX_ITEMS": "222",
+                "SEMANTIC_CACHE_MAX_PROMPT_CHARS": "2222",
+                "SEMANTIC_CACHE_MAX_RESPONSE_CHARS": "3333",
+                "GATEWAY_CONTEXT_MANAGER_ENABLED": "0",
+                "GATEWAY_CONTEXT_WINDOW_MESSAGES": "48",
+                "GATEWAY_REQUEST_QUEUE_ENABLED": "0",
+                "GATEWAY_REQUEST_QUEUE_MAX_ATTEMPTS": "9",
+                "GATEWAY_REQUEST_QUEUE_INITIAL_BACKOFF_SECONDS": "0.5",
+                "GATEWAY_REQUEST_QUEUE_MAX_BACKOFF_SECONDS": "33",
             },
             clear=True,
         ):
@@ -85,6 +138,41 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(loaded.tavily_timeout_seconds, 33)
         self.assertEqual(loaded.files.upload_file_max_bytes, 123456)
         self.assertEqual(loaded.files.upload_max_bytes, 234567)
+        self.assertTrue(loaded.edge.enabled)
+        self.assertEqual(loaded.edge.provider, "llama_cpp")
+        self.assertTrue(loaded.edge.model_path.endswith("Q4_K_M.gguf"))
+        self.assertEqual(loaded.edge.model_name, "DeepSeek-R1-Distill-Qwen-1.5B")
+        self.assertTrue(loaded.edge.allow_model_path_override)
+        self.assertEqual(loaded.edge.n_ctx, 8192)
+        self.assertEqual(loaded.edge.n_threads, 8)
+        self.assertEqual(loaded.edge.n_gpu_layers, 20)
+        self.assertEqual(loaded.edge.max_tokens, 2048)
+        self.assertEqual(loaded.edge.temperature, 0.2)
+        self.assertEqual(loaded.edge.top_p, 0.9)
+        self.assertTrue(loaded.local_rag.enabled)
+        self.assertEqual(loaded.local_rag.backend, "sqlite")
+        self.assertEqual(loaded.local_rag.embedding_provider, "onnx")
+        self.assertTrue(loaded.local_rag.embedding_model_path.endswith("bge-micro.onnx"))
+        self.assertTrue(loaded.local_rag.tokenizer_path.endswith("tokenizer.json"))
+        self.assertEqual(loaded.local_rag.embedding_dimensions, 384)
+        self.assertEqual(loaded.local_rag.embedding_max_tokens, 512)
+        self.assertEqual(loaded.local_rag.search_limit, 36)
+        self.assertFalse(loaded.tracing.enabled)
+        self.assertEqual(loaded.tracing.input_chars, 200_000)
+        self.assertEqual(loaded.tracing.output_chars, 1_000)
+        self.assertEqual(loaded.tracing.list_limit, 10)
+        self.assertFalse(loaded.semantic_cache.enabled)
+        self.assertEqual(loaded.semantic_cache.similarity_threshold, 0.97)
+        self.assertEqual(loaded.semantic_cache.ttl_seconds, 120)
+        self.assertEqual(loaded.semantic_cache.max_items, 222)
+        self.assertEqual(loaded.semantic_cache.max_prompt_chars, 2222)
+        self.assertEqual(loaded.semantic_cache.max_response_chars, 3333)
+        self.assertFalse(loaded.gateway.context_manager_enabled)
+        self.assertEqual(loaded.gateway.context_sliding_window_messages, 48)
+        self.assertFalse(loaded.gateway.request_queue_enabled)
+        self.assertEqual(loaded.gateway.request_queue_max_attempts, 9)
+        self.assertEqual(loaded.gateway.request_queue_initial_backoff_seconds, 0.5)
+        self.assertEqual(loaded.gateway.request_queue_max_backoff_seconds, 33)
 
     def test_ocr_env_values_default_and_clamp(self) -> None:
         with patch.dict(

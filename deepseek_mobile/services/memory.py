@@ -109,6 +109,12 @@ def _save_memories_unlocked(memories: list[dict[str, Any]]) -> None:
     temp_path = MEMORY_FILE.with_suffix(".tmp")
     temp_path.write_text(json.dumps(cleaned, ensure_ascii=False, indent=2), encoding="utf-8")
     temp_path.replace(MEMORY_FILE)
+    try:
+        from deepseek_mobile.services import local_rag
+
+        local_rag.sync_memories(cleaned)
+    except Exception:
+        pass
 
 
 @contextmanager
@@ -410,6 +416,16 @@ def retrieve_memories(query: str, *, scopes: list[str] | None = None) -> list[di
     tokens = query_tokens(query)
     broad = is_memory_broad_query(query)
     allowed_scopes = {normalize_memory_scope(scope) for scope in scopes} if scopes else {"global"}
+    vector_hits: dict[str, int] = {}
+    try:
+        from deepseek_mobile.services import local_rag
+
+        for hit in local_rag.search_memories_index(query, scopes=sorted(allowed_scopes), limit=MEMORY_RETRIEVE_LIMIT * 2):
+            memory_id = str(hit.metadata.get("id") or hit.source_id)
+            if memory_id:
+                vector_hits[memory_id] = max(vector_hits.get(memory_id, 0), int(hit.score))
+    except Exception:
+        vector_hits = {}
     scored: list[tuple[int, str, dict[str, Any]]] = []
 
     for item in memories:
@@ -430,6 +446,9 @@ def retrieve_memories(query: str, *, scopes: list[str] | None = None) -> list[di
         if broad:
             score += 10
         score += score_chunk(content, tokens)
+        memory_id = str(item.get("id") or "")
+        if memory_id in vector_hits:
+            score += max(1, vector_hits[memory_id] // 10)
 
         if score > 0:
             scored.append((score, updated_at, item))

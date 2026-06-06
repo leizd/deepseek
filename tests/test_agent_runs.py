@@ -166,6 +166,35 @@ def test_auto_signal_categories_detects_each_intent() -> None:
     assert agent_runs.auto_signal_categories("你好呀") == set()
 
 
+def test_agent_run_static_presets_include_explicit_dependencies() -> None:
+    payload = valid_payload()
+
+    full, _ = agent_runs.plan_for_preset(payload, "full", lambda _event: None)
+    code, _ = agent_runs.plan_for_preset(payload, "code", lambda _event: None)
+    research, _ = agent_runs.plan_for_preset(payload, "research", lambda _event: None)
+    reason, _ = agent_runs.plan_for_preset(payload, "reason", lambda _event: None)
+
+    full_by_id = {item["id"]: item for item in full}
+    assert full_by_id["coder"]["depends_on"] == ["researcher"]
+    assert full_by_id["reasoner"]["depends_on"] == ["researcher"]
+    assert full_by_id["critic"]["depends_on"] == ["researcher", "coder", "reasoner"]
+    assert code[-1]["depends_on"] == ["coder", "reasoner"]
+    assert research[-1]["depends_on"] == ["researcher"]
+    assert reason[-1]["depends_on"] == ["reasoner"]
+
+
+def test_start_planned_run_confirmation_snapshot_keeps_preset_dependencies(tmp_settings) -> None:
+    run_id = agent_runs.create_run(valid_payload(), confirm_plan=True, agent_preset="code")["runId"]
+
+    agent_runs.start_planned_run(run_id, valid_payload(), confirm_plan=True, agent_preset="code")
+
+    stored = agent_runs.load_run(run_id)
+    assert stored["status"] == "awaiting_plan"
+    assert stored["plan"][-1]["id"] == "critic"
+    assert stored["plan"][-1]["depends_on"] == ["coder", "reasoner"]
+    assert any(event.get("type") == "agent_plan" and event.get("plan", [])[-1].get("depends_on") for event in stored["events"])
+
+
 def test_auto_agent_plan_single_signal_uses_preset_without_llm() -> None:
     payload = {"messages": [{"role": "user", "content": "帮我修这个 bug，代码报错了"}]}
     with patch.object(agent_runs, "plan_agents") as mock_plan:
@@ -174,6 +203,7 @@ def test_auto_agent_plan_single_signal_uses_preset_without_llm() -> None:
     # 单一明确信号走静态 preset，绝不触发 LLM planner（保持 auto 的廉价快路径）
     mock_plan.assert_not_called()
     assert [item["id"] for item in plan] == ["coder", "reasoner", "critic"]
+    assert plan[-1]["depends_on"] == ["coder", "reasoner"]
 
 
 def test_auto_agent_plan_no_signal_delegates_to_llm_planner() -> None:
@@ -242,6 +272,40 @@ def test_rerun_agent_resets_phase_and_final_answer_without_cascading(tmp_setting
     assert stored["finalAnswer"] == "new final"
     assert stored["status"] == "done"
     assert any("未自动重跑" in event.get("text", "") for event in stored["events"])
+
+
+def test_rerun_agent_prior_outputs_follow_dag_layers_not_plan_order(tmp_settings) -> None:
+    run_id = agent_runs.create_run(valid_payload())["runId"]
+    agent_runs.append_event(
+        run_id,
+        {
+            "type": "agent_plan",
+            "plan": [
+                {"id": "coder", "task": "写实现", "depends_on": ["reasoner"]},
+                {"id": "reasoner", "task": "先推理"},
+            ],
+        },
+    )
+    agent_runs.append_event(
+        run_id,
+        {
+            "type": "agent_output",
+            "phase": "reasoner",
+            "output": {"id": "reasoner", "name": "Reasoner", "task": "先推理", "content": "reasoned"},
+        },
+    )
+    agent_runs.append_event(
+        run_id,
+        {
+            "type": "agent_output",
+            "phase": "coder",
+            "output": {"id": "coder", "name": "Coder", "task": "写实现", "content": "coded"},
+        },
+    )
+
+    prior = agent_runs.prior_outputs_for_agent(agent_runs.load_run(run_id), "coder")
+
+    assert [item["id"] for item in prior] == ["reasoner"]
 
 
 def test_run_files_are_valid_json_snapshots(tmp_settings) -> None:

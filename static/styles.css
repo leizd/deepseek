@@ -6439,6 +6439,69 @@ body.file-reader-side-open.file-reader-pdf-open .file-original-region-toolbar .f
   line-height: 1.55;
 }
 
+.trace-waterfall {
+  display: grid;
+  gap: 10px;
+}
+
+.trace-span {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-sunken);
+}
+
+.trace-span.is-error {
+  border-color: var(--danger);
+}
+
+.trace-span-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  font-size: 13px;
+}
+
+.trace-span-header strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-weight: 750;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trace-span-header span,
+.trace-span-details {
+  color: var(--muted-strong);
+  font-size: 12px;
+}
+
+.trace-span-rail {
+  width: 100%;
+  height: 9px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface-soft);
+}
+
+.trace-span-bar {
+  height: 100%;
+  min-width: 8px;
+  border-radius: inherit;
+  background: var(--accent);
+}
+
+.trace-span-details {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .panel-close-button {
   background: var(--surface-soft);
 }

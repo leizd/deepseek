@@ -1754,6 +1754,36 @@ def test_safe_agent_plan_preserves_and_cleans_depends_on() -> None:
     assert "depends_on" not in by_id["reasoner"]
 
 
+def test_safe_agent_plan_drops_worker_dependency_on_critic() -> None:
+    plan = multi_agent.safe_agent_plan(
+        {
+            "agents": [
+                {"id": "critic", "task": "v"},
+                {"id": "coder", "task": "c", "depends_on": ["critic", "researcher"]},
+            ]
+        }
+    )
+
+    by_id = {item["id"]: item for item in plan}
+    # 首轮 worker 不等待 Critic；Critic 反馈由修订环处理，避免 DAG 反向依赖。
+    assert by_id["coder"]["depends_on"] == ["researcher"]
+
+
+def test_default_agent_plan_matches_legacy_execution_order() -> None:
+    plan = multi_agent.default_agent_plan()
+    assert [item["id"] for item in plan] == [
+        "researcher",
+        "coder",
+        "reasoner",
+        "critic",
+    ]
+    by_id = {item["id"]: item for item in plan}
+    assert "depends_on" not in by_id["researcher"]
+    assert by_id["coder"]["depends_on"] == ["researcher"]
+    assert by_id["reasoner"]["depends_on"] == ["researcher"]
+    assert by_id["critic"]["depends_on"] == ["researcher", "coder", "reasoner"]
+
+
 def test_plan_has_dependencies_detects_any_depends_on() -> None:
     assert multi_agent.plan_has_dependencies([{"id": "coder", "task": "c"}]) is False
     # 空 depends_on 不算依赖
@@ -1810,6 +1840,43 @@ def test_dependency_layers_breaks_cycle_without_dropping_agents() -> None:
     ]
     layers = multi_agent.layered_plan(plan)
     assert [[item["id"] for item in layer] for layer in layers] == [["coder", "reasoner"]]
+
+
+def test_dependency_layers_keep_critic_last_when_workers_cycle() -> None:
+    # worker 成环时可以同层冲掉，但 Critic 仍要等到下一层复核这些 worker。
+    plan = [
+        {"id": "coder", "task": "c", "depends_on": ["reasoner"]},
+        {"id": "reasoner", "task": "x", "depends_on": ["coder"]},
+        {"id": "critic", "task": "v", "depends_on": ["coder", "reasoner"]},
+    ]
+    layers = multi_agent.layered_plan(plan)
+
+    assert [[item["id"] for item in layer] for layer in layers] == [["coder", "reasoner"], ["critic"]]
+
+
+def test_dependency_layers_keep_critic_last_with_partial_dependencies() -> None:
+    # Planner 只给部分 worker 写 depends_on 时，仍要保留旧语义：Critic 复核所有 worker 后再跑。
+    plan: list[dict[str, Any]] = [
+        {"id": "researcher", "task": "r"},
+        {"id": "coder", "task": "c", "depends_on": ["researcher"]},
+        {"id": "reasoner", "task": "x"},
+        {"id": "critic", "task": "v"},
+    ]
+    layers = multi_agent.layered_plan(plan)
+
+    assert [item["id"] for item in layers[-1]] == ["critic"]
+    before_critic = [item["id"] for layer in layers[:-1] for item in layer]
+    assert set(before_critic) == {"researcher", "coder", "reasoner"}
+
+
+def test_dependency_layers_ignore_worker_dependency_on_critic() -> None:
+    plan: list[dict[str, Any]] = [
+        {"id": "coder", "task": "c", "depends_on": ["critic"]},
+        {"id": "critic", "task": "v"},
+    ]
+    layers = multi_agent.layered_plan(plan)
+
+    assert [[item["id"] for item in layer] for layer in layers] == [["coder"], ["critic"]]
 
 
 def test_execute_agent_tier_parallel_flag_runs_full_layer_concurrently() -> None:

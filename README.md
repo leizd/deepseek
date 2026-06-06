@@ -1,10 +1,43 @@
-﻿# DeepSeek Mobile
+# DeepSeek Mobile
 
-![版本](https://img.shields.io/badge/version-1.7.0-blue)
+![版本](https://img.shields.io/badge/version-1.8.1-blue)
 ![Python](https://img.shields.io/badge/python-3.10%2B-green)
 ![许可证](https://img.shields.io/badge/license-MIT-black)
 
-DeepSeek Mobile 是一个手机优先、本地优先的 AI 客户端。桌面端可打包成双击即用的本地应用窗口，手机端可打包成 APK；本机 Python 后端负责转发 DeepSeek API、搜索、文件解析、OCR、长期记忆、持久项目文档库、本地工具调用和静态资源。v1.7.0 强化图片视觉理解、PPT / 文档 / 思维导图生成与本地下载，并修复流式调用工具/输出正文时 Activity 状态文案和计时不准的问题；v1.6.6 把前端换上 Gemini 风格的新皮肤，并修复桌面 WebView 启动鉴权、选区引用提问、当前时间上下文、多 Agent 历史回放丢答案、Markdown 链接和饼图渲染等问题；v1.6.3 起 Windows exe 默认入口为内嵌 WebView 的本地桌面应用，不再需要跳转外部浏览器。
+DeepSeek Mobile 是一个手机优先、本地优先的 AI 客户端。桌面端可打包成双击即用的本地应用窗口，手机端可打包成 APK；本机 Python 后端负责转发 DeepSeek API、搜索、文件解析、OCR、长期记忆、持久项目文档库、本地工具调用、端侧推理路由、本地可观测性、API 网关韧性和静态资源。v1.8.0 新增 Gateway & Resiliency：通过 Context Manager 稳定 prompt/cache 前缀，并用 SQLite 请求队列在网络抖动时持久化重试；v1.7.7 新增 Agentic Workflow & Observability，本机 SQLite 会记录聊天/多 Agent DAG 的 trace span，并提供本地语义缓存层；v1.7.6 新增 Local Data Infra，把项目文档和长期记忆升级为本地 SQLite / sqlite-vec RAG 索引，并预留 ONNX Runtime 本地 embedding 流水线；v1.7.5 新增 Edge Inference Infra，可选接入本地 DeepSeek-R1-Distill GGUF / MLC 模型并在简单任务或云端不可达时走端侧；v1.7.0 强化图片视觉理解、PPT / 文档 / 思维导图生成与本地下载，并修复流式调用工具/输出正文时 Activity 状态文案和计时不准的问题；v1.6.6 把前端换上 Gemini 风格的新皮肤，并修复桌面 WebView 启动鉴权、选区引用提问、当前时间上下文、多 Agent 历史回放丢答案、Markdown 链接和饼图渲染等问题；v1.6.3 起 Windows exe 默认入口为内嵌 WebView 的本地桌面应用，不再需要跳转外部浏览器。
+
+## v1.8.0 更新
+
+- 新增 Gateway Context Manager：DeepSeek 请求会固定 system prompt 前缀、按函数名稳定工具定义顺序，并用无空格且 key 排序的稳定 JSON 序列化请求体，最大化 DeepSeek Prefix Cache / Prompt Cache 的可复用前缀。
+- 长上下文在已有 `contextSummary` 兜底时会启用滑动窗口，只保留稳定前缀、最近消息和尾部 dynamic context，避免历史越来越长时拖垮移动端请求。
+- 新增 SQLite 请求队列 `.request-queue/queue.sqlite3`：云端请求打开前会落本地队列记录，遇到断网、超时、429、502、503、504 等可重试失败时自动退避重试；手机息屏或网络短暂切换后，后台 Agent 工作流可继续等待网络恢复，而不是立刻从头报错。
+- 响应诊断新增 `diagnostics.contextManager` 与 `diagnostics.gatewayResiliency`，前端诊断侧栏展示 Context Manager 状态、滑动窗口丢弃数、网关尝试次数和重试次数。
+- 新增 `GET /api/gateway/status`，`/api/config` 同步返回 `gateway.contextManager` 与 `gateway.requestQueue` 状态；Service Worker 缓存版本更新到 `deepseek-mobile-v180`。
+
+## v1.7.7 更新
+
+- 新增 Local Tracing Dashboard：每轮普通聊天、端侧推理和多 Agent DAG 都会生成 `traceId`，写入本地 `.traces/traces.sqlite3`；每个 DeepSeek 请求、端侧请求和语义缓存检查都会记录 span、耗时、输入/输出摘要、usage、prompt cache 命中率和 token 消耗。
+- 前端助手消息更多菜单新增 `Trace` 按钮，可打开本轮 trace waterfall，查看 Planner、Researcher、Coder、Reasoner、Critic、Synthesizer 等节点的耗时分布和慢 span。
+- 新增 Semantic Cache：无工具、无搜索、无附件的请求会在调用 DeepSeek 前用本地 embedding 查 `.semantic-cache/cache.sqlite3`；相似度达到 `SEMANTIC_CACHE_THRESHOLD`（默认 0.95）时直接返回本地缓存结果。
+- 语义缓存默认复用 Local RAG 的 embedding 管线：默认哈希 embedding 零依赖；配置 ONNX Runtime 后可用同一套本地轻量模型计算 prompt 向量。缓存只保存在本机，且可通过 `/api/semantic-cache` 清空。
+- 新增 `/api/traces`、`/api/traces/{traceId}`、`/api/semantic-cache/status` 和 `POST /api/semantic-cache`，`/api/config` 同步返回 `tracing` 与 `semanticCache` 状态。
+- Service Worker 缓存版本更新到 `deepseek-mobile-v177`，确保 Trace 面板和语义缓存诊断的前端代码刷新后生效。
+
+## v1.7.6 更新
+
+- 新增 Local Data Infra：项目文档库和长期记忆会同步写入本地 `.local-rag/rag.sqlite3`，形成统一的本地 RAG 数据层；`/api/config`、`/api/rag/status` 会返回索引状态。
+- 默认使用纯本地 SQLite + 哈希 embedding，安装 `requirements-rag.txt` 后可启用 `sqlite-vec` 的 `vec0` KNN 向量表；没有 native 扩展时仍会回退到 SQLite 元数据表和 Python 本地相似度计算。
+- 预留 ONNX Runtime embedding 流水线：配置 `LOCAL_RAG_EMBEDDING_PROVIDER=onnx`、`LOCAL_RAG_ONNX_MODEL_PATH`、`LOCAL_RAG_TOKENIZER_PATH` 后，可用本机轻量 embedding 模型替代默认哈希向量。
+- `search_files` 工具改为“本地向量库优先 + JSON 分块索引兜底”，Coder/Agent 检索 `.file-cache` 与 `.projects` 时会返回 `retrieval` 诊断字段。
+- 新增 `POST /api/rag/reindex`，可重建已有 `.file-cache`、`.projects` 和 `.memory` 的本地 RAG 索引；数据仍只保存在本机，不接入第三方 embedding 服务。
+
+## v1.7.5 更新
+
+- 新增 Edge Inference Infra：通过 `EDGE_INFERENCE_ENABLED=1`、`EDGE_INFERENCE_PROVIDER=llama_cpp`、`EDGE_MODEL_PATH=<*.gguf>` 可选接入本地 DeepSeek-R1-Distill 1.5B/7B 量化模型；`requirements-edge.txt` 提供 `llama-cpp-python` 可选依赖，MLC-LLM 路径保留为平台相关安装。
+- 新增端云协同路由：`edgeMode=auto` 会把简单闲聊、概括、改写、翻译等短任务优先路由到本地模型；代码、数学、联网搜索、PPT / 文档 / 思维导图、多 Agent 和图片任务继续走云端 DeepSeek-V3/R1。
+- 云端连接失败时，简单任务可自动回退本地端侧模型；`diagnostics.edgeInference` 会记录本轮是否使用端侧、provider、路由原因、量化标记、上下文窗口和回退错误。
+- 新增 `/api/edge/status` 与 `/api/edge/reload`，用于查看本地模型依赖、GGUF 路径、量化信息、加载状态，并释放已加载模型；`/api/config` 同步返回 `edgeInference` 能力摘要。
+- 前端聊天入口支持“没有云端 API Key 但本地模型可用”的普通对话场景；Agent Run、联网搜索、图片理解和标题生成仍要求云端能力。
 
 ## v1.7.0 更新
 
@@ -13,6 +46,7 @@ DeepSeek Mobile 是一个手机优先、本地优先的 AI 客户端。桌面端
 - 新增 `create_document` 工具：模型可直接生成排版精美的 Word（`.docx`）和 PDF 文档，支持标题块、分章节编号、正文段落、要点、表格、页码与配色主题（PDF 用 reportlab 内置中文字体，无需附带字体文件），复用同一套 `/api/download` 下载链路。
 - 新增 `create_mindmap` 工具：用户要求“画思维导图 / 脑图 / mind map”时，后端强制让模型输出结构化节点，并在本地生成可下载 SVG 思维导图，最终回复会在正文中直接显示预览图。
 - `create_pptx` / `create_document` / `create_mindmap` 这类终态文件工具执行成功后，后端会直接返回本地下载链接，不再把完整工具参数和结果二次发给 DeepSeek 总结，避免工具回合把 prompt cache 命中率拉低。
+- 多 Agent DAG 编排更稳定：Critic 会保持最后复核，即使 Planner 只给部分 worker 写了依赖或 worker 依赖成环；先确认计划工作台也会保留 `depends_on`，不会把 Leader 的依赖计划清掉。
 - 修复流式工具调用期间 Activity 标题计时停顿：运行中计时改为整轮活跃耗时，调用工具、搜索和 Agent 工作阶段都继续刷新。
 - 修复正文已经开始输出时仍显示“思考中”：流式状态会按阶段显示“思考中 / 调用工具中 / 搜索中 / Agent 工作中 / 生成中”。
 - Service Worker 缓存版本更新到 `deepseek-mobile-v170`，确保新的前端状态逻辑刷新后生效。
@@ -291,7 +325,7 @@ python -m pip install -r requirements-ocr.txt
 - 支持文件预览，可查看后端实际抽取到的文本片段。
 - 支持文本、Markdown、CSV、JSON、代码文件、RTF、HTML、DOCX、XLSX、PPTX、EPUB、PDF、PNG、JPG、WebP、BMP、TIFF、GIF 等格式。
 - 文件会在本地后端解析并分块缓存，聊天请求只发送 `fileId` 等元数据。
-- 提问时后端会按问题从缓存中检索相关片段，而不是把整份文件硬塞给模型；v0.7.1 起检索会结合关键词分数和本地哈希向量相似度，先提供完全本地的轻量语义排序。v0.7.2 起模型也可通过 `search_files` 工具主动检索 `.file-cache` 和 `.projects`。
+- 提问时后端会按问题从缓存中检索相关片段，而不是把整份文件硬塞给模型；v1.7.6 起检索会把分块写入 `.local-rag/rag.sqlite3`，优先走本地 SQLite / sqlite-vec 向量索引，未安装可选依赖时回退到关键词 + 哈希 embedding 的本地混合排序。v0.7.2 起模型也可通过 `search_files` 工具主动检索 `.file-cache` 和 `.projects`。
 - PDF 优先读取可复制文字；扫描版或图片型 PDF、照片和截图可通过 OCR 重试读取文字。
 - OCR 重试会优先调用 DeepSeek API 转写图片文字；它的目标仍是“提取文字”，普通聊天里的图片理解才负责更开放的看图问答。
 
@@ -318,6 +352,9 @@ python -m pip install -r requirements-ocr.txt
 - 自定义 Seek：浏览器 `localStorage`。
 - 项目空间 / 文档库：`.projects/{projectId}/project.json` 和 `.projects/{projectId}/files/`。
 - 文件分块缓存：`.file-cache`。
+- 本地 RAG 向量索引：`.local-rag/rag.sqlite3`。
+- 本地 Trace 数据库：`.traces/traces.sqlite3`。
+- 语义缓存数据库：`.semantic-cache/cache.sqlite3`。
 - 搜索缓存：`.search-cache`。
 - 本地提醒队列：`.reminders/reminders.json`。
 - 长期记忆：`.memory/memories.json`。
@@ -326,7 +363,7 @@ python -m pip install -r requirements-ocr.txt
 
 文件分块缓存会自动清理：默认保留 14 天内缓存，并把 `.file-cache` 总量控制在约 500 MB 内。项目空间里的 `.projects/` 是持久文档库，不参与临时附件缓存清理；删除项目时才会移除对应文档。搜索缓存会按过期时间清理。服务启动时会立即清理一次，并在运行期间约每 6 小时后台清理一次。
 
-`.gitignore` 默认排除了运行期缓存、长期记忆、项目文档库、提醒队列、覆盖率、测试缓存、IDE 配置和本地 `server*.log`。发布压缩包或提交代码前，请不要把 `.file-cache`、`.projects`、`.memory`、`.reminders`、`.search-cache` 等本地数据打包进去。
+`.gitignore` 默认排除了运行期缓存、长期记忆、项目文档库、本地 RAG 索引、Trace、语义缓存、提醒队列、覆盖率、测试缓存、IDE 配置和本地 `server*.log`。发布压缩包或提交代码前，请不要把 `.file-cache`、`.projects`、`.local-rag`、`.traces`、`.semantic-cache`、`.memory`、`.reminders`、`.search-cache` 等本地数据打包进去。
 
 发布压缩包建议使用：
 
