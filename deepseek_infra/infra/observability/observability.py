@@ -278,6 +278,55 @@ def trace_status() -> dict[str, Any]:
     }
 
 
+def metrics_snapshot() -> dict[str, Any]:
+    """Aggregate counters from the local trace store for /metrics and dashboards."""
+    snapshot: dict[str, Any] = {
+        "enabled": TRACE_ENABLED,
+        "runs_total": 0,
+        "runs_by_kind": {},
+        "error_runs_total": 0,
+        "model_calls_total": 0,
+        "semantic_cache_checks_total": 0,
+        "semantic_cache_hits_total": 0,
+        "tokens_total": 0,
+        "run_latency_ms_avg": 0.0,
+    }
+    if not TRACE_ENABLED:
+        return snapshot
+    try:
+        with _db_lock, connect_db() as conn:
+            initialize_schema(conn)
+            snapshot["runs_total"] = int(conn.execute(f"SELECT COUNT(*) FROM {TRACE_RUNS_TABLE}").fetchone()[0])
+            snapshot["runs_by_kind"] = {
+                str(kind): int(count)
+                for kind, count in conn.execute(f"SELECT kind, COUNT(*) FROM {TRACE_RUNS_TABLE} GROUP BY kind").fetchall()
+            }
+            snapshot["error_runs_total"] = int(
+                conn.execute(f"SELECT COUNT(*) FROM {TRACE_RUNS_TABLE} WHERE status = 'error'").fetchone()[0]
+            )
+            avg_latency = conn.execute(f"SELECT AVG(duration_ms) FROM {TRACE_RUNS_TABLE}").fetchone()[0]
+            snapshot["run_latency_ms_avg"] = round(float(avg_latency), 2) if avg_latency is not None else 0.0
+            snapshot["model_calls_total"] = int(
+                conn.execute(
+                    f"SELECT COUNT(*) FROM {TRACE_SPANS_TABLE} "
+                    "WHERE kind IN ('deepseek_api', 'deepseek_json', 'deepseek_stream')"
+                ).fetchone()[0]
+            )
+            snapshot["semantic_cache_checks_total"] = int(
+                conn.execute(f"SELECT COUNT(*) FROM {TRACE_SPANS_TABLE} WHERE kind = 'semantic_cache'").fetchone()[0]
+            )
+            snapshot["semantic_cache_hits_total"] = int(
+                conn.execute(
+                    f"SELECT COUNT(*) FROM {TRACE_SPANS_TABLE} WHERE kind = 'semantic_cache' AND status = 'hit'"
+                ).fetchone()[0]
+            )
+            total_tokens = conn.execute(f"SELECT SUM(total_tokens) FROM {TRACE_SPANS_TABLE}").fetchone()[0]
+            snapshot["tokens_total"] = int(total_tokens) if total_tokens is not None else 0
+    except Exception as exc:
+        set_last_error(f"metrics snapshot failed: {exc}")
+    return snapshot
+
+
 def list_traces(limit: int | None = None) -> list[dict[str, Any]]:
     if not TRACE_ENABLED:
         return []

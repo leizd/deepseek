@@ -57,6 +57,8 @@ from deepseek_infra.infra.gateway.openai_api import (
     openai_models_list,
     openai_to_internal_payload,
 )
+from deepseek_infra.infra.observability.health import healthz, readyz
+from deepseek_infra.infra.observability.metrics import render_prometheus
 from deepseek_infra.infra.gateway.edge_inference import edge_inference_status, edge_unload
 from deepseek_infra.infra.rag.files import (
     cached_file_source,
@@ -552,6 +554,21 @@ def create_app() -> FastAPI:
         """OpenAI-compatible model listing from the configured catalog."""
         require_api_auth(request)
         return json_response(openai_models_list())
+
+    @api.get("/healthz")
+    async def healthz_route() -> JSONResponse:
+        """Liveness probe (unauthenticated)."""
+        return json_response(healthz())
+
+    @api.get("/readyz")
+    async def readyz_route() -> JSONResponse:
+        """Readiness probe (unauthenticated)."""
+        return json_response(readyz())
+
+    @api.get("/metrics")
+    async def metrics_route() -> Response:
+        """Prometheus metrics (unauthenticated; bind to 127.0.0.1 by default)."""
+        return Response(content=render_prometheus(), media_type="text/plain; version=0.0.4; charset=utf-8")
 
     @api.post("/api/agent-runs")
     async def api_agent_runs_create(request: Request) -> JSONResponse:
