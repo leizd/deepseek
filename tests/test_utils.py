@@ -7,6 +7,9 @@ import deepseek_mobile.core.utils as utils
 from deepseek_mobile.core.utils import (
     clean_filename,
     clear_local_ip_cache,
+    format_upstream_error,
+    humanize_upstream_error,
+    is_content_risk_error,
     is_lan_ip,
     is_rfc1918_ip,
     latest_user_query,
@@ -119,6 +122,34 @@ class UtilsTests(unittest.TestCase):
         self.assertIs(kwargs["startupinfo"], startup_info)
         self.assertEqual(startup_info.dwFlags & 1, 1)
         self.assertEqual(startup_info.wShowWindow, 0)
+
+    def test_format_upstream_error_extracts_message(self) -> None:
+        self.assertEqual(
+            format_upstream_error('{"error": {"message": "Content Exists Risk"}}'),
+            "Content Exists Risk",
+        )
+        self.assertEqual(format_upstream_error("not json"), "not json")
+        self.assertEqual(format_upstream_error(""), "DeepSeek API error")
+
+    def test_is_content_risk_error_detects_moderation_signatures(self) -> None:
+        self.assertTrue(is_content_risk_error("Content Exists Risk"))
+        self.assertTrue(is_content_risk_error("content_filter triggered"))
+        self.assertTrue(is_content_risk_error("内容存在风险"))
+        self.assertTrue(is_content_risk_error("内容涉及敏感信息"))
+        self.assertFalse(is_content_risk_error("rate limit exceeded"))
+        self.assertFalse(is_content_risk_error("Cannot reach DeepSeek API: timed out"))
+        self.assertFalse(is_content_risk_error(""))
+        self.assertFalse(is_content_risk_error(None))
+
+    def test_humanize_upstream_error_explains_content_risk_only(self) -> None:
+        message = humanize_upstream_error("Content Exists Risk")
+        self.assertIn("内容安全提示", message)
+        self.assertIn("Content Exists Risk", message)
+        self.assertIn("联网搜索", message)
+        # 非内容拦截类错误原样返回，不被改写
+        self.assertEqual(humanize_upstream_error("Rate limit reached"), "Rate limit reached")
+        self.assertEqual(humanize_upstream_error(""), "DeepSeek API error")
+        self.assertEqual(humanize_upstream_error(None), "DeepSeek API error")
 
 
 if __name__ == "__main__":

@@ -28,6 +28,41 @@ def format_upstream_error(raw: str) -> str:
             return str(message)
     return raw[:500] or "DeepSeek API error"
 
+_CONTENT_RISK_SIGNATURES = (
+    "content exists risk",
+    "content_filter",
+    "contentfilter",
+    "content policy",
+    "content management",
+)
+
+def is_content_risk_error(message: str | None) -> bool:
+    """判断上游错误是否为 DeepSeek 内容安全拦截（而非网络、限流、鉴权等）。"""
+    raw = str(message or "")
+    lowered = raw.lower()
+    if not lowered.strip():
+        return False
+    if any(signature in lowered for signature in _CONTENT_RISK_SIGNATURES):
+        return True
+    has_content = "content" in lowered or "内容" in raw
+    has_risk = "risk" in lowered or "风险" in raw or "敏感" in raw
+    return has_content and has_risk
+
+def humanize_upstream_error(message: str | None) -> str:
+    """把上游错误转成清晰、可操作的中文说明；内容安全拦截以外的错误原样返回。"""
+    raw = str(message or "").strip()
+    if not raw:
+        return "DeepSeek API error"
+    if is_content_risk_error(raw):
+        signal = raw if len(raw) <= 100 else raw[:100] + "…"
+        return (
+            "内容安全提示：DeepSeek 判定本轮内容存在风险（原始返回："
+            f"{signal}），已中止生成。这类拦截常见于时政、新闻等敏感话题，"
+            "尤其当联网搜索带回相关内容时。可以换个问法、把问题缩小到具体主题，"
+            "或关闭联网搜索后重试。"
+        )
+    return raw
+
 def normalize_model_name(value: Any) -> str:
     raw = str(value or "").strip()
     key = raw.lower().replace("_", "-").replace(" ", "")

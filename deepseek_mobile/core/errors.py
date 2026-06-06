@@ -12,6 +12,7 @@ class ErrorCode(str, Enum):
     INVALID_PAYLOAD = "invalid_payload"
     UPSTREAM_FAILURE = "upstream_failure"
     UPSTREAM_TIMEOUT = "upstream_timeout"
+    UPSTREAM_CONTENT_RISK = "upstream_content_risk"
     UPLOAD_TOO_LARGE = "upload_too_large"
     UNSUPPORTED_FILE = "unsupported_file"
     FILE_INDEX_EXPIRED = "file_index_expired"

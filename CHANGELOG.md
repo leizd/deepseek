@@ -2,6 +2,42 @@
 
 本项目使用类似 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的分组方式维护变更记录。未发布内容记录在 `[Unreleased]`，正式发版时迁移到具体版本。
 
+## [1.9.1]
+
+### 修复
+
+- **内容安全拦截不再丢掉整轮成果**：当 DeepSeek 在流式响应里返回内容安全拦截（如 `Content Exists Risk`，常见于联网搜索「今天的新闻」这类敏感时政话题）时，旧逻辑会把整轮替换成生硬的 `调用失败：Content Exists Risk` 并连带丢失已生成的思考过程。现在后端用 `humanize_upstream_error()` 把这类错误转成清晰、可操作的中文说明（解释这是 DeepSeek 内容安全拦截，并建议换个问法、缩小到具体主题或关闭联网搜索后重试），并用专用错误码 `ErrorCode.UPSTREAM_CONTENT_RISK`（`upstream_content_risk`）标记，便于前端区分处理。
+
+### 改进
+
+- 前端对内容安全拦截改为「软展示」：新增 `applyAssistantFailure()`，命中 `upstream_content_risk` 时保留已流式产出的思考过程与正文，正文区显示「内容安全提示」而不是红色「调用失败」；助手气泡叠加 `content-filtered` 类，用克制的琥珀色基调区别于普通失败。`contentFiltered` 标记随消息持久化，刷新后保持。
+- `humanize_upstream_error()` / `is_content_risk_error()` 同时覆盖同步与流式两条上游错误路径（`HTTPError` 与 SSE `event: error`）；限流、网络、鉴权等非内容拦截类错误原样透传，行为不变。
+
+### 测试
+
+- `tests/test_utils.py` 新增 `format_upstream_error` / `is_content_risk_error` / `humanize_upstream_error` 单元测试，覆盖中英文内容拦截签名、敏感词命中，以及非拦截类错误的原样返回。
+- `tests/test_encoding_regression.py` 新增 `test_v191_content_risk_graceful_degradation_is_present` 哨兵，钉住后端识别函数与错误码、前端 `applyAssistantFailure` / `contentFiltered` / `content-filtered` 样式与缓存版本。
+
+### 构建 / 发布
+
+- 前端静态资源（`static/modules/chat.js`、`static/styles.css`）有改动，Service Worker 缓存版本更新到 `deepseek-mobile-v181`。
+- 版本号升到 `1.9.1`：`deepseek_mobile/core/config.py`、README badge、`docs/`（API / ARCHITECTURE / FRONTEND_MODULES / APK / SECURITY）「适用版本」、`tests/test_config.py` 与 `tests/test_encoding_regression.py` 版本戳同步更新。
+
+## [1.9.0]
+
+本次为文档与版本维护发版，不改动任何运行时行为；`static/sw.js` 缓存版本保持 `deepseek-mobile-v180`，无需重拉前端缓存。
+
+### 文档
+
+- **README 重构**：把 README 从「逐版本更新日志堆叠」改写为以产品能力为主线的结构——顶部是产品定位与亮点，中部按「对话与推理 / 多 Agent 协作 / 联网搜索 / 文件理解与文档工作台 / 图片视觉与 OCR / 生成式产物 / 端云协同推理 / 本地数据层与可观测性 / 长期记忆 / Seek 助手 / 前端体验」分类介绍当前能力，随后是快速开始、环境变量、安装与依赖、本地数据与隐私、文档索引和注意事项。逐版本历史完全交给本 `CHANGELOG.md`，README 不再保留 `## vX.Y.Z 更新` 段落和开头的版本流水叙述。
+- README「本地数据与隐私」补全 `.request-queue/queue.sqlite3` 和 `.agent-runs/`，并新增「文档」索引指向 `CHANGELOG.md` 与 `docs/` 下的 API / 架构 / 前端模块 / APK / 安全说明。
+- 版本号统一升到 `1.9.0`：`deepseek_mobile/core/config.py`、README badge、`docs/`（API / ARCHITECTURE / FRONTEND_MODULES / APK / SECURITY）的「适用版本」同步更新。
+
+### 测试
+
+- `tests/test_config.py`、`tests/test_encoding_regression.py` 的版本戳升到 `1.9.0`（`version-1.9.0-blue` ×17、`适用版本：v1.9.0。` ×8、`app_version: str = "1.9.0"` ×5）。
+- `test_encoding_regression.py` 中原本锚定旧 README 逐版本段落（`## v1.7.0 更新` / `## v1.4.0 更新` / `Local Data Infra` / `Gateway & Resiliency`）的哨兵断言，改为锚定重构后 README 仍稳定包含的能力字样：`图片视觉理解`、`可恢复 Agent Run`、`create_pptx`、`.local-rag`、`.request-queue`。
+
 ## [1.8.1]
 
 ### 修复

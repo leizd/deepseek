@@ -50,7 +50,13 @@ from deepseek_mobile.services.search import (
     search_single_round,
 )
 from deepseek_mobile.services.tools import MAX_TOOL_ROUNDS, available_tool_definitions, execute_tool_calls
-from deepseek_mobile.core.utils import format_upstream_error, latest_user_query, normalize_model_name
+from deepseek_mobile.core.utils import (
+    format_upstream_error,
+    humanize_upstream_error,
+    is_content_risk_error,
+    latest_user_query,
+    normalize_model_name,
+)
 
 logger = logging.getLogger("deepseek_mobile.deepseek")
 
@@ -1356,10 +1362,13 @@ def call_deepseek(
                 response_json = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
-            span.finish(status="error", error=format_upstream_error(detail), output_data={"status": exc.code, "detail": detail})
+            raw_message = format_upstream_error(detail)
+            upstream_message = humanize_upstream_error(raw_message)
+            upstream_code = ErrorCode.UPSTREAM_CONTENT_RISK if is_content_risk_error(raw_message) else ErrorCode.UPSTREAM_FAILURE
+            span.finish(status="error", error=upstream_message, output_data={"status": exc.code, "detail": detail})
             if trace_context.created:
-                finish_trace(trace_context.trace_id, status="error", error=format_upstream_error(detail))
-            raise AppError(format_upstream_error(detail), code=ErrorCode.UPSTREAM_FAILURE, status=min(exc.code, 502)) from exc
+                finish_trace(trace_context.trace_id, status="error", error=upstream_message)
+            raise AppError(upstream_message, code=upstream_code, status=min(exc.code, 502)) from exc
         except urllib.error.URLError as exc:
             span.finish(status="error", error=str(exc.reason))
             fallback_route = edge_fallback_route(payload)
@@ -1626,7 +1635,13 @@ def stream_deepseek(
                         if event_data == "[DONE]":
                             break
                         if event_name == "error":
-                            error_message = sse_error_message(event_data)
+                            raw_message = sse_error_message(event_data)
+                            error_message = humanize_upstream_error(raw_message)
+                            error_code = (
+                                ErrorCode.UPSTREAM_CONTENT_RISK
+                                if is_content_risk_error(raw_message)
+                                else ErrorCode.UPSTREAM_FAILURE
+                            )
                             span.finish(
                                 status="error",
                                 error=error_message,
@@ -1635,7 +1650,7 @@ def stream_deepseek(
                             )
                             if trace_context.created:
                                 finish_trace(trace_context.trace_id, status="error", error=error_message)
-                            emit_checked({"type": "error", "error": error_message, "code": ErrorCode.UPSTREAM_FAILURE.value})
+                            emit_checked({"type": "error", "error": error_message, "code": error_code.value})
                             return
                         try:
                             chunk = json.loads(event_data)
@@ -1786,9 +1801,12 @@ def stream_deepseek(
         emit_checked({"type": "error", "error": str(exc), "code": exc.code.value})
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
+        raw_message = format_upstream_error(detail)
+        error_message = humanize_upstream_error(raw_message)
+        error_code = ErrorCode.UPSTREAM_CONTENT_RISK if is_content_risk_error(raw_message) else ErrorCode.UPSTREAM_FAILURE
         if trace_context is not None and trace_context.created:
-            finish_trace(trace_context.trace_id, status="error", error=format_upstream_error(detail))
-        emit_checked({"type": "error", "error": format_upstream_error(detail), "code": ErrorCode.UPSTREAM_FAILURE.value})
+            finish_trace(trace_context.trace_id, status="error", error=error_message)
+        emit_checked({"type": "error", "error": error_message, "code": error_code.value})
     except urllib.error.URLError as exc:
         fallback_route = edge_fallback_route(payload)
         if fallback_route is not None:

@@ -1227,6 +1227,12 @@ p {
   color: var(--text-primary);
 }
 
+/* 内容安全拦截：用克制的琥珀色「提示」基调，区别于红色「调用失败」。 */
+.message.error.content-filtered .bubble {
+  border-color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 14%, transparent);
+}
+
 :root[data-theme="arc"] .message.user .bubble {
   border: 1px solid var(--border-default);
 }

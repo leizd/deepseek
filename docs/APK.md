@@ -1,6 +1,6 @@
 # Android APK 打包说明
 
-适用版本：v1.8.1。
+适用版本：v1.9.1。
 
 本仓库现在包含 `android/` Android Studio 工程，可把 DeepSeek Mobile 打包成手机上直接运行的 APK。APK 的结构是：
 
