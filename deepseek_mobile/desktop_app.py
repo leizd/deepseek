@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import logging
 import sys
+import time
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.request import urlopen
 
 from deepseek_mobile.app import ServerHandle, prepare_and_start, shutdown_handle
 
@@ -14,6 +16,9 @@ DEFAULT_WIDTH = 1180
 DEFAULT_HEIGHT = 820
 MIN_WIDTH = 760
 MIN_HEIGHT = 520
+SERVER_READY_TIMEOUT_SECONDS = 8.0
+SERVER_READY_POLL_SECONDS = 0.2
+SERVER_READY_REQUEST_TIMEOUT_SECONDS = 0.75
 
 logger = logging.getLogger("deepseek_mobile.desktop_app")
 
@@ -22,7 +27,9 @@ def main() -> int:
     handle: ServerHandle | None = None
     try:
         handle = prepare_and_start(host="127.0.0.1", serve=True)
-        open_app_window(webview_entry_url(handle.computer_url))
+        url = webview_entry_url(handle.computer_url)
+        wait_for_server_ready(url)
+        open_app_window(url)
         return 0
     except Exception as exc:
         logger.exception("desktop_app_failed")
@@ -55,6 +62,21 @@ def open_app_window(url: str) -> None:
         min_size=(MIN_WIDTH, MIN_HEIGHT),
     )
     webview.start(debug=False, private_mode=False)
+
+
+def wait_for_server_ready(url: str, timeout_seconds: float = SERVER_READY_TIMEOUT_SECONDS) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    last_error: BaseException | None = None
+    while time.monotonic() < deadline:
+        try:
+            with urlopen(url, timeout=SERVER_READY_REQUEST_TIMEOUT_SECONDS) as response:
+                if 200 <= int(response.status) < 400:
+                    return
+                last_error = RuntimeError(f"HTTP {response.status}")
+        except BaseException as exc:
+            last_error = exc
+        time.sleep(SERVER_READY_POLL_SECONDS)
+    raise RuntimeError(f"Local server did not become ready: {last_error}")
 
 
 def show_startup_error(exc: BaseException) -> None:

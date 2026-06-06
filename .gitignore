@@ -4,6 +4,10 @@
 .file-cache/
 .generated/
 .agent-runs/
+.local-rag/
+.semantic-cache/
+.traces/
+.request-queue/
 .memory/
 .projects/
 .reminders/

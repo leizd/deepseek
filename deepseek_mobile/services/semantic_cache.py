@@ -1,0 +1,395 @@
+"""Local semantic response cache backed by SQLite embeddings."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+import sqlite3
+import threading
+import time
+import uuid
+from dataclasses import dataclass
+from typing import Any
+
+from deepseek_mobile.core.config import (
+    SEMANTIC_CACHE_DB,
+    SEMANTIC_CACHE_DIR,
+    SEMANTIC_CACHE_ENABLED,
+    SEMANTIC_CACHE_MAX_ITEMS,
+    SEMANTIC_CACHE_MAX_PROMPT_CHARS,
+    SEMANTIC_CACHE_MAX_RESPONSE_CHARS,
+    SEMANTIC_CACHE_THRESHOLD,
+    SEMANTIC_CACHE_TTL_SECONDS,
+)
+from deepseek_mobile.services.chat_payload import count_payload_attachments
+from deepseek_mobile.services.local_rag import cosine_similarity, embed_text, embedding_pipeline
+
+logger = logging.getLogger("deepseek_mobile.semantic_cache")
+
+CACHE_TABLE = "semantic_cache_items"
+
+_db_lock = threading.RLock()
+_last_error = ""
+
+
+@dataclass(frozen=True, slots=True)
+class CacheLookup:
+    diagnostics: dict[str, Any]
+    result: dict[str, Any] | None = None
+
+    @property
+    def hit(self) -> bool:
+        return self.result is not None
+
+
+def lookup(payload: dict[str, Any], body: dict[str, Any]) -> CacheLookup:
+    diagnostics = base_diagnostics()
+    reason = skip_reason(payload, body)
+    if reason:
+        diagnostics["skippedReason"] = reason
+        return CacheLookup(diagnostics)
+
+    prompt_text = prompt_text_for_body(body)
+    if not prompt_text:
+        diagnostics["skippedReason"] = "empty_prompt"
+        return CacheLookup(diagnostics)
+    if len(prompt_text) > SEMANTIC_CACHE_MAX_PROMPT_CHARS:
+        diagnostics["skippedReason"] = "prompt_too_large"
+        diagnostics["promptChars"] = len(prompt_text)
+        return CacheLookup(diagnostics)
+
+    diagnostics["checked"] = True
+    diagnostics["promptChars"] = len(prompt_text)
+    prompt_hash = stable_hash(prompt_text)
+    try:
+        query_embedding = embed_text(prompt_text)
+        rows = candidate_rows(str(body.get("model") or ""))
+    except Exception as exc:
+        set_last_error(f"semantic cache lookup failed: {exc}")
+        diagnostics["skippedReason"] = "lookup_error"
+        diagnostics["lastError"] = _last_error
+        return CacheLookup(diagnostics)
+
+    now = int(time.time())
+    best_row: sqlite3.Row | None = None
+    best_similarity = 0.0
+    for row in rows:
+        if cache_expired(row, now):
+            continue
+        row_embedding = decode_embedding(row["embedding"])
+        similarity = cosine_similarity(query_embedding, row_embedding)
+        if row["prompt_hash"] == prompt_hash:
+            similarity = 1.0
+        if similarity > best_similarity:
+            best_similarity = similarity
+            best_row = row
+
+    diagnostics["similarity"] = round(best_similarity, 4)
+    if best_row is None or best_similarity < SEMANTIC_CACHE_THRESHOLD:
+        return CacheLookup(diagnostics)
+
+    response = decode_json(best_row["response_json"])
+    if not isinstance(response, dict):
+        diagnostics["skippedReason"] = "bad_cache_record"
+        return CacheLookup(diagnostics)
+
+    cache_id = str(best_row["cache_id"])
+    touch_cache(cache_id)
+    diagnostics.update(
+        {
+            "hit": True,
+            "cacheId": cache_id,
+            "similarity": round(best_similarity, 4),
+            "promptHash": prompt_hash,
+            "savedUsage": decode_json(best_row["usage_json"]) if best_row["usage_json"] else {},
+        }
+    )
+    return CacheLookup(diagnostics, cached_result(cache_id, response))
+
+
+def store(payload: dict[str, Any], body: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
+    diagnostics: dict[str, Any] = {"stored": False}
+    reason = skip_reason(payload, body)
+    if reason:
+        diagnostics["storeSkippedReason"] = reason
+        return diagnostics
+
+    prompt_text = prompt_text_for_body(body)
+    content = str(result.get("content") or "")
+    if not prompt_text or not content:
+        diagnostics["storeSkippedReason"] = "empty_prompt_or_response"
+        return diagnostics
+    if len(prompt_text) > SEMANTIC_CACHE_MAX_PROMPT_CHARS:
+        diagnostics["storeSkippedReason"] = "prompt_too_large"
+        return diagnostics
+    if len(content) > SEMANTIC_CACHE_MAX_RESPONSE_CHARS:
+        diagnostics["storeSkippedReason"] = "response_too_large"
+        return diagnostics
+    if result.get("search") or result.get("memorySuggestions"):
+        diagnostics["storeSkippedReason"] = "side_effect_response"
+        return diagnostics
+
+    response = {
+        "model": str(result.get("model") or body.get("model") or ""),
+        "content": content,
+        "reasoning": str(result.get("reasoning") or ""),
+    }
+    usage = result.get("usage") if isinstance(result.get("usage"), dict) else {}
+    prompt_hash = stable_hash(prompt_text)
+    now = int(time.time())
+    try:
+        embedding = embed_text(prompt_text)
+        cache_id = existing_cache_id(prompt_hash, str(body.get("model") or "")) or uuid.uuid4().hex
+        with _db_lock, connect_db() as conn:
+            initialize_schema(conn)
+            conn.execute(
+                f"""
+                INSERT INTO {CACHE_TABLE}
+                    (
+                        cache_id, prompt_hash, model, prompt_text, embedding, response_json, usage_json,
+                        created_at, updated_at, last_hit_at, hit_count
+                    )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0)
+                ON CONFLICT(cache_id) DO UPDATE SET
+                    prompt_text = excluded.prompt_text,
+                    embedding = excluded.embedding,
+                    response_json = excluded.response_json,
+                    usage_json = excluded.usage_json,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    cache_id,
+                    prompt_hash,
+                    str(body.get("model") or ""),
+                    prompt_text,
+                    encode_embedding(embedding),
+                    json.dumps(response, ensure_ascii=False),
+                    json.dumps(usage, ensure_ascii=False),
+                    now,
+                    now,
+                ),
+            )
+            trim_cache(conn)
+        diagnostics.update({"stored": True, "cacheId": cache_id, "promptHash": prompt_hash})
+    except Exception as exc:
+        set_last_error(f"semantic cache store failed: {exc}")
+        diagnostics["storeSkippedReason"] = "store_error"
+        diagnostics["lastError"] = _last_error
+    return diagnostics
+
+
+def status() -> dict[str, Any]:
+    item_count = 0
+    hit_count = 0
+    if SEMANTIC_CACHE_ENABLED:
+        try:
+            with _db_lock, connect_db() as conn:
+                initialize_schema(conn)
+                row = conn.execute(f"SELECT COUNT(*) AS c, COALESCE(SUM(hit_count), 0) AS h FROM {CACHE_TABLE}").fetchone()
+                item_count = int(row["c"] or 0)
+                hit_count = int(row["h"] or 0)
+        except Exception as exc:
+            set_last_error(f"semantic cache status failed: {exc}")
+    pipeline = embedding_pipeline()
+    return {
+        "enabled": SEMANTIC_CACHE_ENABLED,
+        "databasePath": str(SEMANTIC_CACHE_DB),
+        "similarityThreshold": SEMANTIC_CACHE_THRESHOLD,
+        "ttlSeconds": SEMANTIC_CACHE_TTL_SECONDS,
+        "maxItems": SEMANTIC_CACHE_MAX_ITEMS,
+        "items": item_count,
+        "hits": hit_count,
+        "embeddingProvider": pipeline.active_provider,
+        "embeddingDimensions": pipeline.dimensions,
+        "lastError": _last_error or pipeline.error,
+    }
+
+
+def clear() -> dict[str, Any]:
+    try:
+        with _db_lock, connect_db() as conn:
+            initialize_schema(conn)
+            conn.execute(f"DELETE FROM {CACHE_TABLE}")
+    except Exception as exc:
+        set_last_error(f"semantic cache clear failed: {exc}")
+        return {"ok": False, "semanticCache": status()}
+    return {"ok": True, "semanticCache": status()}
+
+
+def base_diagnostics() -> dict[str, Any]:
+    return {
+        "enabled": SEMANTIC_CACHE_ENABLED,
+        "checked": False,
+        "hit": False,
+        "threshold": SEMANTIC_CACHE_THRESHOLD,
+        "similarity": 0.0,
+        "skippedReason": "",
+        "cacheId": "",
+    }
+
+
+def skip_reason(payload: dict[str, Any], body: dict[str, Any]) -> str:
+    if not SEMANTIC_CACHE_ENABLED:
+        return "disabled"
+    if payload.get("semanticCacheEnabled") is False:
+        return "request_disabled"
+    if count_payload_attachments(payload.get("messages")):
+        return "attachments"
+    if payload.get("searchEnabled") is True:
+        return "search_enabled"
+    if body.get("tools"):
+        return "tools_enabled"
+    tool_choice = body.get("tool_choice")
+    if tool_choice and tool_choice != "none":
+        return "tool_choice_enabled"
+    if body.get("stream_options"):
+        return ""
+    return ""
+
+
+def prompt_text_for_body(body: dict[str, Any]) -> str:
+    prompt = {
+        "model": body.get("model"),
+        "temperature": body.get("temperature"),
+        "top_p": body.get("top_p"),
+        "reasoning_effort": body.get("reasoning_effort"),
+        "thinking": body.get("thinking"),
+        "messages": body.get("messages") or [],
+    }
+    return json.dumps(prompt, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+
+
+def cached_result(cache_id: str, response: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": f"semantic-cache-{cache_id[:12]}",
+        "model": str(response.get("model") or ""),
+        "content": str(response.get("content") or ""),
+        "reasoning": str(response.get("reasoning") or ""),
+        "usage": {},
+    }
+
+
+def candidate_rows(model: str) -> list[sqlite3.Row]:
+    with _db_lock, connect_db() as conn:
+        initialize_schema(conn)
+        rows = conn.execute(
+            f"""
+            SELECT * FROM {CACHE_TABLE}
+            WHERE model = ?
+            ORDER BY updated_at DESC
+            LIMIT ?
+            """,
+            (model, SEMANTIC_CACHE_MAX_ITEMS),
+        ).fetchall()
+    return list(rows)
+
+
+def existing_cache_id(prompt_hash: str, model: str) -> str:
+    with _db_lock, connect_db() as conn:
+        initialize_schema(conn)
+        row = conn.execute(
+            f"SELECT cache_id FROM {CACHE_TABLE} WHERE prompt_hash = ? AND model = ? ORDER BY updated_at DESC LIMIT 1",
+            (prompt_hash, model),
+        ).fetchone()
+    return str(row["cache_id"]) if row else ""
+
+
+def touch_cache(cache_id: str) -> None:
+    try:
+        now = int(time.time())
+        with _db_lock, connect_db() as conn:
+            initialize_schema(conn)
+            conn.execute(
+                f"UPDATE {CACHE_TABLE} SET hit_count = hit_count + 1, last_hit_at = ?, updated_at = ? WHERE cache_id = ?",
+                (now, now, cache_id),
+            )
+    except Exception as exc:
+        set_last_error(f"semantic cache touch failed: {exc}")
+
+
+def trim_cache(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        f"""
+        DELETE FROM {CACHE_TABLE}
+        WHERE cache_id IN (
+            SELECT cache_id FROM {CACHE_TABLE}
+            ORDER BY updated_at DESC
+            LIMIT -1 OFFSET ?
+        )
+        """,
+        (SEMANTIC_CACHE_MAX_ITEMS,),
+    )
+
+
+def cache_expired(row: sqlite3.Row, now: int) -> bool:
+    updated_at = int(row["updated_at"] or 0)
+    return SEMANTIC_CACHE_TTL_SECONDS > 0 and updated_at > 0 and now - updated_at > SEMANTIC_CACHE_TTL_SECONDS
+
+
+def connect_db() -> sqlite3.Connection:
+    SEMANTIC_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(SEMANTIC_CACHE_DB)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    return conn
+
+
+def initialize_schema(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        f"""
+        CREATE TABLE IF NOT EXISTS {CACHE_TABLE} (
+            cache_id TEXT PRIMARY KEY,
+            prompt_hash TEXT NOT NULL,
+            model TEXT NOT NULL,
+            prompt_text TEXT NOT NULL,
+            embedding TEXT NOT NULL,
+            response_json TEXT NOT NULL,
+            usage_json TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            last_hit_at INTEGER NOT NULL,
+            hit_count INTEGER NOT NULL
+        )
+        """
+    )
+    conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{CACHE_TABLE}_model ON {CACHE_TABLE}(model, updated_at)")
+    conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{CACHE_TABLE}_hash ON {CACHE_TABLE}(prompt_hash, model)")
+
+
+def stable_hash(text: str) -> str:
+    return hashlib.blake2b(text.encode("utf-8", errors="ignore"), digest_size=16).hexdigest()
+
+
+def encode_embedding(vector: list[float]) -> str:
+    return json.dumps([round(float(item), 6) for item in vector], separators=(",", ":"))
+
+
+def decode_embedding(value: Any) -> list[float]:
+    try:
+        data = json.loads(str(value or "[]"))
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(data, list):
+        return []
+    result: list[float] = []
+    for item in data:
+        try:
+            result.append(float(item))
+        except (TypeError, ValueError):
+            result.append(0.0)
+    return result
+
+
+def decode_json(value: Any) -> Any:
+    try:
+        return json.loads(str(value or "{}"))
+    except json.JSONDecodeError:
+        return {}
+
+
+def set_last_error(message: str) -> None:
+    global _last_error
+    _last_error = message
+    logger.warning("semantic_cache_error", extra={"detail": message})

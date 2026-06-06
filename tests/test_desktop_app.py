@@ -13,12 +13,14 @@ def test_desktop_app_starts_webview_and_shuts_down() -> None:
 
     with (
         patch.object(desktop_app, "prepare_and_start", return_value=handle) as prepare,
+        patch.object(desktop_app, "wait_for_server_ready") as wait_ready,
         patch.object(desktop_app, "open_app_window") as open_window,
         patch.object(desktop_app, "shutdown_handle") as shutdown,
     ):
         assert desktop_app.main() == 0
 
     prepare.assert_called_once_with(host="127.0.0.1", serve=True)
+    wait_ready.assert_called_once_with("http://127.0.0.1:8000/?token=abc&desktop=1")
     open_window.assert_called_once_with("http://127.0.0.1:8000/?token=abc&desktop=1")
     shutdown.assert_called_once_with(handle)
 
@@ -34,6 +36,23 @@ def test_desktop_app_shuts_down_after_window_error() -> None:
     ):
         assert desktop_app.main() == 1
 
+    show_error.assert_called_once()
+    shutdown.assert_called_once_with(handle)
+
+
+def test_desktop_app_shuts_down_when_server_never_becomes_ready() -> None:
+    handle = SimpleNamespace(computer_url="http://127.0.0.1:8000/?token=abc")
+
+    with (
+        patch.object(desktop_app, "prepare_and_start", return_value=handle),
+        patch.object(desktop_app, "wait_for_server_ready", side_effect=RuntimeError("not ready")),
+        patch.object(desktop_app, "open_app_window") as open_window,
+        patch.object(desktop_app, "show_startup_error") as show_error,
+        patch.object(desktop_app, "shutdown_handle") as shutdown,
+    ):
+        assert desktop_app.main() == 1
+
+    open_window.assert_not_called()
     show_error.assert_called_once()
     shutdown.assert_called_once_with(handle)
 

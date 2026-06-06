@@ -3,12 +3,12 @@ from __future__ import annotations
 import http.client
 import io
 import json
+import sys
 import tempfile
 import threading
 import unittest
 from email.message import Message
 import urllib.error
-from http.server import ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, cast
 from urllib.parse import parse_qs, urlsplit
@@ -20,12 +20,11 @@ import deepseek_mobile.services.memory as memory_module
 import deepseek_mobile.services.projects as projects_module
 import deepseek_mobile.web.server as server_module
 from deepseek_mobile.core.errors import ErrorCode
-from deepseek_mobile.web.server import DeepSeekMobileHandler
 
 
 class ServerIntegrationTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.running_server = ThreadingHTTPServer(("127.0.0.1", 0), DeepSeekMobileHandler)
+        self.running_server, _ = server_module.create_server(0, host="127.0.0.1")
         self.thread = threading.Thread(target=self.running_server.serve_forever, daemon=True)
         self.thread.start()
 
@@ -508,6 +507,51 @@ class ServerIntegrationTests(unittest.TestCase):
             {"fileMaxBytes": 200_000_000, "requestMaxBytes": 220_000_000, "maxFiles": server_module.MAX_MULTIPART_FILES},
         )
         self.assertEqual(payload["ocr"], {"enabled": server_module.settings.ocr.enabled, "mode": "balanced", "localOnly": False})
+        self.assertIn("edgeInference", payload)
+        self.assertIn("provider", payload["edgeInference"])
+        self.assertIn("localRag", payload)
+        self.assertIn("embeddingProvider", payload["localRag"])
+        self.assertIn("tracing", payload)
+        self.assertIn("traceCount", payload["tracing"])
+        self.assertIn("semanticCache", payload)
+        self.assertIn("similarityThreshold", payload["semanticCache"])
+        self.assertIn("gateway", payload)
+        self.assertIn("contextManager", payload["gateway"])
+        self.assertIn("requestQueue", payload["gateway"])
+
+    def test_local_rag_status_and_reindex_routes(self) -> None:
+        status, payload = self.request_json("GET", "/api/rag/status")
+        rebuild_status, rebuild_payload = self.request_json("POST", "/api/rag/reindex", body={"action": "reindex"})
+
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["ok"])
+        self.assertIn("localRag", payload)
+        self.assertEqual(rebuild_status, 200)
+        self.assertTrue(rebuild_payload["ok"])
+        self.assertIn("localRag", rebuild_payload)
+
+    def test_trace_semantic_cache_and_gateway_routes(self) -> None:
+        trace_payload = {"traceId": "trace-1", "status": "completed", "spans": [], "summary": {"spanCount": 0}}
+        gateway_payload = {"contextManager": {"enabled": True}, "requestQueue": {"enabled": True, "counts": {}}}
+        with (
+            patch.object(server_module, "list_traces", return_value=[trace_payload]),
+            patch.object(server_module, "get_trace", return_value=trace_payload),
+            patch.object(server_module, "semantic_cache_status", return_value={"enabled": True, "items": 0}),
+            patch.object(server_module, "gateway_status", return_value=gateway_payload),
+        ):
+            traces_status, traces_payload = self.request_json("GET", "/api/traces")
+            detail_status, detail_payload = self.request_json("GET", "/api/traces/trace-1")
+            cache_status, cache_payload = self.request_json("GET", "/api/semantic-cache/status")
+            gateway_status_code, gateway_response = self.request_json("GET", "/api/gateway/status")
+
+        self.assertEqual(traces_status, 200)
+        self.assertEqual(cast(list[dict[str, Any]], traces_payload["traces"])[0]["traceId"], "trace-1")
+        self.assertEqual(detail_status, 200)
+        self.assertEqual(cast(dict[str, Any], detail_payload["trace"])["traceId"], "trace-1")
+        self.assertEqual(cache_status, 200)
+        self.assertEqual(cast(dict[str, Any], cache_payload["semanticCache"])["items"], 0)
+        self.assertEqual(gateway_status_code, 200)
+        self.assertEqual(gateway_response["gateway"], gateway_payload)
 
     def test_pwa_icon_static_assets_are_served_with_image_types(self) -> None:
         for path, expected_type in [
@@ -727,6 +771,23 @@ class ServerIntegrationTests(unittest.TestCase):
         self.assertEqual(status, 500)
         self.assertEqual(payload["code"], ErrorCode.INTERNAL.value)
         self.assertIn("Multipart parser dependency", payload["error"])
+
+
+class PythonwStartupTests(unittest.TestCase):
+    """launch.bat starts the app under pythonw, where sys.stdout/stderr are None.
+
+    uvicorn configures logging inside Config.__init__ and its default formatter
+    calls sys.stdout.isatty() unless use_colors is set, which used to raise and
+    surface as "Unable to configure formatter 'default'" so the window never opened.
+    """
+
+    def test_create_server_without_console_streams(self) -> None:
+        with patch.object(sys, "stdout", None), patch.object(sys, "stderr", None):
+            server, port = server_module.create_server(0, host="127.0.0.1")
+        try:
+            self.assertGreater(port, 0)
+        finally:
+            server.server_close()
 
 
 class FakeStream:

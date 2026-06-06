@@ -50,6 +50,12 @@ def delete_project(project_id: str) -> int:
     path = PROJECTS_DIR / safe_id
     if not path.exists():
         return 0
+    try:
+        from deepseek_mobile.services import local_rag
+
+        local_rag.delete_items(collection=local_rag.COLLECTION_FILES, project_id=safe_id)
+    except Exception:
+        pass
     shutil.rmtree(path)
     return 1
 

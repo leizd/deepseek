@@ -190,6 +190,9 @@ const state = {
   temperature: Number(localStorage.getItem(storageKeys.temperature) || "0.7"),
   hasServerKey: false,
   hasServerSearch: false,
+  edgeInference: null,
+  tracing: null,
+  semanticCache: null,
   uploadLimits: { ...defaultUploadLimits },
   hasSearch: true,
   searchMode: loadSearchMode(),
@@ -1312,6 +1315,9 @@ async function loadConfig() {
       state.authRequired = response.status === 401 || data.code === "unauthorized";
       state.hasServerKey = false;
       state.hasServerSearch = false;
+      state.edgeInference = null;
+      state.tracing = null;
+      state.semanticCache = null;
       updateSearchAvailability({ render: false });
       renderAccessUrls({});
       renderSearchToggle();
@@ -1326,6 +1332,9 @@ async function loadConfig() {
     state.authRequired = false;
     state.hasServerKey = Boolean(config.hasServerKey);
     state.hasServerSearch = Boolean(config.hasSearch);
+    state.edgeInference = config.edgeInference || null;
+    state.tracing = config.tracing || null;
+    state.semanticCache = config.semanticCache || null;
     state.uploadLimits = normalizeUploadLimits(config.uploadLimits);
     updateSearchAvailability({ render: false });
     renderAccessUrls(config);
@@ -1339,6 +1348,9 @@ async function loadConfig() {
     state.authRequired = false;
     state.hasServerKey = false;
     state.hasServerSearch = false;
+    state.edgeInference = null;
+    state.tracing = null;
+    state.semanticCache = null;
     updateSearchAvailability({ render: false });
     renderAccessUrls({});
     renderSearchToggle();
@@ -1352,6 +1364,21 @@ function renderAccessUrls(config) {
   const phoneUrl = config.phoneUrl || window.location.origin;
   setAccessLink(computerUrlLink, computerUrl);
   setAccessLink(phoneUrlLink, phoneUrl);
+}
+
+function edgeInferenceAvailable() {
+  return Boolean(state.edgeInference?.available);
+}
+
+function hasGenerationBackend({ agent = false } = {}) {
+  return Boolean(state.hasServerKey || (!agent && edgeInferenceAvailable()));
+}
+
+function requireGenerationBackend({ agent = false } = {}) {
+  if (hasGenerationBackend({ agent })) return true;
+  showToast(edgeInferenceAvailable() && agent ? "Agent Run requires a DeepSeek API Key." : "Please set a DeepSeek API Key or enable a local edge model.");
+  openSettings();
+  return false;
 }
 
 function setAccessLink(link, url) {
@@ -3494,6 +3521,8 @@ function renderDiagnosticsPanel(message) {
   const diagnostics = message.diagnostics && typeof message.diagnostics === "object" ? message.diagnostics : {};
   const usage = message.usage && typeof message.usage === "object" ? message.usage : {};
   const agentCache = diagnostics.agentCache && typeof diagnostics.agentCache === "object" ? diagnostics.agentCache : null;
+  const contextManager = diagnostics.contextManager && typeof diagnostics.contextManager === "object" ? diagnostics.contextManager : null;
+  const gatewayResiliency = diagnostics.gatewayResiliency && typeof diagnostics.gatewayResiliency === "object" ? diagnostics.gatewayResiliency : null;
   const rows = [
     ["请求消息数", diagnostics.requestMessageCount],
     ["压缩摘要字符", diagnostics.contextSummaryChars],
@@ -3511,6 +3540,13 @@ function renderDiagnosticsPanel(message) {
     ["Cache hit tokens", diagnostics.cacheHitTokens ?? usage.prompt_cache_hit_tokens ?? usage.promptCacheHitTokens],
     ["Cache miss tokens", diagnostics.cacheMissTokens ?? usage.prompt_cache_miss_tokens ?? usage.promptCacheMissTokens],
     ["Cache hit rate", diagnostics.cacheHitRate === undefined ? undefined : `${diagnostics.cacheHitRate}%`],
+    ["Semantic cache", formatSemanticCache(diagnostics.semanticCache)],
+    ["Context Manager", formatContextManager(contextManager)],
+    ["Context window dropped", contextManager?.droppedMessages],
+    ["Gateway queue", formatGatewayResiliency(gatewayResiliency)],
+    ["Gateway attempts", gatewayResiliency?.attemptCount],
+    ["Gateway retries", gatewayResiliency?.retryCount],
+    ["Trace ID", diagnostics.traceId],
     ["Agent 缓存总 tokens", formatAgentCacheTotal(agentCache)],
     ["Agent 缓存命中 tokens", agentCache?.hitTokens],
     ["Agent 缓存未命中 tokens", agentCache?.missTokens],
@@ -3539,6 +3575,173 @@ function renderDiagnosticsPanel(message) {
     empty.textContent = "这条回复暂无诊断信息。";
     diagnosticsPanelList.append(empty);
   }
+}
+
+async function openTracePanelForMessage(messageId) {
+  if (!diagnosticsPanel || !diagnosticsPanelList) return;
+  const message = state.messages.find((item) => item.id === messageId);
+  if (!message) return;
+  const traceId = traceIdForMessage(message);
+  if (!traceId) {
+    showToast("Trace is not available for this message.");
+    return;
+  }
+  state.activeDiagnosticsMessageId = message.id;
+  closeHistory();
+  closeSettings();
+  closeSeekPanel();
+  closeSearchPanel();
+  closeFilePreview();
+  closeMemoryPanel();
+  closeActivityPanel();
+  renderTracePanelLoading(traceId);
+  diagnosticsPanel?.classList.add("open");
+  diagnosticsPanel?.setAttribute("aria-hidden", "false");
+  activateFocusTrap(diagnosticsPanel);
+  syncBackdrop();
+  try {
+    const response = await apiFetch(`/api/traces/${encodeURIComponent(traceId)}`);
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.error || `Trace request failed: ${response.status}`);
+    }
+    renderTracePanel(data.trace || {}, message);
+  } catch (error) {
+    renderTracePanelError(traceId, error);
+  }
+}
+
+function renderTracePanelLoading(traceId) {
+  if (!diagnosticsPanelList) return;
+  diagnosticsPanelList.replaceChildren();
+  appendTraceRow("Trace ID", traceId);
+  appendTraceRow("Status", "Loading...");
+}
+
+function renderTracePanelError(traceId, error) {
+  if (!diagnosticsPanelList) return;
+  diagnosticsPanelList.replaceChildren();
+  appendTraceRow("Trace ID", traceId);
+  appendTraceRow("Error", error?.message || "Unable to load trace.");
+}
+
+function renderTracePanel(trace, message) {
+  if (!diagnosticsPanelList) return;
+  diagnosticsPanelList.replaceChildren();
+  const spans = Array.isArray(trace.spans) ? trace.spans : [];
+  const summary = trace.summary && typeof trace.summary === "object" ? trace.summary : {};
+  appendTraceRow("Trace ID", trace.traceId || traceIdForMessage(message));
+  appendTraceRow("Status", trace.status || "unknown");
+  appendTraceRow("Duration", formatTraceDuration(trace.durationMs));
+  appendTraceRow("Spans", summary.spanCount ?? spans.length);
+  appendTraceRow("Total tokens", summary.totalTokens);
+  appendTraceRow("Slowest", summary.slowestSpan ? `${summary.slowestSpan} · ${formatTraceDuration(summary.slowestDurationMs)}` : "");
+
+  if (!spans.length) {
+    const empty = document.createElement("p");
+    empty.className = "panel-empty";
+    empty.textContent = "No trace spans recorded yet.";
+    diagnosticsPanelList.append(empty);
+    return;
+  }
+
+  const maxEnd = spans.reduce((max, span) => Math.max(max, numberOrZero(span.offsetMs) + numberOrZero(span.durationMs)), 1);
+  const waterfall = document.createElement("div");
+  waterfall.className = "trace-waterfall";
+  spans.forEach((span) => {
+    waterfall.append(renderTraceSpan(span, maxEnd));
+  });
+  diagnosticsPanelList.append(waterfall);
+}
+
+function renderTraceSpan(span, maxEnd) {
+  const node = document.createElement("article");
+  node.className = "trace-span";
+  node.classList.toggle("is-error", span.status && !["ok", "hit", "miss", "skipped"].includes(span.status));
+
+  const header = document.createElement("div");
+  header.className = "trace-span-header";
+  const title = document.createElement("strong");
+  title.textContent = span.name || span.kind || "span";
+  const meta = document.createElement("span");
+  meta.textContent = [span.kind, span.status, formatTraceDuration(span.durationMs)].filter(Boolean).join(" · ");
+  header.append(title, meta);
+
+  const rail = document.createElement("div");
+  rail.className = "trace-span-rail";
+  const bar = document.createElement("div");
+  bar.className = "trace-span-bar";
+  const left = Math.min(98, Math.max(0, (numberOrZero(span.offsetMs) / maxEnd) * 100));
+  const width = Math.max(2, Math.min(100 - left, (Math.max(1, numberOrZero(span.durationMs)) / maxEnd) * 100));
+  bar.style.marginLeft = `${left}%`;
+  bar.style.width = `${width}%`;
+  rail.append(bar);
+
+  const details = document.createElement("div");
+  details.className = "trace-span-details";
+  const parts = [
+    span.totalTokens ? `${span.totalTokens} tokens` : "",
+    span.cacheHitRate ? `cache ${span.cacheHitRate}%` : "",
+    span.error ? `error: ${span.error}` : "",
+  ].filter(Boolean);
+  details.textContent = parts.join(" · ");
+
+  node.append(header, rail);
+  if (details.textContent) node.append(details);
+  return node;
+}
+
+function appendTraceRow(label, value) {
+  if (value === undefined || value === null || value === "") return;
+  const row = document.createElement("div");
+  row.className = "diagnostics-row";
+  const key = document.createElement("span");
+  key.textContent = label;
+  const val = document.createElement("strong");
+  val.textContent = String(value);
+  row.append(key, val);
+  diagnosticsPanelList?.append(row);
+}
+
+function traceIdForMessage(message) {
+  const diagnostics = message?.diagnostics && typeof message.diagnostics === "object" ? message.diagnostics : {};
+  return String(diagnostics.traceId || "");
+}
+
+function formatTraceDuration(ms) {
+  const value = Math.max(0, Math.round(Number(ms) || 0));
+  if (!value) return "0ms";
+  if (value < 1000) return `${value}ms`;
+  return formatReasoningDuration(value / 1000);
+}
+
+function formatSemanticCache(cache) {
+  if (!cache || typeof cache !== "object") return undefined;
+  if (cache.hit) return `hit · ${Math.round(numberOrZero(cache.similarity) * 100)}%`;
+  if (cache.checked) return `miss · ${Math.round(numberOrZero(cache.similarity) * 100)}%`;
+  return cache.skippedReason ? `skipped · ${cache.skippedReason}` : undefined;
+}
+
+function formatContextManager(contextManager) {
+  if (!contextManager || typeof contextManager !== "object") return undefined;
+  if (contextManager.enabled === false) return "off";
+  const parts = ["on"];
+  if (contextManager.stableJson) parts.push("stable JSON");
+  if (contextManager.toolOrderStable) parts.push("stable tools");
+  if (contextManager.slidingWindowApplied) {
+    parts.push(`window dropped ${numberOrZero(contextManager.droppedMessages)}`);
+  }
+  return parts.join(" / ");
+}
+
+function formatGatewayResiliency(gateway) {
+  if (!gateway || typeof gateway !== "object") return undefined;
+  if (gateway.requestQueueEnabled === false) return "queue off";
+  const parts = [gateway.lastStatus || "ready"];
+  if (gateway.queued) parts.push("queued");
+  if (numberOrZero(gateway.retryCount)) parts.push(`${numberOrZero(gateway.retryCount)} retries`);
+  if (gateway.lastError) parts.push(gateway.lastError);
+  return parts.join(" / ");
 }
 
 function numberOrZero(value) {
@@ -3599,7 +3802,7 @@ async function onSubmit(event) {
   if (!content && !attachments.length) return;
 
   const apiKey = apiKeyInput.value.trim();
-  if (!apiKey && !state.hasServerKey) {
+  if (!apiKey && !requireGenerationBackend({ agent: state.agentMode })) {
     showToast("请先在设置里填写 DeepSeek API Key");
     openSettings();
     return;
@@ -3851,7 +4054,7 @@ async function continueGeneration(messageId) {
   if (!assistantMessage || !assistantMessage.interrupted) return;
 
   const apiKey = apiKeyInput.value.trim();
-  if (!apiKey && !state.hasServerKey) {
+  if (!apiKey && !requireGenerationBackend({ agent: assistantMessage.agentMode || state.agentMode })) {
     showToast("请先在设置里填写 DeepSeek API Key");
     openSettings();
     return;
@@ -3953,7 +4156,7 @@ async function regenerateMessage(messageId) {
   }
 
   const apiKey = apiKeyInput.value.trim();
-  if (!apiKey && !state.hasServerKey) {
+  if (!apiKey && !requireGenerationBackend({ agent: assistantMessage.agentMode || state.agentMode })) {
     showToast("请先在设置里填写 DeepSeek API Key");
     openSettings();
     return;
@@ -4070,7 +4273,7 @@ async function submitMessageEdit(messageId, content) {
   }
 
   const apiKey = apiKeyInput.value.trim();
-  if (!apiKey && !state.hasServerKey) {
+  if (!apiKey && !requireGenerationBackend({ agent: state.agentMode })) {
     showToast("请先在设置里填写 DeepSeek API Key");
     openSettings();
     return;
@@ -4874,6 +5077,17 @@ function renderAssistantActions(message) {
     synthButton.disabled = state.busy || message.agentRunStatus === "awaiting_plan";
     synthButton.textContent = "重新综合最终回答";
     menu.append(synthButton);
+  }
+
+  if (traceIdForMessage(message)) {
+    const traceButton = document.createElement("button");
+    traceButton.type = "button";
+    traceButton.className = "assistant-menu-action";
+    traceButton.dataset.traceMessage = message.id;
+    traceButton.setAttribute("aria-controls", diagnosticsPanel?.id || "");
+    traceButton.setAttribute("aria-expanded", "false");
+    traceButton.textContent = "Trace";
+    menu.append(traceButton);
   }
 
   if (message.diagnostics || message.usage || message.search) {
@@ -11502,6 +11716,13 @@ function syncPanelTriggerStates() {
       )
     );
   });
+  document.querySelectorAll?.("button[data-trace-message]")?.forEach((button) => {
+    button.setAttribute("aria-controls", diagnosticsPanel?.id || "");
+    button.setAttribute(
+      "aria-expanded",
+      String(Boolean(diagnosticsPanel?.classList.contains("open") && state.activeDiagnosticsMessageId === button.dataset.traceMessage))
+    );
+  });
 }
 
 function syncBackdrop() {
@@ -12158,6 +12379,12 @@ async function onChatLogClick(event) {
   const diagnosticsButton = clickTarget?.closest("button[data-diagnostics-message]");
   if (diagnosticsButton) {
     openDiagnosticsPanelForMessage(diagnosticsButton.dataset.diagnosticsMessage);
+    return;
+  }
+
+  const traceButton = clickTarget?.closest("button[data-trace-message]");
+  if (traceButton) {
+    await openTracePanelForMessage(traceButton.dataset.traceMessage);
     return;
   }
 
@@ -13000,12 +13227,30 @@ function normalizedEditableAgentPlan(plan) {
   const valid = new Set(editableAgentPhases.map((item) => item.id));
   const items = Array.isArray(plan) ? plan : [];
   const normalized = items
-    .map((item) => ({
-      id: valid.has(String(item?.id || "")) ? String(item.id) : "critic",
-      task: String(item?.task || "").trim().slice(0, 500),
-    }))
+    .map((item) => {
+      const id = valid.has(String(item?.id || "")) ? String(item.id) : "critic";
+      const entry = {
+        id,
+        task: String(item?.task || "").trim().slice(0, 500),
+      };
+      const dependsOn = normalizeEditableAgentDependsOn(item?.depends_on, id, valid);
+      if (dependsOn.length) entry.depends_on = dependsOn;
+      return entry;
+    })
     .filter((item) => item.task || item.id);
   return normalized.length ? normalized : agentPlanForPreset("full");
+}
+
+function normalizeEditableAgentDependsOn(value, selfId, valid) {
+  if (!Array.isArray(value)) return [];
+  const cleaned = [];
+  for (const item of value) {
+    const id = String(item || "").trim();
+    if (!valid.has(id) || id === selfId || cleaned.includes(id)) continue;
+    if (id === "critic" && selfId !== "critic") continue;
+    cleaned.push(id);
+  }
+  return cleaned;
 }
 
 function agentPlanForPreset(preset) {
@@ -13013,13 +13258,13 @@ function agentPlanForPreset(preset) {
     return [
       { id: "coder", task: "检查代码、实现路径和工程风险" },
       { id: "reasoner", task: "分析边界条件和架构取舍" },
-      { id: "critic", task: "复核漏洞、遗漏和反例" },
+      { id: "critic", task: "复核漏洞、遗漏和反例", depends_on: ["coder", "reasoner"] },
     ];
   }
   if (preset === "research") {
     return [
       { id: "researcher", task: "检索资料、事实和来源" },
-      { id: "critic", task: "复核来源可靠性和不确定点" },
+      { id: "critic", task: "复核来源可靠性和不确定点", depends_on: ["researcher"] },
     ];
   }
   if (preset === "critic") {
@@ -13027,9 +13272,9 @@ function agentPlanForPreset(preset) {
   }
   return [
     { id: "researcher", task: "检索外部资料、背景事实和可引用来源" },
-    { id: "coder", task: "检查项目代码、实现路径和相关文件" },
-    { id: "reasoner", task: "分析架构取舍、边界条件和方案权衡" },
-    { id: "critic", task: "审查风险、遗漏、反例和不确定性" },
+    { id: "coder", task: "检查项目代码、实现路径和相关文件", depends_on: ["researcher"] },
+    { id: "reasoner", task: "分析架构取舍、边界条件和方案权衡", depends_on: ["researcher"] },
+    { id: "critic", task: "审查风险、遗漏、反例和不确定性", depends_on: ["researcher", "coder", "reasoner"] },
   ];
 }
 

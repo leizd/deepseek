@@ -1,3 +1,3 @@
-"""Chat, search, memory, file, OCR, and compression services."""
+"""Chat, search, memory, local RAG, file, OCR, and compression services."""
 
 

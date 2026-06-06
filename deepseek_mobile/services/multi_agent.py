@@ -29,6 +29,7 @@ from deepseek_mobile.services.deepseek_client import (
     usage_int,
     validate_deepseek_payload,
 )
+from deepseek_mobile.services.observability import ensure_trace, finish_trace, with_trace_diagnostics
 
 MAX_AGENTS = 4
 # v1.3.1: long-running multi-Agent middle tiers use the shared config timeout.
@@ -100,7 +101,7 @@ LEADER_DONE_PREFIXES: tuple[str, ...] = (
 )
 
 
-def leader_done_text(plan: list[dict[str, str]]) -> str:
+def leader_done_text(plan: list[dict[str, Any]]) -> str:
     prefix = random.choice(LEADER_DONE_PREFIXES)
     body = "\n".join(f"- {AGENT_PROFILES[item['id']]['name']}：{item['task']}" for item in plan)
     return f"{prefix}\n{body}"
@@ -113,6 +114,8 @@ Available ids: researcher, coder, reasoner, critic.
 Each agent may include an optional "depends_on": a list of agent ids whose output it needs first.
 Agents with no unmet dependencies run in parallel; declare depends_on only when one agent must wait for another.
 Omit depends_on (or use []) when an agent can start immediately.
+The critic reviews worker outputs, so when critic is selected it should depend_on every non-critic agent in this plan.
+Do not make researcher, coder, or reasoner depend on critic; critique-driven reruns are handled after the first pass.
 Return only JSON:
 {"agents":[{"id":"researcher","task":"..."},{"id":"coder","task":"...","depends_on":["researcher"]}]}
 """.strip()
@@ -299,11 +302,20 @@ def stream_multi_agent(
             emit_event(event)
         raise_if_cancelled(cancel_event)
 
+    trace_context = None
     try:
         raise_if_cancelled(cancel_event)
         validate_deepseek_payload(payload)
         selected_model = normalize_model_name(payload.get("model") or DEFAULT_MODEL)
         user_query = latest_user_query(payload)
+        trace_context = ensure_trace(
+            payload,
+            kind="agent",
+            title=user_query,
+            metadata={"agentMode": True, "stream": True, "model": selected_model},
+        )
+        if trace_context.trace_id:
+            payload = {**payload, "traceId": trace_context.trace_id}
         search_budget = new_agent_search_budget()
 
         leader_plan_started = time.monotonic()
@@ -327,21 +339,29 @@ def stream_multi_agent(
             emit_event=safe_emit,
             cancel_event=cancel_event,
         )
+        if trace_context.created:
+            finish_trace(trace_context.trace_id, metadata={"model": selected_model, "agentMode": True})
     except RequestCancelled:
+        if trace_context is not None and trace_context.created:
+            finish_trace(trace_context.trace_id, status="cancelled")
         return
     except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
         if cancel_event is not None:
             cancel_event.set()
+        if trace_context is not None and trace_context.created:
+            finish_trace(trace_context.trace_id, status="cancelled")
         return
     except Exception as exc:
+        if trace_context is not None and trace_context.created:
+            finish_trace(trace_context.trace_id, status="error", error=str(exc))
         safe_emit({"type": "error", "error": str(exc), "code": ErrorCode.INTERNAL.value})
 
 
 def execute_agent_tier(
     payload: dict[str, Any],
-    tier: list[dict[str, str]],
+    tier: list[dict[str, Any]],
     *,
-    prior_outputs: list[dict[str, str]],
+    prior_outputs: list[dict[str, Any]],
     search_budget: SearchBudget,
     emit_event: Callable[[dict[str, Any]], None],
     cancel_event: threading.Event | None = None,
@@ -419,7 +439,7 @@ def execute_agent_tier(
 MIDDLE_PARALLEL_AGENT_IDS = {"coder", "reasoner"}
 
 
-def _tier_runs_in_parallel(tier: list[dict[str, str]]) -> bool:
+def _tier_runs_in_parallel(tier: list[dict[str, Any]]) -> bool:
     """v1.2.5 只并行中间层：coder / reasoner 共享 Researcher 摘要，但互不等待。"""
     agent_ids = {str(item.get("id") or "") for item in tier}
     return len(tier) > 1 and agent_ids.issubset(MIDDLE_PARALLEL_AGENT_IDS)
@@ -446,16 +466,16 @@ def failed_agent_output(agent_id: str, task: str, exc: BaseException) -> dict[st
 
 def _execute_agent_tier_parallel(
     payload: dict[str, Any],
-    tier: list[dict[str, str]],
+    tier: list[dict[str, Any]],
     *,
-    prior_outputs: list[dict[str, str]],
+    prior_outputs: list[dict[str, Any]],
     search_budget: SearchBudget,
     emit_event: Callable[[dict[str, Any]], None],
     cancel_event: threading.Event | None = None,
 ) -> list[dict[str, Any]]:
     """并行执行 coder / reasoner；返回顺序仍按 Planner 原顺序，便于诊断和综合稳定。"""
     outputs_by_index: dict[int, dict[str, Any]] = {}
-    futures: dict[Future[dict[str, Any]], tuple[int, dict[str, str]]] = {}
+    futures: dict[Future[dict[str, Any]], tuple[int, dict[str, Any]]] = {}
     emit_gates: dict[int, threading.Event] = {}
     started_at: dict[int, float] = {}
     pool = ThreadPoolExecutor(max_workers=min(len(tier), MAX_AGENTS))
@@ -643,7 +663,7 @@ def diagnostics_for_agent_run(
 
 def stream_agent_plan(
     payload: dict[str, Any],
-    plan: list[dict[str, str]],
+    plan: list[dict[str, Any]],
     *,
     selected_model: str,
     user_query: str,
@@ -721,7 +741,7 @@ def stream_agent_plan(
 
 def run_critic_revision(
     payload: dict[str, Any],
-    plan: list[dict[str, str]],
+    plan: list[dict[str, Any]],
     agent_outputs: list[dict[str, Any]],
     *,
     search_budget: SearchBudget,
@@ -883,6 +903,7 @@ def stream_synthesis_for_outputs(
     )
     token_budget.record(_token_total_for_usage(synthesizer_usage))
     diagnostics = diagnostics_for_agent_run(agent_outputs, synthesizer_usage, search_budget, token_budget)
+    diagnostics = with_trace_diagnostics(diagnostics, str(payload.get("traceId") or ""))
     emit_event({"type": "done", "model": selected_model, "usage": {}, "diagnostics": diagnostics})
     return diagnostics
 
@@ -892,7 +913,7 @@ def plan_agents(
     emit_event: Callable[[dict[str, Any]], None] | None = None,
     *,
     cancel_event: threading.Event | None = None,
-) -> list[dict[str, str]]:
+) -> list[dict[str, Any]]:
     """让 Leader/Planner 决定要哪几个 worker。
 
     v1.2.4：**Planner 的 JSON 内容不再流进主正文区**。之前用 ``## Leader 任务拆解``
@@ -950,13 +971,16 @@ def _clean_depends_on(raw: Any, self_id: str) -> list[str]:
     """规整 planner 给的 depends_on：只保留已知角色 id、去掉自依赖、去重并保序。
 
     指向"合法角色但本轮不在 plan 里"的依赖留到分层时再丢（见 :func:`_dependency_layers`），
-    这里只做角色合法性与自依赖过滤。
+    这里只做角色合法性与自依赖过滤。非 Critic worker 不等待 Critic；修订反馈由
+    :func:`run_critic_revision` 单独处理，避免首轮 DAG 形成反向依赖。
     """
     if not isinstance(raw, list):
         return []
     cleaned: list[str] = []
     for dep in raw:
         dep_id = str(dep or "").strip()
+        if dep_id == "critic" and self_id != "critic":
+            continue
         if dep_id in AGENT_PROFILES and dep_id != self_id and dep_id not in cleaned:
             cleaned.append(dep_id)
     return cleaned
@@ -987,12 +1011,12 @@ def safe_agent_plan(plan: dict[str, Any]) -> list[dict[str, Any]]:
     return agents or default_agent_plan()
 
 
-def default_agent_plan() -> list[dict[str, str]]:
+def default_agent_plan() -> list[dict[str, Any]]:
     return [
-        {"id": "coder", "task": "分析代码、架构、实现路径和工程风险"},
         {"id": "researcher", "task": "核查事实、背景和可能需要搜索的信息"},
-        {"id": "reasoner", "task": "梳理推理链路、边界条件和可执行方案"},
-        {"id": "critic", "task": "检查方案风险、遗漏和反例"},
+        {"id": "coder", "task": "分析代码、架构、实现路径和工程风险", "depends_on": ["researcher"]},
+        {"id": "reasoner", "task": "梳理推理链路、边界条件和可执行方案", "depends_on": ["researcher"]},
+        {"id": "critic", "task": "检查方案风险、遗漏和反例", "depends_on": ["researcher", "coder", "reasoner"]},
     ]
 
 
@@ -1050,21 +1074,32 @@ def _dependency_layers(plan: list[dict[str, Any]]) -> list[list[dict[str, Any]]]
     deps: dict[str, set[str]] = {}
     for item in plan:
         raw = item.get("depends_on") or []
-        deps[item["id"]] = {dep for dep in raw if dep in items and dep != item["id"]}
+        deps[item["id"]] = {
+            dep
+            for dep in raw
+            if dep in items and dep != item["id"] and not (dep == "critic" and item["id"] != "critic")
+        }
+        if item["id"] == "critic":
+            # Critic is a review role. In legacy mode it always ran last; keep that
+            # invariant even when only part of the planner output contains depends_on.
+            deps[item["id"]].update(aid for aid in order if aid != "critic")
 
     layers: list[list[dict[str, Any]]] = []
     placed: set[str] = set()
     while len(placed) < len(order):
         ready = [aid for aid in order if aid not in placed and deps[aid] <= placed]
         if not ready:
-            # 环 / 互相依赖：剩余的一次性冲掉，避免死循环和丢 agent。
-            ready = [aid for aid in order if aid not in placed]
+            # 环 / 互相依赖：先把剩余非 Critic worker 一次性冲掉，避免死循环和丢 agent；
+            # Critic 仍留到下一层复核这些 worker，保持"最后审查"语义。
+            remaining = [aid for aid in order if aid not in placed]
+            non_critic_remaining = [aid for aid in remaining if aid != "critic"]
+            ready = non_critic_remaining or remaining
         layers.append([items[aid] for aid in ready])
         placed.update(ready)
     return layers
 
 
-def build_prior_context(prior_outputs: list[dict[str, str]] | None) -> str:
+def build_prior_context(prior_outputs: list[dict[str, Any]] | None) -> str:
     """把前面层 agent 的摘要格式化成给后续 agent 看的参考材料。
 
     v1.2.4：优先用 structured 字段（summary/evidence/risks）；解析失败回退到 content。
@@ -1102,7 +1137,7 @@ def run_agent(
     agent_id: str,
     task: str,
     search_budget: SearchBudget,
-    prior_outputs: list[dict[str, str]] | None = None,
+    prior_outputs: list[dict[str, Any]] | None = None,
     emit_event: Callable[[dict[str, Any]], None] | None = None,
     max_retries: int = 1,
     cancel_event: threading.Event | None = None,
@@ -1130,7 +1165,7 @@ def _agent_payload_for(
     *,
     agent_id: str,
     task: str,
-    prior_outputs: list[dict[str, str]] | None,
+    prior_outputs: list[dict[str, Any]] | None,
 ) -> dict[str, Any]:
     agent_payload = agent_base_payload(payload)
     original_system = str(payload.get("systemPrompt") or "").strip()
@@ -1206,7 +1241,7 @@ def _run_agent_once(
     agent_id: str,
     task: str,
     search_budget: SearchBudget,
-    prior_outputs: list[dict[str, str]] | None,
+    prior_outputs: list[dict[str, Any]] | None,
     emit_event: Callable[[dict[str, Any]], None] | None = None,
     cancel_event: threading.Event | None = None,
 ) -> dict[str, Any]:
@@ -1237,9 +1272,10 @@ def _run_agent_once(
     accumulated_content: list[str] = []
     captured_search: Any = None
     captured_usage: dict[str, Any] = {}
+    captured_error = ""
 
     def agent_relay(event: dict[str, Any]) -> None:
-        nonlocal captured_search, captured_usage
+        nonlocal captured_search, captured_usage, captured_error
         et = event.get("type")
         if et == "content":
             text = str(event.get("text") or "")
@@ -1304,6 +1340,16 @@ def _run_agent_once(
                         "search": search_data,
                     }
                 )
+        elif et == "error":
+            captured_error = str(event.get("error") or "Agent upstream request failed")
+            emit_event(
+                {
+                    "type": "agent_note",
+                    "phase": agent_id,
+                    "name": profile["name"],
+                    "text": captured_error,
+                }
+            )
 
     stream_deepseek(
         agent_payload,
@@ -1316,6 +1362,8 @@ def _run_agent_once(
     )
 
     raise_if_cancelled(cancel_event)
+    if captured_error:
+        raise RuntimeError(captured_error)
     return _build_agent_result(agent_id, task, "".join(accumulated_content), captured_search, captured_usage)
 
 
@@ -1441,6 +1489,7 @@ def agent_base_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "contextSummaryGeneration",
         "contextSummaryMessageCount",
         "contextCompressionDeltaCount",
+        "traceId",
     }
     return {key: payload[key] for key in preserved_keys if key in payload}
 

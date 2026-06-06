@@ -22,9 +22,20 @@ from deepseek_mobile.core.config import (
 )
 from deepseek_mobile.services.chat_payload import count_payload_attachments, expanded_message_content
 from deepseek_mobile.services.context_compressor import format_context_summary_context
+from deepseek_mobile.services.context_manager import manage_request_body, merge_context_manager_diagnostics, stable_json_dumps
 from deepseek_mobile.core.errors import AppError, ErrorCode
+from deepseek_mobile.services.edge_inference import (
+    EdgeRouteDecision,
+    edge_manager,
+    edge_options_from_payload,
+    select_edge_route,
+)
 from deepseek_mobile.services.memory import empty_memory_state, format_memory_notice, memory_scope_from_payload, prepare_memory_state
+from deepseek_mobile.services.observability import ensure_trace, finish_trace, start_span, with_trace_diagnostics
 from deepseek_mobile.services.presentations import create_presentation_from_text
+from deepseek_mobile.services.resiliency import diagnostics_with_gateway, open_with_resiliency, request_payload_summary
+from deepseek_mobile.services.semantic_cache import lookup as semantic_cache_lookup
+from deepseek_mobile.services.semantic_cache import store as semantic_cache_store
 from deepseek_mobile.services.slides_skill import format_slides_skill_context
 from deepseek_mobile.services.search import (
     aggregate_search_rounds,
@@ -294,6 +305,8 @@ def build_deepseek_request(
         "toolNames": [],
     }
 
+    request_body, context_manager_diag = manage_request_body(request_body, allow_sliding_window=bool(context_summary))
+    diagnostics = merge_context_manager_diagnostics(diagnostics, context_manager_diag)
     return PreparedDeepSeekRequest(api_key=api_key, body=request_body, diagnostics=diagnostics)
 
 
@@ -561,6 +574,199 @@ def prepare_deepseek_call(
     return PreparedDeepSeekCall(request=prepared, search_data=search_data)
 
 
+def preflight_chat_payload(payload: dict[str, Any]) -> ValidatedPayload | None:
+    route = select_edge_route(payload, cloud_available=cloud_api_key_available(payload))
+    if route.use_edge:
+        validate_edge_payload(payload)
+        return None
+    return preflight_deepseek_payload(payload)
+
+
+def cloud_api_key_available(payload: dict[str, Any]) -> bool:
+    return bool(str(payload.get("apiKey") or settings.deepseek_api_key or "").strip())
+
+
+def validate_edge_payload(payload: dict[str, Any]) -> None:
+    messages = payload.get("messages")
+    if not isinstance(messages, list) or not messages:
+        raise AppError("At least one message is required", code=ErrorCode.INVALID_PAYLOAD)
+    _validate_request_messages(payload, messages)
+
+
+def edge_route_for_payload(payload: dict[str, Any]) -> EdgeRouteDecision:
+    return select_edge_route(payload, cloud_available=cloud_api_key_available(payload))
+
+
+def edge_fallback_route(payload: dict[str, Any]) -> EdgeRouteDecision | None:
+    try:
+        route = select_edge_route(payload, cloud_available=False)
+    except AppError:
+        return None
+    if route.use_edge and route.reason in {"cloud_unavailable_simple_local", "local_forced"}:
+        return route
+    return None
+
+
+def build_edge_messages(payload: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    validate_edge_payload(payload)
+    memory_state = prepare_memory_state(payload)
+    api_messages: list[dict[str, Any]] = []
+    system_prompt = str(payload.get("systemPrompt") or "").strip()
+    if system_prompt:
+        api_messages.append({"role": "system", "content": system_prompt})
+    normalized_messages = normalize_chat_messages(payload.get("messages") or [])
+    dynamic_context = build_dynamic_turn_context(payload, memory_state, tools_enabled=False)
+    if dynamic_context:
+        normalized_messages = append_context_to_latest_user(normalized_messages, dynamic_context)
+    for message in normalized_messages:
+        if message.get("role") in {"system", "user", "assistant"} and not message.get("tool_calls"):
+            api_messages.append(message)
+    diagnostics = {
+        "requestMessageCount": sum(1 for item in api_messages if item.get("role") in {"user", "assistant"}),
+        "contextSummaryChars": len(str(payload.get("contextSummary") or "").strip()),
+        "dynamicContextChars": len(dynamic_context),
+        "contextSummaryGeneration": int(payload.get("contextSummaryGeneration") or 0),
+        "contextSummaryMessageCount": int(payload.get("contextSummaryMessageCount") or 0),
+        "contextCompressionDeltaCount": int(payload.get("contextCompressionDeltaCount") or 0),
+        "memoryEnabled": bool(memory_state.get("enabled")),
+        "memoryHitCount": int(memory_state.get("hitCount") or 0),
+        "attachmentCount": count_payload_attachments(payload.get("messages")),
+        "searchRoundCount": 0,
+        "searchResultCount": 0,
+        "toolCallCount": 0,
+        "toolNames": [],
+    }
+    return api_messages, diagnostics
+
+
+def call_edge_inference(payload: dict[str, Any], route: EdgeRouteDecision, *, fallback_error: str = "") -> dict[str, Any]:
+    trace_context = ensure_trace(
+        payload,
+        kind="edge",
+        title=latest_user_query(payload),
+        metadata={"stream": False, "routeReason": route.reason},
+    )
+    messages, diagnostics = build_edge_messages(payload)
+    options = edge_options_from_payload(payload)
+    span = start_span(
+        trace_context.trace_id,
+        name="edge_inference",
+        kind="edge",
+        input_data={"messages": messages, "options": options},
+    )
+    try:
+        completion = edge_manager.complete(messages, options)
+    except Exception as exc:
+        span.finish(status="error", error=str(exc))
+        if trace_context.created:
+            finish_trace(trace_context.trace_id, status="error", error=str(exc))
+        raise
+    span.finish(
+        output_data={"model": completion.model, "content": completion.content, "reasoning": completion.reasoning},
+        usage=completion.usage,
+    )
+    result_diagnostics = with_trace_diagnostics(
+        diagnostics_with_usage(edge_diagnostics(diagnostics, route, fallback_error=fallback_error), completion.usage),
+        trace_context.trace_id,
+    )
+    if trace_context.created:
+        finish_trace(trace_context.trace_id, metadata={"model": completion.model, "edge": True})
+    return {
+        "id": None,
+        "model": completion.model,
+        "content": completion.content,
+        "reasoning": completion.reasoning,
+        "usage": completion.usage,
+        "diagnostics": result_diagnostics,
+    }
+
+
+def stream_edge_inference(
+    payload: dict[str, Any],
+    emit_event: Callable[[dict[str, Any]], None],
+    route: EdgeRouteDecision,
+    *,
+    cancel_event: threading.Event | None = None,
+    fallback_error: str = "",
+) -> None:
+    trace_context = ensure_trace(
+        payload,
+        kind="edge",
+        title=latest_user_query(payload),
+        metadata={"stream": True, "routeReason": route.reason},
+    )
+    messages, diagnostics = build_edge_messages(payload)
+    options = edge_options_from_payload(payload)
+    content = ""
+    span = start_span(
+        trace_context.trace_id,
+        name="edge_inference_stream",
+        kind="edge",
+        input_data={"messages": messages, "options": options},
+    )
+    try:
+        emit_event({"type": "system_note", "text": "Using local edge inference for this turn.\n\n"})
+        for delta in edge_manager.stream(messages, options):
+            raise_if_cancelled(cancel_event)
+            text = str(delta or "")
+            if not text:
+                continue
+            content += text
+            emit_event({"type": "content", "text": text})
+        usage = {"prompt_tokens": 0, "completion_tokens": max(0, len(content) // 4), "total_tokens": max(0, len(content) // 4)}
+        span.finish(output_data={"model": options.model_name, "content": content}, usage=usage)
+        result_diagnostics = with_trace_diagnostics(
+            diagnostics_with_usage(edge_diagnostics(diagnostics, route, fallback_error=fallback_error), usage),
+            trace_context.trace_id,
+        )
+        if trace_context.created:
+            finish_trace(trace_context.trace_id, metadata={"model": options.model_name, "edge": True})
+        emit_event(
+            {
+                "type": "done",
+                "id": None,
+                "model": options.model_name,
+                "content": content,
+                "reasoning": "",
+                "usage": usage,
+                "search": None,
+                "memorySuggestions": [],
+                "diagnostics": result_diagnostics,
+            }
+        )
+    except RequestCancelled:
+        span.finish(status="cancelled", output_data={"content": content})
+        return
+    except AppError as exc:
+        span.finish(status="error", error=str(exc))
+        if trace_context.created:
+            finish_trace(trace_context.trace_id, status="error", error=str(exc))
+        emit_event({"type": "error", "error": str(exc), "code": exc.code.value})
+    except Exception:
+        logger.exception("edge_stream_error")
+        span.finish(status="error", error="Edge inference error")
+        if trace_context.created:
+            finish_trace(trace_context.trace_id, status="error", error="Edge inference error")
+        emit_event({"type": "error", "error": "Edge inference error", "code": ErrorCode.INTERNAL.value})
+
+
+def edge_diagnostics(diagnostics: dict[str, Any], route: EdgeRouteDecision, *, fallback_error: str = "") -> dict[str, Any]:
+    result = dict(diagnostics)
+    status = route.status
+    result["edgeInference"] = {
+        "used": route.use_edge,
+        "provider": route.provider,
+        "routeReason": route.reason,
+        "mode": route.mode,
+        "modelName": status.get("modelName") or "",
+        "quantization": status.get("quantization") or "",
+        "nCtx": status.get("nCtx") or 0,
+        "nGpuLayers": status.get("nGpuLayers") or 0,
+        "fallbackError": fallback_error,
+    }
+    return result
+
+
 def search_if_needed(
     payload: dict[str, Any],
     *,
@@ -696,7 +902,7 @@ def web_search_callback_for_turn(
 def deepseek_request(prepared: PreparedDeepSeekRequest, *, accept: str) -> urllib.request.Request:
     return urllib.request.Request(
         DEEPSEEK_URL,
-        data=json.dumps(prepared.body).encode("utf-8"),
+        data=stable_json_dumps(prepared.body).encode("utf-8"),
         headers={
             "Authorization": f"Bearer {prepared.api_key}",
             "Content-Type": "application/json",
@@ -715,6 +921,55 @@ def diagnostics_with_usage(diagnostics: dict[str, Any], usage: dict[str, Any]) -
     total_cache_tokens = hit_tokens + miss_tokens
     result["cacheHitRate"] = round((hit_tokens / total_cache_tokens) * 100, 1) if total_cache_tokens else 0.0
     return result
+
+
+def diagnostics_with_semantic_cache(diagnostics: dict[str, Any], semantic_cache: dict[str, Any]) -> dict[str, Any]:
+    result = dict(diagnostics)
+    result["semanticCache"] = semantic_cache
+    return result
+
+
+def merge_semantic_cache_diagnostics(current: dict[str, Any], update: dict[str, Any]) -> dict[str, Any]:
+    result = dict(current)
+    for key, value in update.items():
+        if value not in (None, ""):
+            result[key] = value
+    return result
+
+
+def upstream_trace_input(body: dict[str, Any], *, budget_key: str, tool_round: int, stream: bool) -> dict[str, Any]:
+    return {
+        "budgetKey": budget_key,
+        "toolRound": tool_round,
+        "stream": stream,
+        "model": body.get("model"),
+        "messageCount": len(body.get("messages") or []),
+        "toolCount": len(body.get("tools") or []),
+        "toolChoice": body.get("tool_choice"),
+        "body": body,
+    }
+
+
+def upstream_trace_output(response_json: dict[str, Any], answer: dict[str, Any], tool_calls: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "id": response_json.get("id"),
+        "model": response_json.get("model"),
+        "content": str(answer.get("content") or ""),
+        "reasoning": answer.get("reasoning_content") or answer.get("reasoning") or "",
+        "toolCallCount": len(tool_calls),
+        "toolNames": tool_names(tool_calls),
+    }
+
+
+def stream_trace_output(content: str, reasoning: str, tool_calls: list[dict[str, Any]], response_id: str | None, response_model: str) -> dict[str, Any]:
+    return {
+        "id": response_id,
+        "model": response_model,
+        "content": content,
+        "reasoning": reasoning,
+        "toolCallCount": len(tool_calls),
+        "toolNames": tool_names(tool_calls),
+    }
 
 
 USAGE_SUM_FIELDS = (
@@ -1024,9 +1279,49 @@ def call_deepseek(
     max_tool_rounds: int = MAX_TOOL_ROUNDS,
     budget_key: str = "default",
 ) -> dict[str, Any]:
+    edge_route = edge_route_for_payload(payload)
+    if edge_route.use_edge:
+        return call_edge_inference(payload, edge_route)
+
     prepared_call = prepare_deepseek_call(payload, stream=False)
     prepared = prepared_call.request
     body = prepared.body
+    gateway_attempts: list[dict[str, Any]] = []
+    trace_context = ensure_trace(
+        payload,
+        kind="agent" if payload.get("agentMode") is True else "chat",
+        title=latest_user_query(payload),
+        metadata={"stream": False, "budgetKey": budget_key, "model": body.get("model")},
+    )
+    cache_body = body
+    semantic_span = start_span(
+        trace_context.trace_id,
+        name=f"{budget_key}:semantic_cache",
+        kind="semantic_cache",
+        input_data={"model": body.get("model"), "messageCount": len(body.get("messages") or [])},
+    )
+    semantic_lookup = semantic_cache_lookup(payload, body)
+    semantic_diag = semantic_lookup.diagnostics
+    semantic_span.finish(
+        status="hit" if semantic_lookup.hit else "miss" if semantic_diag.get("checked") else "skipped",
+        output_data=semantic_diag,
+    )
+    if semantic_lookup.hit and semantic_lookup.result is not None:
+        cached = dict(semantic_lookup.result)
+        cached_usage = cached.get("usage")
+        usage = cached_usage if isinstance(cached_usage, dict) else {}
+        diagnostics = edge_diagnostics(diagnostics_with_tools(prepared.diagnostics, count=0, names=[]), edge_route)
+        diagnostics = diagnostics_with_gateway(diagnostics, gateway_attempts)
+        cached["diagnostics"] = with_trace_diagnostics(
+            diagnostics_with_usage(
+                diagnostics_with_semantic_cache(diagnostics_with_search(diagnostics, prepared_call.search_data), semantic_diag),
+                usage,
+            ),
+            trace_context.trace_id,
+        )
+        if trace_context.created:
+            finish_trace(trace_context.trace_id, metadata={"model": cached.get("model"), "semanticCacheHit": True})
+        return cached
     default_memory_scope = memory_scope_from_payload(payload)
     tool_call_count = 0
     seen_tool_names: list[str] = []
@@ -1044,18 +1339,52 @@ def call_deepseek(
     local_final_content = ""
     for tool_round in range(max_tool_rounds + 2):
         request = request_with_body(prepared, body, accept="application/json")
+        span = start_span(
+            trace_context.trace_id,
+            name=f"{budget_key}:deepseek:{tool_round + 1}",
+            kind="deepseek_api",
+            input_data=upstream_trace_input(body, budget_key=budget_key, tool_round=tool_round, stream=False),
+        )
         try:
-            with urllib.request.urlopen(request, timeout=DEEPSEEK_TIMEOUT_SECONDS) as response:
+            with open_with_resiliency(
+                request,
+                timeout=DEEPSEEK_TIMEOUT_SECONDS,
+                kind="deepseek_json",
+                payload=request_payload_summary(body, stream=False, budget_key=budget_key, tool_round=tool_round),
+                diagnostics_callback=gateway_attempts.append,
+            ) as response:
                 response_json = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
+            span.finish(status="error", error=format_upstream_error(detail), output_data={"status": exc.code, "detail": detail})
+            if trace_context.created:
+                finish_trace(trace_context.trace_id, status="error", error=format_upstream_error(detail))
             raise AppError(format_upstream_error(detail), code=ErrorCode.UPSTREAM_FAILURE, status=min(exc.code, 502)) from exc
         except urllib.error.URLError as exc:
+            span.finish(status="error", error=str(exc.reason))
+            fallback_route = edge_fallback_route(payload)
+            if fallback_route is not None:
+                result = call_edge_inference(payload, fallback_route, fallback_error=str(exc.reason))
+                if trace_context.created:
+                    finish_trace(trace_context.trace_id, metadata={"model": result.get("model"), "edgeFallback": True})
+                return result
             code = ErrorCode.UPSTREAM_TIMEOUT if "timed out" in str(exc.reason).lower() else ErrorCode.UPSTREAM_FAILURE
+            if trace_context.created:
+                finish_trace(trace_context.trace_id, status="error", error=f"Cannot reach DeepSeek API: {exc.reason}")
             raise AppError(f"Cannot reach DeepSeek API: {exc.reason}", code=code, status=502) from exc
         usage_totals = merge_usage_totals(usage_totals, response_json.get("usage") or {})
-        answer = first_response_message(response_json)
-        tool_calls = normalize_tool_calls(answer.get("tool_calls"))
+        try:
+            answer = first_response_message(response_json)
+            tool_calls = normalize_tool_calls(answer.get("tool_calls"))
+        except Exception as exc:
+            span.finish(status="error", error=str(exc), output_data=response_json, usage=response_json.get("usage") or {})
+            if trace_context.created:
+                finish_trace(trace_context.trace_id, status="error", error=str(exc))
+            raise
+        span.finish(
+            output_data=upstream_trace_output(response_json, answer, tool_calls),
+            usage=response_json.get("usage") or {},
+        )
         if not tool_calls:
             break
         if tool_round >= max_tool_rounds:
@@ -1086,19 +1415,39 @@ def call_deepseek(
     if fallback_created:
         tool_call_count += 1
         seen_tool_names.append("create_pptx")
-    diagnostics = diagnostics_with_tools(prepared.diagnostics, count=tool_call_count, names=seen_tool_names)
+    diagnostics = diagnostics_with_gateway(
+        edge_diagnostics(diagnostics_with_tools(prepared.diagnostics, count=tool_call_count, names=seen_tool_names), edge_route),
+        gateway_attempts,
+    )
+    final_diagnostics = diagnostics_with_usage(
+        diagnostics_with_semantic_cache(diagnostics_with_search(diagnostics, search_data), semantic_diag),
+        usage,
+    )
     result = {
         "id": response_json.get("id"),
         "model": response_json.get("model", body["model"]),
         "content": final_content,
         "reasoning": answer.get("reasoning_content") or "",
         "usage": usage,
-        "diagnostics": diagnostics_with_usage(diagnostics_with_search(diagnostics, search_data), usage),
+        "diagnostics": final_diagnostics,
     }
     if search_data:
         result["search"] = search_for_client(search_data)
     if memory_suggestions:
         result["memorySuggestions"] = memory_suggestions
+    semantic_diag = merge_semantic_cache_diagnostics(semantic_diag, semantic_cache_store(payload, cache_body, result))
+    result["diagnostics"] = with_trace_diagnostics(
+        diagnostics_with_usage(
+            diagnostics_with_semantic_cache(diagnostics_with_search(diagnostics, search_data), semantic_diag),
+            usage,
+        ),
+        trace_context.trace_id,
+    )
+    if trace_context.created:
+        finish_trace(
+            trace_context.trace_id,
+            metadata={"model": result.get("model"), "toolCallCount": tool_call_count, "semanticCacheHit": False},
+        )
     return result
 
 
@@ -1120,6 +1469,9 @@ def stream_deepseek(
     search_for_response: dict[str, Any] | None = None
     search_data: dict[str, Any] | None = None
     diagnostics: dict[str, Any] = {}
+    gateway_attempts: list[dict[str, Any]] = []
+    edge_route: EdgeRouteDecision | None = None
+    trace_context = None
 
     def emit_checked(event: dict[str, Any]) -> None:
         raise_if_cancelled(cancel_event)
@@ -1134,7 +1486,19 @@ def stream_deepseek(
         search_for_response = search_for_client(progress)
         emit_checked({"type": "search", "search": search_for_response})
 
+    def record_gateway_attempt(attempt: dict[str, Any]) -> None:
+        gateway_attempts.append(attempt)
+        if attempt.get("status") == "queued":
+            emit_system_note(
+                "Gateway queue: DeepSeek API is temporarily unreachable; retrying after "
+                f"{attempt.get('nextAttemptInSeconds', 0)}s.\n\n"
+            )
+
     try:
+        edge_route = edge_route_for_payload(payload)
+        if edge_route.use_edge:
+            stream_edge_inference(payload, emit_checked, edge_route, cancel_event=cancel_event)
+            return
         raise_if_cancelled(cancel_event)
         prepared_call = prepare_deepseek_call(payload, stream=True, progress_callback=emit_search_progress, system_note_callback=emit_system_note)
         prepared = prepared_call.request
@@ -1143,6 +1507,69 @@ def stream_deepseek(
         response_model = prepared.body["model"]
         search_for_response = search_for_client(search_data) if search_data else search_for_response
         body = prepared.body
+        trace_context = ensure_trace(
+            payload,
+            kind="agent" if payload.get("agentMode") is True else "chat",
+            title=latest_user_query(payload),
+            metadata={"stream": True, "budgetKey": budget_key, "model": body.get("model")},
+        )
+        cache_body = body
+        semantic_span = start_span(
+            trace_context.trace_id,
+            name=f"{budget_key}:semantic_cache",
+            kind="semantic_cache",
+            input_data={"model": body.get("model"), "messageCount": len(body.get("messages") or [])},
+        )
+        semantic_lookup = semantic_cache_lookup(payload, body)
+        semantic_diag = semantic_lookup.diagnostics
+        semantic_span.finish(
+            status="hit" if semantic_lookup.hit else "miss" if semantic_diag.get("checked") else "skipped",
+            output_data=semantic_diag,
+        )
+        if semantic_lookup.hit and semantic_lookup.result is not None:
+            cached = semantic_lookup.result
+            content = str(cached.get("content") or "")
+            reasoning = str(cached.get("reasoning") or "")
+            response_model = str(cached.get("model") or response_model)
+            cached_usage = cached.get("usage")
+            usage = cached_usage if isinstance(cached_usage, dict) else {}
+            emit_system_note("Semantic cache hit: returning a local cached answer.\n\n")
+            if reasoning:
+                emit_checked({"type": "reasoning", "text": reasoning})
+            if content:
+                emit_checked({"type": "content", "text": content})
+            cached_diagnostics = with_trace_diagnostics(
+                diagnostics_with_usage(
+                    diagnostics_with_semantic_cache(
+                        diagnostics_with_search(
+                            diagnostics_with_gateway(
+                                edge_diagnostics(diagnostics_with_tools(diagnostics, count=0, names=[]), edge_route),
+                                gateway_attempts,
+                            ),
+                            search_data,
+                        ),
+                        semantic_diag,
+                    ),
+                    usage,
+                ),
+                trace_context.trace_id,
+            )
+            if trace_context.created:
+                finish_trace(trace_context.trace_id, metadata={"model": response_model, "semanticCacheHit": True})
+            emit_checked(
+                {
+                    "type": "done",
+                    "id": cached.get("id"),
+                    "model": response_model,
+                    "content": content,
+                    "reasoning": reasoning,
+                    "usage": usage,
+                    "search": search_for_response,
+                    "memorySuggestions": [],
+                    "diagnostics": cached_diagnostics,
+                }
+            )
+            return
         default_memory_scope = memory_scope_from_payload(payload)
         tool_call_count = 0
         seen_tool_names: list[str] = []
@@ -1168,60 +1595,92 @@ def stream_deepseek(
             round_reasoning = ""
             round_usage: dict[str, Any] = {}
             request = request_with_body(prepared, body, accept="text/event-stream")
-
-            with urllib.request.urlopen(request, timeout=DEEPSEEK_TIMEOUT_SECONDS) as upstream:
-                event_name = "message"
-                for raw_line in upstream:
-                    raise_if_cancelled(cancel_event)
-                    line = raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
-                    if not line:
-                        event_name = "message"
-                        continue
-                    if line.startswith("event:"):
-                        event_name = line.removeprefix("event:").strip() or "message"
-                        continue
-                    if not line.startswith("data:"):
-                        continue
-                    event_data = line.removeprefix("data:").strip()
-                    if event_data == "[DONE]":
-                        break
-                    if event_name == "error":
-                        emit_checked({"type": "error", "error": sse_error_message(event_data), "code": ErrorCode.UPSTREAM_FAILURE.value})
-                        return
-                    try:
-                        chunk = json.loads(event_data)
-                    except json.JSONDecodeError:
-                        logger.debug("invalid_stream_chunk", extra={"chunk": event_data[:200]})
-                        continue
-                    response_id = chunk.get("id") or response_id
-                    response_model = chunk.get("model") or response_model
-                    choices = chunk.get("choices") or []
-                    if not choices:
-                        continue
-                    delta = choices[0].get("delta") or {}
-                    if isinstance(chunk.get("usage"), dict):
-                        round_usage = chunk["usage"]
-                    merge_stream_tool_call_deltas(stream_tool_calls, delta.get("tool_calls"))
-                    delta_reasoning = (
-                        delta.get("reasoning_content")
-                        or delta.get("reasoning")
-                        or delta.get("thinking_content")
-                        or delta.get("thinking")
-                    )
-                    delta_content = delta.get("content")
-                    if delta_reasoning:
-                        text = str(delta_reasoning)
-                        reasoning += text
-                        round_reasoning += text
-                        emit_checked({"type": "reasoning", "text": text})
-                    if delta_content:
-                        text = str(delta_content)
-                        content += text
-                        round_content += text
-                        emit_checked({"type": "content", "text": text})
+            span = start_span(
+                trace_context.trace_id,
+                name=f"{budget_key}:deepseek:{tool_round + 1}",
+                kind="deepseek_api",
+                input_data=upstream_trace_input(body, budget_key=budget_key, tool_round=tool_round, stream=True),
+            )
+            try:
+                with open_with_resiliency(
+                    request,
+                    timeout=DEEPSEEK_TIMEOUT_SECONDS,
+                    kind="deepseek_stream",
+                    payload=request_payload_summary(body, stream=True, budget_key=budget_key, tool_round=tool_round),
+                    diagnostics_callback=record_gateway_attempt,
+                    cancel_checker=lambda: raise_if_cancelled(cancel_event),
+                ) as upstream:
+                    event_name = "message"
+                    for raw_line in upstream:
+                        raise_if_cancelled(cancel_event)
+                        line = raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
+                        if not line:
+                            event_name = "message"
+                            continue
+                        if line.startswith("event:"):
+                            event_name = line.removeprefix("event:").strip() or "message"
+                            continue
+                        if not line.startswith("data:"):
+                            continue
+                        event_data = line.removeprefix("data:").strip()
+                        if event_data == "[DONE]":
+                            break
+                        if event_name == "error":
+                            error_message = sse_error_message(event_data)
+                            span.finish(
+                                status="error",
+                                error=error_message,
+                                output_data={"content": round_content, "reasoning": round_reasoning},
+                                usage=round_usage,
+                            )
+                            if trace_context.created:
+                                finish_trace(trace_context.trace_id, status="error", error=error_message)
+                            emit_checked({"type": "error", "error": error_message, "code": ErrorCode.UPSTREAM_FAILURE.value})
+                            return
+                        try:
+                            chunk = json.loads(event_data)
+                        except json.JSONDecodeError:
+                            logger.debug("invalid_stream_chunk", extra={"chunk": event_data[:200]})
+                            continue
+                        response_id = chunk.get("id") or response_id
+                        response_model = chunk.get("model") or response_model
+                        choices = chunk.get("choices") or []
+                        if not choices:
+                            continue
+                        delta = choices[0].get("delta") or {}
+                        if isinstance(chunk.get("usage"), dict):
+                            round_usage = chunk["usage"]
+                        merge_stream_tool_call_deltas(stream_tool_calls, delta.get("tool_calls"))
+                        delta_reasoning = (
+                            delta.get("reasoning_content")
+                            or delta.get("reasoning")
+                            or delta.get("thinking_content")
+                            or delta.get("thinking")
+                        )
+                        delta_content = delta.get("content")
+                        if delta_reasoning:
+                            text = str(delta_reasoning)
+                            reasoning += text
+                            round_reasoning += text
+                            emit_checked({"type": "reasoning", "text": text})
+                        if delta_content:
+                            text = str(delta_content)
+                            content += text
+                            round_content += text
+                            emit_checked({"type": "content", "text": text})
+            except RequestCancelled:
+                span.finish(status="cancelled", output_data={"content": round_content, "reasoning": round_reasoning}, usage=round_usage)
+                raise
+            except Exception as exc:
+                span.finish(status="error", error=str(exc), output_data={"content": round_content, "reasoning": round_reasoning}, usage=round_usage)
+                raise
 
             tool_calls = finalized_stream_tool_calls(stream_tool_calls)
             usage = merge_usage_totals(usage, round_usage)
+            span.finish(
+                output_data=stream_trace_output(round_content, round_reasoning, tool_calls, response_id, response_model),
+                usage=round_usage,
+            )
             raise_if_cancelled(cancel_event)
             if not tool_calls:
                 break
@@ -1267,6 +1726,39 @@ def stream_deepseek(
         if fallback_created:
             tool_call_count += 1
             seen_tool_names.append("create_pptx")
+        result_for_cache = {
+            "model": response_model,
+            "content": content,
+            "reasoning": reasoning,
+            "usage": usage,
+            "search": search_for_response,
+            "memorySuggestions": memory_suggestions,
+        }
+        semantic_diag = merge_semantic_cache_diagnostics(semantic_diag, semantic_cache_store(payload, cache_body, result_for_cache))
+        result_diagnostics = with_trace_diagnostics(
+            diagnostics_with_usage(
+                diagnostics_with_semantic_cache(
+                    diagnostics_with_search(
+                        diagnostics_with_gateway(
+                            edge_diagnostics(
+                                diagnostics_with_tools(diagnostics, count=tool_call_count, names=seen_tool_names),
+                                edge_route,
+                            ),
+                            gateway_attempts,
+                        ),
+                        search_data,
+                    ),
+                    semantic_diag,
+                ),
+                usage,
+            ),
+            trace_context.trace_id,
+        )
+        if trace_context.created:
+            finish_trace(
+                trace_context.trace_id,
+                metadata={"model": response_model, "toolCallCount": tool_call_count, "semanticCacheHit": False},
+            )
         emit_checked({
             "type": "done",
             "id": response_id,
@@ -1276,27 +1768,42 @@ def stream_deepseek(
             "usage": usage,
             "search": search_for_response,
             "memorySuggestions": memory_suggestions,
-            "diagnostics": diagnostics_with_usage(
-                diagnostics_with_search(diagnostics_with_tools(diagnostics, count=tool_call_count, names=seen_tool_names), search_data),
-                usage,
-            ),
+            "diagnostics": result_diagnostics,
         })
     except RequestCancelled:
+        if trace_context is not None and trace_context.created:
+            finish_trace(trace_context.trace_id, status="cancelled")
         return
     except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
         if cancel_event is not None:
             cancel_event.set()
+        if trace_context is not None and trace_context.created:
+            finish_trace(trace_context.trace_id, status="cancelled")
         return
     except AppError as exc:
+        if trace_context is not None and trace_context.created:
+            finish_trace(trace_context.trace_id, status="error", error=str(exc))
         emit_checked({"type": "error", "error": str(exc), "code": exc.code.value})
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
+        if trace_context is not None and trace_context.created:
+            finish_trace(trace_context.trace_id, status="error", error=format_upstream_error(detail))
         emit_checked({"type": "error", "error": format_upstream_error(detail), "code": ErrorCode.UPSTREAM_FAILURE.value})
     except urllib.error.URLError as exc:
+        fallback_route = edge_fallback_route(payload)
+        if fallback_route is not None:
+            stream_edge_inference(payload, emit_checked, fallback_route, cancel_event=cancel_event, fallback_error=str(exc.reason))
+            if trace_context is not None and trace_context.created:
+                finish_trace(trace_context.trace_id, metadata={"edgeFallback": True})
+            return
         code = ErrorCode.UPSTREAM_TIMEOUT if "timed out" in str(exc.reason).lower() else ErrorCode.UPSTREAM_FAILURE
+        if trace_context is not None and trace_context.created:
+            finish_trace(trace_context.trace_id, status="error", error=f"Cannot reach DeepSeek API: {exc.reason}")
         emit_checked({"type": "error", "error": f"Cannot reach DeepSeek API: {exc.reason}", "code": code.value})
     except Exception:
         logger.exception("stream_error")
+        if trace_context is not None and trace_context.created:
+            finish_trace(trace_context.trace_id, status="error", error="Stream error")
         emit_checked({"type": "error", "error": "Stream error", "code": ErrorCode.INTERNAL.value})
 
 

@@ -17,6 +17,7 @@ from deepseek_mobile.services.deepseek_client import RequestCancelled, SearchBud
 from deepseek_mobile.services.multi_agent import (
     AGENT_PROFILES,
     leader_done_text,
+    layered_plan,
     MULTI_AGENT_PER_AGENT_SEARCH_LIMIT,
     MULTI_AGENT_TOTAL_SEARCH_LIMIT,
     default_agent_plan,
@@ -330,7 +331,7 @@ def normalize_agent_preset(value: Any) -> str:
     return preset if preset in {"full", "auto", "code", "research", "reason", "critic", "leader"} else "full"
 
 
-def plan_for_preset(payload: dict[str, Any], agent_preset: str, emit_event: Callable[[dict[str, Any]], None]) -> tuple[list[dict[str, str]], str]:
+def plan_for_preset(payload: dict[str, Any], agent_preset: str, emit_event: Callable[[dict[str, Any]], None]) -> tuple[list[dict[str, Any]], str]:
     preset = normalize_agent_preset(agent_preset)
     if preset == "leader":
         return plan_agents(payload, emit_event), "Leader 自动拆解"
@@ -340,17 +341,17 @@ def plan_for_preset(payload: dict[str, Any], agent_preset: str, emit_event: Call
         return [
             {"id": "coder", "task": "检查代码、实现路径和工程风险"},
             {"id": "reasoner", "task": "分析边界条件和架构取舍"},
-            {"id": "critic", "task": "复核漏洞、遗漏和反例"},
+            {"id": "critic", "task": "复核漏洞、遗漏和反例", "depends_on": ["coder", "reasoner"]},
         ], "自动启用 Coder + Reasoner + Critic"
     if preset == "research":
         return [
             {"id": "researcher", "task": "检索资料、事实和来源"},
-            {"id": "critic", "task": "复核来源可靠性和不确定点"},
+            {"id": "critic", "task": "复核来源可靠性和不确定点", "depends_on": ["researcher"]},
         ], "自动启用 Researcher + Critic"
     if preset == "reason":
         return [
             {"id": "reasoner", "task": "梳理推理链路、边界条件和方案权衡"},
-            {"id": "critic", "task": "检查风险、遗漏和反例"},
+            {"id": "critic", "task": "检查风险、遗漏和反例", "depends_on": ["reasoner"]},
         ], "自动启用 Reasoner + Critic"
     if preset == "critic":
         return [{"id": "critic", "task": "审查现有想法的风险、漏洞和遗漏"}], "仅启用 Critic"
@@ -378,7 +379,7 @@ def auto_signal_categories(query: str) -> set[str]:
 def auto_agent_plan(
     payload: dict[str, Any],
     emit_event: Callable[[dict[str, Any]], None] | None = None,
-) -> tuple[list[dict[str, str]], str]:
+) -> tuple[list[dict[str, Any]], str]:
     """Pick an Agent plan for the "auto" preset.
 
     A single clear keyword signal maps straight to its static preset (cheap, no
@@ -443,7 +444,7 @@ def start_planned_run(run_id: str, runtime_payload: dict[str, Any], *, confirm_p
         append_event(run_id, {"type": "error", "error": str(exc), "code": ErrorCode.INTERNAL.value})
 
 
-def continue_with_plan(run_id: str, runtime_payload: dict[str, Any], plan: list[dict[str, str]] | None = None) -> None:
+def continue_with_plan(run_id: str, runtime_payload: dict[str, Any], plan: list[dict[str, Any]] | None = None) -> None:
     try:
         validate_deepseek_payload(runtime_payload)
         selected_model = normalize_model_name(runtime_payload.get("model") or DEFAULT_MODEL)
@@ -460,7 +461,7 @@ def continue_with_plan(run_id: str, runtime_payload: dict[str, Any], plan: list[
 def execute_plan(
     run_id: str,
     runtime_payload: dict[str, Any],
-    plan: list[dict[str, str]],
+    plan: list[dict[str, Any]],
     *,
     selected_model: str,
     user_query: str,
@@ -591,6 +592,17 @@ def outputs_in_plan_order(run: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def prior_outputs_for_agent(run: dict[str, Any], agent_id: str) -> list[dict[str, Any]]:
+    plan = safe_agent_plan({"agents": run.get("plan") or []})
+    agent_outputs = run.get("agentOutputs")
+    outputs = agent_outputs if isinstance(agent_outputs, dict) else {}
+    prior_ids: list[str] = []
+    for layer in layered_plan(plan):
+        layer_ids = [str(item.get("id") or "") for item in layer]
+        if agent_id in layer_ids:
+            return [outputs[aid] for aid in prior_ids if isinstance(outputs.get(aid), dict)]
+        prior_ids.extend(aid for aid in layer_ids if aid)
+
+    # Target is not in the current plan snapshot; preserve the old plan-order fallback.
     ordered = outputs_in_plan_order(run)
     prior: list[dict[str, Any]] = []
     for output in ordered:

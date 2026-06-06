@@ -27,6 +27,7 @@ from deepseek_mobile.core.errors import AppError, ErrorCode
 from deepseek_mobile.core.utils import query_tokens, score_chunk
 from deepseek_mobile.services.documents import create_document
 from deepseek_mobile.services.files import cosine_similarity, extract_html_text, load_cached_file, local_text_vector
+from deepseek_mobile.services import local_rag
 from deepseek_mobile.services.memory import build_memory_suggestion, delete_memories_by_query, normalize_memory_scope, retrieve_memories
 from deepseek_mobile.services.mindmaps import create_mindmap
 from deepseek_mobile.services.presentations import create_presentation
@@ -1257,8 +1258,36 @@ def search_files(query: str, *, limit: int = 5) -> dict[str, Any]:
         raise AppError("search_files query is empty", code=ErrorCode.INVALID_PAYLOAD)
     tokens = query_tokens(query)
     query_vector = local_text_vector(query)
-    matches: list[dict[str, Any]] = []
-    for path, project_id in iter_cached_file_paths():
+    paths = iter_cached_file_paths()
+    for path, project_id in paths:
+        cached = read_cached_file(path)
+        if not cached:
+            continue
+        local_rag.index_file_payload(cached, project_id=project_id)
+
+    matches_by_key: dict[tuple[str, str, int], dict[str, Any]] = {}
+
+    for result in local_rag.search_files_index(query, limit=max(limit * 4, limit)):
+        chunk_index = int(result.chunk_index) + 1
+        key = (result.source_id, result.project_id, chunk_index)
+        matches_by_key[key] = {
+            "score": result.score,
+            "fileId": result.source_id,
+            "projectId": result.project_id,
+            "name": result.name,
+            "kind": result.kind,
+            "chunkIndex": chunk_index,
+            "lineStart": int(result.metadata.get("lineStart") or 0),
+            "lineEnd": int(result.metadata.get("lineEnd") or 0),
+            "snippet": compact_snippet(result.text, query),
+            "retrieval": {
+                "source": "local_rag",
+                "vectorScore": round(result.vector_score, 4),
+                "keywordScore": result.keyword_score,
+            },
+        }
+
+    for path, project_id in paths:
         cached = read_cached_file(path)
         if not cached:
             continue
@@ -1275,19 +1304,25 @@ def search_files(query: str, *, limit: int = 5) -> dict[str, Any]:
             score = keyword_score * 10 + int(vector_score * 100)
             if score <= 0:
                 continue
-            matches.append(
-                {
-                    "score": score,
-                    "fileId": str(cached.get("id") or path.stem),
-                    "projectId": project_id,
-                    "name": str(cached.get("name") or path.name),
-                    "kind": str(cached.get("kind") or "text"),
-                    "chunkIndex": int(chunk.get("index") or 0) + 1,
-                    "lineStart": int(chunk.get("lineStart") or 0),
-                    "lineEnd": int(chunk.get("lineEnd") or 0),
-                    "snippet": compact_snippet(text, query),
-                }
-            )
+            file_id = str(cached.get("id") or path.stem)
+            chunk_index = int(chunk.get("index") or 0) + 1
+            key = (file_id, project_id, chunk_index)
+            existing = matches_by_key.get(key)
+            if existing and int(existing.get("score") or 0) >= score:
+                continue
+            matches_by_key[key] = {
+                "score": score,
+                "fileId": file_id,
+                "projectId": project_id,
+                "name": str(cached.get("name") or path.name),
+                "kind": str(cached.get("kind") or "text"),
+                "chunkIndex": chunk_index,
+                "lineStart": int(chunk.get("lineStart") or 0),
+                "lineEnd": int(chunk.get("lineEnd") or 0),
+                "snippet": compact_snippet(text, query),
+                "retrieval": {"source": "json_hybrid", "vectorScore": round(vector_score, 4), "keywordScore": keyword_score},
+            }
+    matches = list(matches_by_key.values())
     matches.sort(key=lambda item: (-int(item["score"]), item["name"], int(item["chunkIndex"])))
     return {"query": query, "matches": matches[:limit], "searchedFiles": len({item["fileId"] for item in matches})}
 

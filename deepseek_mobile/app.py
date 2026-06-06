@@ -7,8 +7,7 @@ import mimetypes
 import sys
 import threading
 from dataclasses import dataclass
-from http.server import ThreadingHTTPServer
-from typing import Callable
+from typing import Callable, Protocol
 
 from deepseek_mobile.core.config import DEFAULT_HOST, DEFAULT_PORT, STATIC_DIR, configure_logging, settings
 from deepseek_mobile.services.files import cleanup_file_cache
@@ -22,11 +21,17 @@ logger = logging.getLogger("deepseek_mobile")
 CACHE_CLEANUP_INTERVAL_SECONDS = 6 * 60 * 60
 
 
+class ServerLifecycle(Protocol):
+    def serve_forever(self, poll_interval: float | None = None) -> None: ...
+    def shutdown(self) -> None: ...
+    def server_close(self) -> None: ...
+
+
 @dataclass(frozen=True, slots=True)
 class ServerHandle:
-    """Bundle of objects needed to interact with a running HTTP server."""
+    """Bundle of objects needed to interact with a running ASGI server."""
 
-    server: ThreadingHTTPServer
+    server: ServerLifecycle
     port: int
     host: str
     computer_url: str
@@ -49,7 +54,7 @@ def prepare_and_start(
     serve: bool = True,
     on_started: Callable[[ServerHandle], None] | None = None,
 ) -> ServerHandle:
-    """Prepare runtime dependencies and bind the HTTP server.
+    """Prepare runtime dependencies and bind the FastAPI/ASGI server.
 
     When ``serve=True`` (the default for embedded callers) the server is started
     in a daemon background thread so the caller can keep doing other work and
@@ -87,7 +92,7 @@ def prepare_and_start(
     if serve:
         thread = threading.Thread(
             target=server.serve_forever,
-            name="deepseek-http-server",
+            name="deepseek-asgi-server",
             daemon=True,
         )
         thread.start()

@@ -104,9 +104,66 @@ class OCRSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class EdgeInferenceSettings:
+    enabled: bool = False
+    provider: str = "llama_cpp"
+    model_path: str = ""
+    model_name: str = "deepseek-r1-distill-local"
+    chat_format: str = ""
+    allow_model_path_override: bool = False
+    n_ctx: int = 4096
+    n_threads: int = 0
+    n_gpu_layers: int = 0
+    max_tokens: int = 1024
+    temperature: float = 0.7
+    top_p: float = 0.95
+    simple_max_chars: int = 6000
+
+
+@dataclass(frozen=True, slots=True)
+class LocalRAGSettings:
+    enabled: bool = True
+    backend: str = "sqlite_vec"
+    embedding_provider: str = "hash"
+    embedding_model_path: str = ""
+    tokenizer_path: str = ""
+    embedding_dimensions: int = 64
+    embedding_max_tokens: int = 256
+    search_limit: int = 24
+
+
+@dataclass(frozen=True, slots=True)
+class TracingSettings:
+    enabled: bool = True
+    input_chars: int = 20_000
+    output_chars: int = 20_000
+    list_limit: int = 100
+
+
+@dataclass(frozen=True, slots=True)
+class SemanticCacheSettings:
+    enabled: bool = True
+    similarity_threshold: float = 0.95
+    ttl_seconds: int = 7 * 24 * 60 * 60
+    max_items: int = 1_000
+    max_prompt_chars: int = 80_000
+    max_response_chars: int = 80_000
+
+
+@dataclass(frozen=True, slots=True)
+class GatewaySettings:
+    context_manager_enabled: bool = True
+    context_sliding_window_messages: int = 36
+    request_queue_enabled: bool = True
+    request_queue_max_attempts: int = 6
+    request_queue_initial_backoff_seconds: float = 2.0
+    request_queue_max_backoff_seconds: float = 120.0
+
+
+@dataclass(frozen=True, slots=True)
 class Settings:
     root: Path = ROOT
-    app_version: str = "1.7.0"
+    app_version: str = "1.8.1"
     deepseek_url: str = "https://api.deepseek.com/chat/completions"
     tavily_url: str = "https://api.tavily.com/search"
     deepseek_timeout_seconds: int = 180
@@ -160,6 +217,11 @@ class Settings:
     memory: MemorySettings = field(default_factory=MemorySettings)
     auth: AuthSettings = field(default_factory=AuthSettings)
     ocr: OCRSettings = field(default_factory=OCRSettings)
+    edge: EdgeInferenceSettings = field(default_factory=EdgeInferenceSettings)
+    local_rag: LocalRAGSettings = field(default_factory=LocalRAGSettings)
+    tracing: TracingSettings = field(default_factory=TracingSettings)
+    semantic_cache: SemanticCacheSettings = field(default_factory=SemanticCacheSettings)
+    gateway: GatewaySettings = field(default_factory=GatewaySettings)
 
     @property
     def static_dir(self) -> Path:
@@ -200,6 +262,38 @@ class Settings:
     @property
     def agent_runs_dir(self) -> Path:
         return self.root / ".agent-runs"
+
+    @property
+    def local_rag_dir(self) -> Path:
+        return self.root / ".local-rag"
+
+    @property
+    def local_rag_db(self) -> Path:
+        return self.local_rag_dir / "rag.sqlite3"
+
+    @property
+    def traces_dir(self) -> Path:
+        return self.root / ".traces"
+
+    @property
+    def traces_db(self) -> Path:
+        return self.traces_dir / "traces.sqlite3"
+
+    @property
+    def semantic_cache_dir(self) -> Path:
+        return self.root / ".semantic-cache"
+
+    @property
+    def semantic_cache_db(self) -> Path:
+        return self.semantic_cache_dir / "cache.sqlite3"
+
+    @property
+    def request_queue_dir(self) -> Path:
+        return self.root / ".request-queue"
+
+    @property
+    def request_queue_db(self) -> Path:
+        return self.request_queue_dir / "queue.sqlite3"
 
     @property
     def auth_token_file(self) -> Path:
@@ -244,6 +338,53 @@ class Settings:
                     600,
                 ),
             ),
+            edge=EdgeInferenceSettings(
+                enabled=_env_bool("EDGE_INFERENCE_ENABLED", False),
+                provider=_env_choice("EDGE_INFERENCE_PROVIDER", {"llama_cpp", "mlc"}, "llama_cpp"),
+                model_path=os.environ.get("EDGE_MODEL_PATH", "").strip(),
+                model_name=os.environ.get("EDGE_MODEL_NAME", "deepseek-r1-distill-local").strip() or "deepseek-r1-distill-local",
+                chat_format=os.environ.get("EDGE_CHAT_FORMAT", "").strip(),
+                allow_model_path_override=_env_bool("EDGE_ALLOW_MODEL_PATH_OVERRIDE", False),
+                n_ctx=_env_int_clamped("EDGE_N_CTX", 4096, 512, 262_144),
+                n_threads=_env_int_min("EDGE_N_THREADS", 0, 0),
+                n_gpu_layers=_env_int_min("EDGE_N_GPU_LAYERS", 0, 0),
+                max_tokens=_env_int_clamped("EDGE_MAX_TOKENS", 1024, 16, 16_384),
+                temperature=_env_float_clamped("EDGE_TEMPERATURE", 0.7, 0.0, 2.0),
+                top_p=_env_float_clamped("EDGE_TOP_P", 0.95, 0.05, 1.0),
+                simple_max_chars=_env_int_clamped("EDGE_SIMPLE_MAX_CHARS", 6000, 256, 120_000),
+            ),
+            local_rag=LocalRAGSettings(
+                enabled=_env_bool("LOCAL_RAG_ENABLED", True),
+                backend=_env_choice("LOCAL_RAG_BACKEND", {"sqlite_vec", "sqlite"}, "sqlite_vec"),
+                embedding_provider=_env_choice("LOCAL_RAG_EMBEDDING_PROVIDER", {"hash", "onnx"}, "hash"),
+                embedding_model_path=os.environ.get("LOCAL_RAG_ONNX_MODEL_PATH", "").strip(),
+                tokenizer_path=os.environ.get("LOCAL_RAG_TOKENIZER_PATH", "").strip(),
+                embedding_dimensions=_env_int_clamped("LOCAL_RAG_EMBEDDING_DIMENSIONS", 64, 8, 4096),
+                embedding_max_tokens=_env_int_clamped("LOCAL_RAG_EMBEDDING_MAX_TOKENS", 256, 16, 8192),
+                search_limit=_env_int_clamped("LOCAL_RAG_SEARCH_LIMIT", 24, 1, 200),
+            ),
+            tracing=TracingSettings(
+                enabled=_env_bool("TRACE_ENABLED", True),
+                input_chars=_env_int_clamped("TRACE_INPUT_CHARS", 20_000, 1_000, 200_000),
+                output_chars=_env_int_clamped("TRACE_OUTPUT_CHARS", 20_000, 1_000, 200_000),
+                list_limit=_env_int_clamped("TRACE_LIST_LIMIT", 100, 10, 1_000),
+            ),
+            semantic_cache=SemanticCacheSettings(
+                enabled=_env_bool("SEMANTIC_CACHE_ENABLED", True),
+                similarity_threshold=_env_float_clamped("SEMANTIC_CACHE_THRESHOLD", 0.95, 0.5, 0.999),
+                ttl_seconds=_env_int_clamped("SEMANTIC_CACHE_TTL_SECONDS", 7 * 24 * 60 * 60, 60, 31_536_000),
+                max_items=_env_int_clamped("SEMANTIC_CACHE_MAX_ITEMS", 1_000, 10, 50_000),
+                max_prompt_chars=_env_int_clamped("SEMANTIC_CACHE_MAX_PROMPT_CHARS", 80_000, 1_000, 500_000),
+                max_response_chars=_env_int_clamped("SEMANTIC_CACHE_MAX_RESPONSE_CHARS", 80_000, 1_000, 500_000),
+            ),
+            gateway=GatewaySettings(
+                context_manager_enabled=_env_bool("GATEWAY_CONTEXT_MANAGER_ENABLED", True),
+                context_sliding_window_messages=_env_int_clamped("GATEWAY_CONTEXT_WINDOW_MESSAGES", 36, 8, 80),
+                request_queue_enabled=_env_bool("GATEWAY_REQUEST_QUEUE_ENABLED", True),
+                request_queue_max_attempts=_env_int_clamped("GATEWAY_REQUEST_QUEUE_MAX_ATTEMPTS", 6, 1, 20),
+                request_queue_initial_backoff_seconds=_env_float_clamped("GATEWAY_REQUEST_QUEUE_INITIAL_BACKOFF_SECONDS", 2.0, 0.0, 60.0),
+                request_queue_max_backoff_seconds=_env_float_clamped("GATEWAY_REQUEST_QUEUE_MAX_BACKOFF_SECONDS", 120.0, 0.0, 600.0),
+            ),
         )
 
 
@@ -286,6 +427,17 @@ def _env_int_clamped(name: str, default: int, minimum: int, maximum: int) -> int
 
 def _env_int_min(name: str, default: int, minimum: int) -> int:
     return max(minimum, _env_int(name, default))
+
+
+def _env_float_clamped(name: str, default: float, minimum: float, maximum: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        return default
+    return min(maximum, max(minimum, value))
 
 
 def _env_choice(name: str, choices: set[str], default: str) -> str:
@@ -354,6 +506,18 @@ OCR_PDF_DPI = settings.ocr.pdf_dpi
 OCR_MAX_IMAGE_PIXELS = settings.ocr.max_image_pixels
 OCR_FORMULA_CMD = settings.ocr.formula_cmd
 OCR_FORMULA_TIMEOUT_SECONDS = settings.ocr.formula_timeout_seconds
+EDGE_INFERENCE_ENABLED = settings.edge.enabled
+EDGE_INFERENCE_PROVIDER = settings.edge.provider
+EDGE_MODEL_PATH = settings.edge.model_path
+EDGE_MODEL_NAME = settings.edge.model_name
+LOCAL_RAG_ENABLED = settings.local_rag.enabled
+LOCAL_RAG_BACKEND = settings.local_rag.backend
+LOCAL_RAG_EMBEDDING_PROVIDER = settings.local_rag.embedding_provider
+LOCAL_RAG_ONNX_MODEL_PATH = settings.local_rag.embedding_model_path
+LOCAL_RAG_TOKENIZER_PATH = settings.local_rag.tokenizer_path
+LOCAL_RAG_EMBEDDING_DIMENSIONS = settings.local_rag.embedding_dimensions
+LOCAL_RAG_EMBEDDING_MAX_TOKENS = settings.local_rag.embedding_max_tokens
+LOCAL_RAG_SEARCH_LIMIT = settings.local_rag.search_limit
 
 SEARCH_RESULT_LIMIT = settings.search.result_limit
 SEARCH_ROUND_LIMIT = settings.search.round_limit
@@ -392,6 +556,30 @@ REMINDERS_DIR = settings.reminders_dir
 REMINDERS_FILE = settings.reminders_file
 PROJECTS_DIR = settings.projects_dir
 AGENT_RUNS_DIR = settings.agent_runs_dir
+LOCAL_RAG_DIR = settings.local_rag_dir
+LOCAL_RAG_DB = settings.local_rag_db
+TRACE_ENABLED = settings.tracing.enabled
+TRACE_DIR = settings.traces_dir
+TRACE_DB = settings.traces_db
+TRACE_INPUT_CHARS = settings.tracing.input_chars
+TRACE_OUTPUT_CHARS = settings.tracing.output_chars
+TRACE_LIST_LIMIT = settings.tracing.list_limit
+SEMANTIC_CACHE_ENABLED = settings.semantic_cache.enabled
+SEMANTIC_CACHE_DIR = settings.semantic_cache_dir
+SEMANTIC_CACHE_DB = settings.semantic_cache_db
+SEMANTIC_CACHE_THRESHOLD = settings.semantic_cache.similarity_threshold
+SEMANTIC_CACHE_TTL_SECONDS = settings.semantic_cache.ttl_seconds
+SEMANTIC_CACHE_MAX_ITEMS = settings.semantic_cache.max_items
+SEMANTIC_CACHE_MAX_PROMPT_CHARS = settings.semantic_cache.max_prompt_chars
+SEMANTIC_CACHE_MAX_RESPONSE_CHARS = settings.semantic_cache.max_response_chars
+GATEWAY_CONTEXT_MANAGER_ENABLED = settings.gateway.context_manager_enabled
+GATEWAY_CONTEXT_WINDOW_MESSAGES = settings.gateway.context_sliding_window_messages
+GATEWAY_REQUEST_QUEUE_ENABLED = settings.gateway.request_queue_enabled
+GATEWAY_REQUEST_QUEUE_DIR = settings.request_queue_dir
+GATEWAY_REQUEST_QUEUE_DB = settings.request_queue_db
+GATEWAY_REQUEST_QUEUE_MAX_ATTEMPTS = settings.gateway.request_queue_max_attempts
+GATEWAY_REQUEST_QUEUE_INITIAL_BACKOFF_SECONDS = settings.gateway.request_queue_initial_backoff_seconds
+GATEWAY_REQUEST_QUEUE_MAX_BACKOFF_SECONDS = settings.gateway.request_queue_max_backoff_seconds
 AUTH_TOKEN_FILE = settings.auth_token_file
 
 TEXT_EXTENSIONS = {

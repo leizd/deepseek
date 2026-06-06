@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 import deepseek_mobile.services.deepseek_client as deepseek_client
 from deepseek_mobile.services.deepseek_client import build_deepseek_request, call_deepseek, stream_deepseek, validate_deepseek_payload
+from deepseek_mobile.services.edge_inference import EdgeCompletion, EdgeRouteDecision
 from deepseek_mobile.core.errors import AppError, ErrorCode
 
 
@@ -113,6 +114,75 @@ class DeepSeekRequestTests(unittest.TestCase):
         self.assertEqual(events[0]["type"], "error")
         self.assertIn("Missing DeepSeek API Key", str(events[0]["error"]))
         self.assertEqual(events[0]["code"], ErrorCode.MISSING_API_KEY.value)
+
+    def test_call_deepseek_routes_simple_request_to_edge_without_api_key(self) -> None:
+        route = EdgeRouteDecision(
+            True,
+            "simple_task_local",
+            "auto",
+            "llama_cpp",
+            {"modelName": "DeepSeek-R1-Distill-Qwen-1.5B-Q4_K_M", "quantization": "Q4_K_M", "nCtx": 4096, "nGpuLayers": 0},
+        )
+        completion = EdgeCompletion(
+            content="local hello",
+            reasoning="",
+            model="DeepSeek-R1-Distill-Qwen-1.5B-Q4_K_M",
+            usage={"prompt_tokens": 4, "completion_tokens": 2, "total_tokens": 6},
+            provider="llama_cpp",
+        )
+
+        with (
+            patch.object(deepseek_client, "edge_route_for_payload", return_value=route),
+            patch.object(deepseek_client.edge_manager, "complete", return_value=completion) as complete,
+            patch("urllib.request.urlopen") as urlopen,
+        ):
+            result = call_deepseek({"messages": [{"role": "user", "content": "hello"}]})
+
+        complete.assert_called_once()
+        urlopen.assert_not_called()
+        self.assertEqual(result["content"], "local hello")
+        self.assertEqual(result["model"], "DeepSeek-R1-Distill-Qwen-1.5B-Q4_K_M")
+        self.assertEqual(result["diagnostics"]["edgeInference"]["used"], True)
+        self.assertEqual(result["diagnostics"]["edgeInference"]["quantization"], "Q4_K_M")
+
+    def test_call_deepseek_falls_back_to_edge_when_cloud_is_unreachable_for_simple_task(self) -> None:
+        cloud_route = EdgeRouteDecision(False, "complex_task_cloud", "auto", "llama_cpp", {"modelName": "local"})
+        fallback_route = EdgeRouteDecision(True, "cloud_unavailable_simple_local", "auto", "llama_cpp", {"modelName": "local"})
+        completion = EdgeCompletion(
+            content="offline local answer",
+            reasoning="",
+            model="local",
+            usage={"prompt_tokens": 4, "completion_tokens": 4, "total_tokens": 8},
+            provider="llama_cpp",
+        )
+
+        with (
+            patch.object(deepseek_client, "edge_route_for_payload", return_value=cloud_route),
+            patch.object(deepseek_client, "edge_fallback_route", return_value=fallback_route),
+            patch.object(deepseek_client.edge_manager, "complete", return_value=completion),
+            patch("urllib.request.urlopen", side_effect=deepseek_client.urllib.error.URLError("offline")),
+        ):
+            result = call_deepseek({"apiKey": "test", "model": "expert", "messages": [{"role": "user", "content": "summarize this"}]})
+
+        self.assertEqual(result["content"], "offline local answer")
+        self.assertEqual(result["diagnostics"]["edgeInference"]["routeReason"], "cloud_unavailable_simple_local")
+        self.assertIn("offline", result["diagnostics"]["edgeInference"]["fallbackError"])
+
+    def test_stream_deepseek_can_stream_from_edge_without_api_key(self) -> None:
+        events: list[dict[str, Any]] = []
+        route = EdgeRouteDecision(True, "simple_task_local", "auto", "llama_cpp", {"modelName": "local", "nCtx": 4096})
+
+        with (
+            patch.object(deepseek_client, "edge_route_for_payload", return_value=route),
+            patch.object(deepseek_client.edge_manager, "stream", return_value=iter(["local ", "stream"])),
+            patch("urllib.request.urlopen") as urlopen,
+        ):
+            stream_deepseek({"messages": [{"role": "user", "content": "hello"}]}, events.append)
+
+        urlopen.assert_not_called()
+        done = [event for event in events if event.get("type") == "done"][0]
+        self.assertEqual(done["content"], "local stream")
+        self.assertEqual(done["diagnostics"]["edgeInference"]["used"], True)
 
     def test_build_deepseek_request_clamps_flash_temperature(self) -> None:
         prepared = build_deepseek_request(
@@ -505,7 +575,7 @@ class DeepSeekRequestTests(unittest.TestCase):
         self.assertEqual(cm.exception.code, ErrorCode.CONTEXT_COMPRESSION_REQUIRED)
         self.assertEqual(cm.exception.status, 409)
 
-    def test_build_deepseek_request_keeps_all_messages_when_summary_exists(self) -> None:
+    def test_build_deepseek_request_applies_sliding_window_when_summary_exists(self) -> None:
         messages = [{"role": "user", "content": f"Message {index}"} for index in range(41)]
 
         prepared = build_deepseek_request(
@@ -514,9 +584,11 @@ class DeepSeekRequestTests(unittest.TestCase):
         )
 
         request_messages = [message for message in prepared.body["messages"] if message["role"] in {"user", "assistant"}]
-        self.assertEqual(len(request_messages), 41)
-        self.assertIn("Message 0", request_messages[0]["content"])
+        self.assertEqual(len(request_messages), 34)
+        self.assertIn("Message 7", request_messages[0]["content"])
         self.assertIn("Message 40", request_messages[-1]["content"])
+        self.assertTrue(prepared.diagnostics["contextManager"]["slidingWindowApplied"])
+        self.assertEqual(prepared.diagnostics["contextManager"]["droppedMessages"], 7)
 
     def test_call_deepseek_adds_cache_diagnostics_from_usage(self) -> None:
         response = {

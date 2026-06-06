@@ -11,9 +11,13 @@ import deepseek_mobile.core.config as config
 import deepseek_mobile.services.files as files
 import deepseek_mobile.services.agent_runs as agent_runs
 import deepseek_mobile.services.memory as memory
+import deepseek_mobile.services.local_rag as local_rag
+import deepseek_mobile.services.observability as observability
 import deepseek_mobile.services.projects as projects
 import deepseek_mobile.services.reminders as reminders
 import deepseek_mobile.services.search as search
+import deepseek_mobile.services.resiliency as resiliency
+import deepseek_mobile.services.semantic_cache as semantic_cache
 import deepseek_mobile.services.tools as tools
 
 
@@ -26,6 +30,10 @@ def tmp_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Pa
     search_cache_dir = tmp_path / ".search-cache"
     reminders_dir = tmp_path / ".reminders"
     projects_dir = tmp_path / ".projects"
+    local_rag_dir = tmp_path / ".local-rag"
+    traces_dir = tmp_path / ".traces"
+    semantic_cache_dir = tmp_path / ".semantic-cache"
+    request_queue_dir = tmp_path / ".request-queue"
 
     monkeypatch.setattr(config, "FILE_CACHE_DIR", file_cache_dir)
     monkeypatch.setattr(config, "AGENT_RUNS_DIR", agent_runs_dir)
@@ -35,6 +43,14 @@ def tmp_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Pa
     monkeypatch.setattr(config, "REMINDERS_DIR", reminders_dir)
     monkeypatch.setattr(config, "REMINDERS_FILE", reminders_dir / "reminders.json")
     monkeypatch.setattr(config, "PROJECTS_DIR", projects_dir)
+    monkeypatch.setattr(config, "LOCAL_RAG_DIR", local_rag_dir)
+    monkeypatch.setattr(config, "LOCAL_RAG_DB", local_rag_dir / "rag.sqlite3")
+    monkeypatch.setattr(config, "TRACE_DIR", traces_dir)
+    monkeypatch.setattr(config, "TRACE_DB", traces_dir / "traces.sqlite3")
+    monkeypatch.setattr(config, "SEMANTIC_CACHE_DIR", semantic_cache_dir)
+    monkeypatch.setattr(config, "SEMANTIC_CACHE_DB", semantic_cache_dir / "cache.sqlite3")
+    monkeypatch.setattr(config, "GATEWAY_REQUEST_QUEUE_DIR", request_queue_dir)
+    monkeypatch.setattr(config, "GATEWAY_REQUEST_QUEUE_DB", request_queue_dir / "queue.sqlite3")
 
     monkeypatch.setattr(files, "FILE_CACHE_DIR", file_cache_dir)
     monkeypatch.setattr(agent_runs, "AGENT_RUNS_DIR", agent_runs_dir)
@@ -45,6 +61,17 @@ def tmp_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Pa
     monkeypatch.setattr(reminders, "REMINDERS_FILE", reminders_dir / "reminders.json")
     monkeypatch.setattr(projects, "PROJECTS_DIR", projects_dir)
     monkeypatch.setattr(files, "PROJECTS_DIR", projects_dir)
+    monkeypatch.setattr(local_rag, "FILE_CACHE_DIR", file_cache_dir)
+    monkeypatch.setattr(local_rag, "MEMORY_FILE", memory_dir / "memories.json")
+    monkeypatch.setattr(local_rag, "PROJECTS_DIR", projects_dir)
+    monkeypatch.setattr(local_rag, "LOCAL_RAG_DIR", local_rag_dir)
+    monkeypatch.setattr(local_rag, "LOCAL_RAG_DB", local_rag_dir / "rag.sqlite3")
+    monkeypatch.setattr(observability, "TRACE_DIR", traces_dir)
+    monkeypatch.setattr(observability, "TRACE_DB", traces_dir / "traces.sqlite3")
+    monkeypatch.setattr(semantic_cache, "SEMANTIC_CACHE_DIR", semantic_cache_dir)
+    monkeypatch.setattr(semantic_cache, "SEMANTIC_CACHE_DB", semantic_cache_dir / "cache.sqlite3")
+    monkeypatch.setattr(resiliency, "GATEWAY_REQUEST_QUEUE_DIR", request_queue_dir)
+    monkeypatch.setattr(resiliency, "GATEWAY_REQUEST_QUEUE_DB", request_queue_dir / "queue.sqlite3")
     monkeypatch.setattr(tools, "FILE_CACHE_DIR", file_cache_dir)
     monkeypatch.setattr(tools, "SEARCH_CACHE_DIR", search_cache_dir)
     monkeypatch.setattr(tools, "PROJECTS_DIR", projects_dir)

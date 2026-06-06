@@ -27,6 +27,7 @@ from deepseek_mobile.core.config import (
     FILE_CONTEXT_MAX_CHUNKS,
     FILE_FULL_CONTEXT_LIMIT,
     FILE_PREVIEW_CHARS,
+    LOCAL_RAG_EMBEDDING_DIMENSIONS,
     MAX_ZIP_ENTRY_BYTES,
     MAX_ZIP_TOTAL_BYTES,
     PROJECTS_DIR,
@@ -35,6 +36,7 @@ from deepseek_mobile.core.config import (
 )
 from deepseek_mobile.core.errors import AppError, ErrorCode
 from deepseek_mobile.core.utils import query_tokens, score_chunk
+from deepseek_mobile.services import local_rag
 from deepseek_mobile.services.ocr import extract_image_ocr, extract_pdf_ocr
 
 
@@ -42,7 +44,7 @@ IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff", "
 EPUB_EXTENSION = ".epub"
 PPTX_EXTENSION = ".pptx"
 HTML_EXTENSIONS = {".html", ".htm"}
-VECTOR_DIMENSIONS = 64
+VECTOR_DIMENSIONS = LOCAL_RAG_EMBEDDING_DIMENSIONS
 MAX_ZIP_COMPRESSION_RATIO = 100
 FILE_READER_DEFAULT_CHUNKS = 6
 FILE_READER_MAX_CHUNKS = 12
@@ -115,7 +117,13 @@ def format_cached_file_context(
     char_count = int(cached.get("charCount") or 0)
     cached_chunks = cached.get("chunks")
     chunks = cached_chunks if isinstance(cached_chunks, list) else []
-    selected_indices = select_file_chunk_indices(chunks, query, char_budget=char_budget)
+    selected_indices = select_file_chunk_indices(
+        chunks,
+        query,
+        char_budget=char_budget,
+        file_id=str(cached.get("id") or ""),
+        project_id=str(cached.get("projectId") or ""),
+    )
     selected_chunks = [chunks[i] for i in selected_indices if 0 <= i < len(chunks)]
 
     lines = [
@@ -161,6 +169,8 @@ def select_file_chunk_indices(
     query: str,
     *,
     char_budget: int = FILE_CONTEXT_CHAR_BUDGET,
+    file_id: str = "",
+    project_id: str = "",
 ) -> list[int]:
     if not chunks:
         return []
@@ -210,6 +220,14 @@ def select_file_chunk_indices(
             if not add(index):
                 break
 
+    indexed_candidates = local_rag.search_file_chunks(file_id, project_id, query, limit=FILE_CONTEXT_MAX_CHUNKS) if file_id else []
+    for index in indexed_candidates:
+        if len(chosen) >= FILE_CONTEXT_MAX_CHUNKS or used >= char_budget:
+            break
+        add(index)
+        add(index - 1)
+        add(index + 1)
+
     for _, index in scored:
         if len(chosen) >= FILE_CONTEXT_MAX_CHUNKS or used >= char_budget:
             break
@@ -243,37 +261,11 @@ def hybrid_chunk_score(chunk: dict[str, Any], text: str, tokens: list[str], quer
 
 
 def local_text_vector(text: str) -> list[float]:
-    """Small local semantic-ish vector using hashed words and CJK ngrams.
-
-    This is deliberately dependency-free. It gives project documents a local
-    vector index today and can be replaced by a model-backed embedding later.
-    """
-
-    vector = [0.0] * VECTOR_DIMENSIONS
-    value = str(text or "").lower()
-    features = query_tokens(value)
-    for feature in features:
-        digest = hashlib.blake2b(feature.encode("utf-8", errors="ignore"), digest_size=4).digest()
-        number = int.from_bytes(digest, "big")
-        index = number % VECTOR_DIMENSIONS
-        sign = -1.0 if number & 1 else 1.0
-        vector[index] += sign
-    norm = sum(item * item for item in vector) ** 0.5
-    if norm <= 0:
-        return vector
-    return [round(item / norm, 6) for item in vector]
+    return local_rag.embed_text(text)
 
 
 def cosine_similarity(left: list[float], right: list[Any]) -> float:
-    if not left or not right:
-        return 0.0
-    total = 0.0
-    for left_value, right_value in zip(left, right):
-        try:
-            total += float(left_value) * float(right_value)
-        except (TypeError, ValueError):
-            continue
-    return max(0.0, total)
+    return local_rag.cosine_similarity(left, right)
 
 
 def extract_uploaded_file(
@@ -514,6 +506,7 @@ def cache_file_chunks(
         "type": content_type,
         "size": size,
         "kind": kind,
+        "projectId": project_id or "",
         "sourceAvailable": True,
         "pageCount": int(page_count or 0),
         "pageTexts": normalized_page_texts(page_texts),
@@ -529,6 +522,7 @@ def cache_file_chunks(
     temp_source_path.replace(source_path)
     temp_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     temp_path.replace(final_path)
+    local_rag.index_file_payload(payload, project_id=project_id or "")
     return file_id
 
 
