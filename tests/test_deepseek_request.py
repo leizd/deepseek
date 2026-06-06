@@ -6,9 +6,9 @@ from datetime import datetime, timezone
 from typing import Any
 from unittest.mock import patch
 
-import deepseek_infra.services.deepseek_client as deepseek_client
-from deepseek_infra.services.deepseek_client import build_deepseek_request, call_deepseek, stream_deepseek, validate_deepseek_payload
-from deepseek_infra.services.edge_inference import EdgeCompletion, EdgeRouteDecision
+import deepseek_infra.infra.gateway.deepseek_client as deepseek_client
+from deepseek_infra.infra.gateway.deepseek_client import build_deepseek_request, call_deepseek, stream_deepseek, validate_deepseek_payload
+from deepseek_infra.infra.gateway.edge_inference import EdgeCompletion, EdgeRouteDecision
 from deepseek_infra.core.errors import AppError, ErrorCode
 
 
@@ -819,7 +819,7 @@ class DeepSeekRequestTests(unittest.TestCase):
         }
         with (
             patch("urllib.request.urlopen", return_value=FakeResponse(json.dumps(tool_response).encode("utf-8"))) as mocked,
-            patch("deepseek_infra.services.tools.create_presentation", return_value=ppt_result),
+            patch("deepseek_infra.infra.tool_runtime.tools.create_presentation", return_value=ppt_result),
         ):
             result = call_deepseek({"apiKey": "test", "model": "expert", "messages": [{"role": "user", "content": "帮我做一个 Roadmap PPT"}]})
 
@@ -870,7 +870,7 @@ class DeepSeekRequestTests(unittest.TestCase):
         }
         with (
             patch("urllib.request.urlopen", return_value=FakeResponse(json.dumps(tool_response).encode("utf-8"))) as mocked,
-            patch("deepseek_infra.services.tools.create_document", return_value=doc_result),
+            patch("deepseek_infra.infra.tool_runtime.tools.create_document", return_value=doc_result),
         ):
             result = call_deepseek({"apiKey": "test", "model": "expert", "messages": [{"role": "user", "content": "帮我做一个 Word 方案"}]})
 
@@ -918,7 +918,7 @@ class DeepSeekRequestTests(unittest.TestCase):
         }
         with (
             patch("urllib.request.urlopen", return_value=FakeResponse(json.dumps(tool_response).encode("utf-8"))) as mocked,
-            patch("deepseek_infra.services.tools.create_mindmap", return_value=map_result),
+            patch("deepseek_infra.infra.tool_runtime.tools.create_mindmap", return_value=map_result),
         ):
             result = call_deepseek({"apiKey": "test", "model": "expert", "messages": [{"role": "user", "content": "帮我画一个 Launch 思维导图"}]})
 
@@ -1255,7 +1255,7 @@ class DeepSeekRequestTests(unittest.TestCase):
         events: list[dict[str, Any]] = []
         with (
             patch("urllib.request.urlopen", return_value=FakeStream([f"data: {json.dumps(tool_delta)}\n".encode("utf-8"), b"data: [DONE]\n"])) as mocked,
-            patch("deepseek_infra.services.tools.create_presentation", return_value=ppt_result),
+            patch("deepseek_infra.infra.tool_runtime.tools.create_presentation", return_value=ppt_result),
         ):
             stream_deepseek({"apiKey": "test", "model": "expert", "messages": [{"role": "user", "content": "帮我做 Roadmap PPT"}]}, events.append)
 

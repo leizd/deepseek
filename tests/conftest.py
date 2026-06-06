@@ -8,17 +8,17 @@ from unittest.mock import patch
 import pytest
 
 import deepseek_infra.core.config as config
-import deepseek_infra.services.files as files
-import deepseek_infra.services.agent_runs as agent_runs
-import deepseek_infra.services.memory as memory
-import deepseek_infra.services.local_rag as local_rag
-import deepseek_infra.services.observability as observability
-import deepseek_infra.services.projects as projects
-import deepseek_infra.services.reminders as reminders
-import deepseek_infra.services.search as search
-import deepseek_infra.services.resiliency as resiliency
-import deepseek_infra.services.semantic_cache as semantic_cache
-import deepseek_infra.services.tools as tools
+import deepseek_infra.infra.rag.files as files
+import deepseek_infra.infra.agent_runtime.agent_runs as agent_runs
+import deepseek_infra.infra.data.memory as memory
+import deepseek_infra.infra.rag.local_rag as local_rag
+import deepseek_infra.infra.observability.observability as observability
+import deepseek_infra.infra.data.projects as projects
+import deepseek_infra.infra.data.reminders as reminders
+import deepseek_infra.infra.tool_runtime.search as search
+import deepseek_infra.infra.gateway.resiliency as resiliency
+import deepseek_infra.infra.gateway.semantic_cache as semantic_cache
+import deepseek_infra.infra.tool_runtime.tools as tools
 
 
 @pytest.fixture

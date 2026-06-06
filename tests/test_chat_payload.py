@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from deepseek_infra.services.chat_payload import count_payload_attachments, expanded_message_content
+from deepseek_infra.infra.gateway.chat_payload import count_payload_attachments, expanded_message_content
 
 
 class ChatPayloadTests(unittest.TestCase):

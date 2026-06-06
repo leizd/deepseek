@@ -19,7 +19,7 @@ from deepseek_infra.core.config import (
     GATEWAY_REQUEST_QUEUE_MAX_ATTEMPTS,
     GATEWAY_REQUEST_QUEUE_MAX_BACKOFF_SECONDS,
 )
-from deepseek_infra.services.context_manager import stable_json_dumps
+from deepseek_infra.infra.gateway.context_manager import stable_json_dumps
 
 RETRYABLE_HTTP_STATUS = {408, 425, 429, 502, 503, 504}
 _DB_LOCK = threading.RLock()

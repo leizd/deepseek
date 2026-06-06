@@ -6,15 +6,15 @@ import tempfile
 from pathlib import Path
 
 from deepseek_infra.core.errors import AppError, ErrorCode
-from deepseek_infra.services import generated_files, presentations
-from deepseek_infra.services.presentations import (
+from deepseek_infra.infra.tool_runtime import generated_files, presentations
+from deepseek_infra.infra.tool_runtime.presentations import (
     create_presentation,
     infer_presentation_title,
     resolve_generated_file,
     save_generated_file_to_downloads,
     slides_from_outline_text,
 )
-from deepseek_infra.services.tools import available_tool_definitions
+from deepseek_infra.infra.tool_runtime.tools import available_tool_definitions
 
 
 class PresentationTests(unittest.TestCase):

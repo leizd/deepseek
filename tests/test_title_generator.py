@@ -5,8 +5,8 @@ import unittest
 from unittest.mock import patch
 
 from deepseek_infra.core.errors import AppError, ErrorCode
-from deepseek_infra.services import title_generator
-from deepseek_infra.services.title_generator import _sanitize_title, generate_title_payload
+from deepseek_infra.infra.gateway import title_generator
+from deepseek_infra.infra.gateway.title_generator import _sanitize_title, generate_title_payload
 
 
 class TitleGeneratorTests(unittest.TestCase):

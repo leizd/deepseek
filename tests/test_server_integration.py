@@ -14,10 +14,10 @@ from typing import Any, cast
 from urllib.parse import parse_qs, urlsplit
 from unittest.mock import patch
 
-import deepseek_infra.services.files as files_module
-import deepseek_infra.services.agent_runs as agent_runs_module
-import deepseek_infra.services.memory as memory_module
-import deepseek_infra.services.projects as projects_module
+import deepseek_infra.infra.rag.files as files_module
+import deepseek_infra.infra.agent_runtime.agent_runs as agent_runs_module
+import deepseek_infra.infra.data.memory as memory_module
+import deepseek_infra.infra.data.projects as projects_module
 import deepseek_infra.web.server as server_module
 from deepseek_infra.core.errors import ErrorCode
 

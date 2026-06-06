@@ -10,9 +10,9 @@ from unittest.mock import patch
 
 import pytest
 
-import deepseek_infra.services.memory as memory
-import deepseek_infra.services.projects as projects
-import deepseek_infra.services.tools as tools
+import deepseek_infra.infra.data.memory as memory
+import deepseek_infra.infra.data.projects as projects
+import deepseek_infra.infra.tool_runtime.tools as tools
 from deepseek_infra.core.errors import AppError, ErrorCode
 
 

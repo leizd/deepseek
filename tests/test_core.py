@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import unittest
 
-from deepseek_infra.services.deepseek_client import build_deepseek_request
-from deepseek_infra.services.files import chunk_text, select_file_chunk_indices
-from deepseek_infra.services.search import aggregate_search_rounds, search_for_client
+from deepseek_infra.infra.gateway.deepseek_client import build_deepseek_request
+from deepseek_infra.infra.rag.files import chunk_text, select_file_chunk_indices
+from deepseek_infra.infra.tool_runtime.search import aggregate_search_rounds, search_for_client
 from deepseek_infra.core.utils import clean_filename, normalize_model_name, query_tokens
 
 

@@ -20,24 +20,24 @@ from deepseek_infra.core.config import (
     SUPPORTED_MODELS,
     settings,
 )
-from deepseek_infra.services.chat_payload import count_payload_attachments, expanded_message_content
-from deepseek_infra.services.context_compressor import format_context_summary_context
-from deepseek_infra.services.context_manager import manage_request_body, merge_context_manager_diagnostics, stable_json_dumps
+from deepseek_infra.infra.gateway.chat_payload import count_payload_attachments, expanded_message_content
+from deepseek_infra.infra.rag.context_compressor import format_context_summary_context
+from deepseek_infra.infra.gateway.context_manager import manage_request_body, merge_context_manager_diagnostics, stable_json_dumps
 from deepseek_infra.core.errors import AppError, ErrorCode
-from deepseek_infra.services.edge_inference import (
+from deepseek_infra.infra.gateway.edge_inference import (
     EdgeRouteDecision,
     edge_manager,
     edge_options_from_payload,
     select_edge_route,
 )
-from deepseek_infra.services.memory import empty_memory_state, format_memory_notice, memory_scope_from_payload, prepare_memory_state
-from deepseek_infra.services.observability import ensure_trace, finish_trace, start_span, with_trace_diagnostics
-from deepseek_infra.services.presentations import create_presentation_from_text
-from deepseek_infra.services.resiliency import diagnostics_with_gateway, open_with_resiliency, request_payload_summary
-from deepseek_infra.services.semantic_cache import lookup as semantic_cache_lookup
-from deepseek_infra.services.semantic_cache import store as semantic_cache_store
-from deepseek_infra.services.slides_skill import format_slides_skill_context
-from deepseek_infra.services.search import (
+from deepseek_infra.infra.data.memory import empty_memory_state, format_memory_notice, memory_scope_from_payload, prepare_memory_state
+from deepseek_infra.infra.observability.observability import ensure_trace, finish_trace, start_span, with_trace_diagnostics
+from deepseek_infra.infra.tool_runtime.presentations import create_presentation_from_text
+from deepseek_infra.infra.gateway.resiliency import diagnostics_with_gateway, open_with_resiliency, request_payload_summary
+from deepseek_infra.infra.gateway.semantic_cache import lookup as semantic_cache_lookup
+from deepseek_infra.infra.gateway.semantic_cache import store as semantic_cache_store
+from deepseek_infra.infra.tool_runtime.slides_skill import format_slides_skill_context
+from deepseek_infra.infra.tool_runtime.search import (
     aggregate_search_rounds,
     compact_search_tool_result,
     diagnostics_with_search,
@@ -49,7 +49,7 @@ from deepseek_infra.services.search import (
     search_queries_for,
     search_single_round,
 )
-from deepseek_infra.services.tools import MAX_TOOL_ROUNDS, available_tool_definitions, execute_tool_calls
+from deepseek_infra.infra.tool_runtime.tools import MAX_TOOL_ROUNDS, available_tool_definitions, execute_tool_calls
 from deepseek_infra.core.utils import (
     format_upstream_error,
     humanize_upstream_error,

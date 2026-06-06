@@ -25,15 +25,15 @@ from urllib.parse import urljoin, urlsplit, urlunsplit
 from deepseek_infra.core.config import FILE_CACHE_DIR, PROJECTS_DIR, SEARCH_CACHE_DIR, SEARCH_CACHE_MAX_AGE_SECONDS, TAVILY_TIMEOUT_SECONDS
 from deepseek_infra.core.errors import AppError, ErrorCode
 from deepseek_infra.core.utils import query_tokens, score_chunk
-from deepseek_infra.services.documents import create_document
-from deepseek_infra.services.files import cosine_similarity, extract_html_text, load_cached_file, local_text_vector
-from deepseek_infra.services import local_rag
-from deepseek_infra.services.memory import build_memory_suggestion, delete_memories_by_query, normalize_memory_scope, retrieve_memories
-from deepseek_infra.services.mindmaps import create_mindmap
-from deepseek_infra.services.presentations import create_presentation
-from deepseek_infra.services.projects import list_projects, read_project
-from deepseek_infra.services.reminders import create_reminder as create_local_reminder, load_reminders
-from deepseek_infra.services.slides_skill import SLIDES_SKILL_DESCRIPTION, SLIDES_SKILL_NAME
+from deepseek_infra.infra.tool_runtime.documents import create_document
+from deepseek_infra.infra.rag.files import cosine_similarity, extract_html_text, load_cached_file, local_text_vector
+from deepseek_infra.infra.rag import local_rag
+from deepseek_infra.infra.data.memory import build_memory_suggestion, delete_memories_by_query, normalize_memory_scope, retrieve_memories
+from deepseek_infra.infra.tool_runtime.mindmaps import create_mindmap
+from deepseek_infra.infra.tool_runtime.presentations import create_presentation
+from deepseek_infra.infra.data.projects import list_projects, read_project
+from deepseek_infra.infra.data.reminders import create_reminder as create_local_reminder, load_reminders
+from deepseek_infra.infra.tool_runtime.slides_skill import SLIDES_SKILL_DESCRIPTION, SLIDES_SKILL_NAME
 
 MAX_TOOL_CALLS_PER_RESPONSE = 6
 MAX_TOOL_ROUNDS = 3

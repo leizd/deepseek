@@ -13,13 +13,13 @@ import re
 from typing import Any
 
 from deepseek_infra.core.errors import AppError, ErrorCode
-from deepseek_infra.services.generated_files import (
+from deepseek_infra.infra.tool_runtime.generated_files import (
     cleanup_generated_files,
     resolve_generated_file,
     save_generated_file_to_downloads,
     store_generated_file,
 )
-from deepseek_infra.services.slides_skill import SLIDES_SKILL_NAME
+from deepseek_infra.infra.tool_runtime.slides_skill import SLIDES_SKILL_NAME
 
 # resolve/save/cleanup 现在由 generated_files 统一提供，这里 re-export 以保持历史导入路径。
 __all__ = [

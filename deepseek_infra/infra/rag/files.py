@@ -36,8 +36,8 @@ from deepseek_infra.core.config import (
 )
 from deepseek_infra.core.errors import AppError, ErrorCode
 from deepseek_infra.core.utils import query_tokens, score_chunk
-from deepseek_infra.services import local_rag
-from deepseek_infra.services.ocr import extract_image_ocr, extract_pdf_ocr
+from deepseek_infra.infra.rag import local_rag
+from deepseek_infra.infra.tool_runtime.ocr import extract_image_ocr, extract_pdf_ocr
 
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff", ".gif"}

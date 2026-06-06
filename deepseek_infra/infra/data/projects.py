@@ -11,7 +11,7 @@ from typing import Any
 
 from deepseek_infra.core.config import PROJECTS_DIR
 from deepseek_infra.core.errors import AppError, ErrorCode
-from deepseek_infra.services.files import extract_uploaded_file
+from deepseek_infra.infra.rag.files import extract_uploaded_file
 
 MAX_PROJECTS = 40
 MAX_PROJECT_DOCUMENTS = 120
@@ -51,7 +51,7 @@ def delete_project(project_id: str) -> int:
     if not path.exists():
         return 0
     try:
-        from deepseek_infra.services import local_rag
+        from deepseek_infra.infra.rag import local_rag
 
         local_rag.delete_items(collection=local_rag.COLLECTION_FILES, project_id=safe_id)
     except Exception:

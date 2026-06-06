@@ -9,7 +9,7 @@ from types import ModuleType, SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
-import deepseek_infra.services.ocr as ocr
+import deepseek_infra.infra.tool_runtime.ocr as ocr
 from deepseek_infra.core.errors import AppError, ErrorCode
 
 

@@ -37,7 +37,7 @@ from deepseek_infra.core.config import (
 )
 from deepseek_infra.core.errors import AppError, ErrorCode
 from deepseek_infra.core.utils import clean_filename, local_ip, url_with_token
-from deepseek_infra.services.agent_runs import (
+from deepseek_infra.infra.agent_runtime.agent_runs import (
     TERMINAL_STATUSES,
     continue_with_plan,
     create_run as create_agent_run,
@@ -49,10 +49,10 @@ from deepseek_infra.services.agent_runs import (
     rerun_agent,
     start_planned_run,
 )
-from deepseek_infra.services.context_compressor import compress_context_payload
-from deepseek_infra.services.deepseek_client import RequestCancelled, call_deepseek, preflight_chat_payload, preflight_deepseek_payload, stream_deepseek
-from deepseek_infra.services.edge_inference import edge_inference_status, edge_unload
-from deepseek_infra.services.files import (
+from deepseek_infra.infra.rag.context_compressor import compress_context_payload
+from deepseek_infra.infra.gateway.deepseek_client import RequestCancelled, call_deepseek, preflight_chat_payload, preflight_deepseek_payload, stream_deepseek
+from deepseek_infra.infra.gateway.edge_inference import edge_inference_status, edge_unload
+from deepseek_infra.infra.rag.files import (
     cached_file_source,
     cleanup_file_cache,
     extract_uploaded_file,
@@ -63,10 +63,10 @@ from deepseek_infra.services.files import (
     file_reader_window,
     load_cached_file,
 )
-from deepseek_infra.services.generated_files import download_descriptor, resolve_generated_file, save_generated_file_to_downloads
-from deepseek_infra.services.local_rag import rebuild_index as rebuild_local_rag_index
-from deepseek_infra.services.local_rag import status as local_rag_status
-from deepseek_infra.services.memory import (
+from deepseek_infra.infra.tool_runtime.generated_files import download_descriptor, resolve_generated_file, save_generated_file_to_downloads
+from deepseek_infra.infra.rag.local_rag import rebuild_index as rebuild_local_rag_index
+from deepseek_infra.infra.rag.local_rag import status as local_rag_status
+from deepseek_infra.infra.data.memory import (
     clear_memories,
     delete_memories_by_query,
     delete_memory_by_id,
@@ -76,15 +76,15 @@ from deepseek_infra.services.memory import (
     normalize_memory_scope,
     upsert_memory,
 )
-from deepseek_infra.services.multi_agent import stream_multi_agent
-from deepseek_infra.services.observability import get_trace, list_traces, trace_status
-from deepseek_infra.services.projects import add_project_files, create_project, delete_project, list_projects
-from deepseek_infra.services.reminders import create_reminder, delete_reminder, due_reminders, load_reminders
-from deepseek_infra.services.resiliency import gateway_status
-from deepseek_infra.services.semantic_cache import clear as clear_semantic_cache
-from deepseek_infra.services.semantic_cache import status as semantic_cache_status
-from deepseek_infra.services.title_generator import generate_title_payload
-from deepseek_infra.services.tools import fetch_url
+from deepseek_infra.infra.agent_runtime.multi_agent import stream_multi_agent
+from deepseek_infra.infra.observability.observability import get_trace, list_traces, trace_status
+from deepseek_infra.infra.data.projects import add_project_files, create_project, delete_project, list_projects
+from deepseek_infra.infra.data.reminders import create_reminder, delete_reminder, due_reminders, load_reminders
+from deepseek_infra.infra.gateway.resiliency import gateway_status
+from deepseek_infra.infra.gateway.semantic_cache import clear as clear_semantic_cache
+from deepseek_infra.infra.gateway.semantic_cache import status as semantic_cache_status
+from deepseek_infra.infra.gateway.title_generator import generate_title_payload
+from deepseek_infra.infra.tool_runtime.tools import fetch_url
 
 logger = logging.getLogger("deepseek_infra.server")
 

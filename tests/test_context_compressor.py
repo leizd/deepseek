@@ -4,7 +4,7 @@ import json
 import unittest
 from unittest.mock import patch
 
-import deepseek_infra.services.context_compressor as compressor
+import deepseek_infra.infra.rag.context_compressor as compressor
 from deepseek_infra.core.errors import AppError, ErrorCode
 
 

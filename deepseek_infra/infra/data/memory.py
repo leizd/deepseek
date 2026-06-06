@@ -110,7 +110,7 @@ def _save_memories_unlocked(memories: list[dict[str, Any]]) -> None:
     temp_path.write_text(json.dumps(cleaned, ensure_ascii=False, indent=2), encoding="utf-8")
     temp_path.replace(MEMORY_FILE)
     try:
-        from deepseek_infra.services import local_rag
+        from deepseek_infra.infra.rag import local_rag
 
         local_rag.sync_memories(cleaned)
     except Exception:
@@ -418,7 +418,7 @@ def retrieve_memories(query: str, *, scopes: list[str] | None = None) -> list[di
     allowed_scopes = {normalize_memory_scope(scope) for scope in scopes} if scopes else {"global"}
     vector_hits: dict[str, int] = {}
     try:
-        from deepseek_infra.services import local_rag
+        from deepseek_infra.infra.rag import local_rag
 
         for hit in local_rag.search_memories_index(query, scopes=sorted(allowed_scopes), limit=MEMORY_RETRIEVE_LIMIT * 2):
             memory_id = str(hit.metadata.get("id") or hit.source_id)

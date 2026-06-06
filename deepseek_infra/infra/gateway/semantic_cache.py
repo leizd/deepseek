@@ -22,8 +22,8 @@ from deepseek_infra.core.config import (
     SEMANTIC_CACHE_THRESHOLD,
     SEMANTIC_CACHE_TTL_SECONDS,
 )
-from deepseek_infra.services.chat_payload import count_payload_attachments
-from deepseek_infra.services.local_rag import cosine_similarity, embed_text, embedding_pipeline
+from deepseek_infra.infra.gateway.chat_payload import count_payload_attachments
+from deepseek_infra.infra.rag.local_rag import cosine_similarity, embed_text, embedding_pipeline
 
 logger = logging.getLogger("deepseek_infra.semantic_cache")
 

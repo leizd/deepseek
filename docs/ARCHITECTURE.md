@@ -11,29 +11,29 @@ DeepSeek Mobile 是一个本地优先的 AI 客户端：桌面端可通过内嵌
 | `app.py` | 兼容启动入口，保留 `python app.py` 的使用方式。 |
 | `deepseek_infra/app.py` | 进程启动、日志、MIME 注册、缓存清理和 HTTP 服务绑定。 |
 | `deepseek_infra/web/server.py` | HTTP 路由、本地 token 鉴权、流式 multipart 解析、JSON/NDJSON 响应和静态文件服务。 |
-| `deepseek_infra/services/deepseek_client.py` | 请求校验、记忆/搜索编排、Prompt 组装、DeepSeek 同步和流式调用。 |
-| `deepseek_infra/services/edge_inference.py` | 端侧推理基础设施：可选加载 llama.cpp / MLC-LLM 后端，管理 GGUF / MLC 模型路径、上下文窗口、量化诊断、懒加载卸载和简单任务端云路由判定。 |
-| `deepseek_infra/services/multi_agent.py` | Leader + 多 Agent 编排：任务拆解、worker 并行调用、搜索预算共享和最终综合。 |
-| `deepseek_infra/services/agent_runs.py` | 持久化 Agent Run、indexed event log、派生快照、断线重连游标、后台 run registry、计划确认和重跑。 |
-| `deepseek_infra/services/observability.py` | 本地可观测性：SQLite trace run/span 存储、输入/输出摘要脱敏、耗时、usage、prompt cache 命中率和 trace 查询 API。 |
-| `deepseek_infra/services/semantic_cache.py` | 本地语义缓存：复用 Local RAG embedding 管线，把可缓存 prompt/response 写入 `.semantic-cache/cache.sqlite3`，在 DeepSeek API 前做相似度命中。 |
-| `deepseek_infra/services/context_manager.py` | API 网关 Context Manager：稳定 JSON 序列化、固定工具定义顺序、在已有摘要时执行滑动窗口裁剪，并输出 prompt cache 友好的请求诊断。 |
-| `deepseek_infra/services/resiliency.py` | API 网关韧性层：用 `.request-queue/queue.sqlite3` 记录上游请求队列项，对断网、超时、429 和网关类 5xx 做退避重试，并汇总 `gatewayResiliency` 诊断。 |
-| `deepseek_infra/services/chat_payload.py` | 前端消息展开和附件计数。 |
-| `deepseek_infra/services/context_compressor.py` | 长对话的增量上下文摘要生成。 |
-| `deepseek_infra/services/memory.py` | 本地长期记忆 CRUD、作用域过滤、检索排序、显式“记住/忘记”命令解析、记忆建议和冲突检测。 |
-| `deepseek_infra/services/local_rag.py` | 本地 RAG 数据层：SQLite / 可选 sqlite-vec 索引、哈希或 ONNX embedding、文件 chunk 与长期记忆同步、状态诊断和重建索引。 |
-| `deepseek_infra/services/reminders.py` | 本地提醒队列、到期查询和轻量中文提醒解析。 |
-| `deepseek_infra/services/projects.py` | 持久项目空间、项目元数据、项目文档库写入和删除。 |
-| `deepseek_infra/services/search.py` | 搜索触发、多轮 Tavily 查询、结果聚合、缓存和 Prompt 格式化。 |
-| `deepseek_infra/services/tools.py` | DeepSeek function calling 本地工具：受限数学计算、缓存文件搜索、公共网页二次精读、提醒、记忆、项目文件、数据转换、图表规格、PPT 生成、Word/PDF 文档生成、SVG 思维导图生成、多查询搜索对比和长期记忆建议。 |
-| `deepseek_infra/services/presentations.py` | 本地 `.pptx` 生成：`create_pptx` 工具用 `python-pptx` 生成真实 PowerPoint 文件，普通模型漏调工具时可从文本大纲兜底生成；渲染器会自动加入目录页并选择卡片、流程、对比、观点、总结等版式。 |
-| `deepseek_infra/services/documents.py` | 本地 `.docx` / `.pdf` 生成：`create_document` 工具用 `python-docx` / `reportlab`（内置中文 CID 字体，无需附带字体文件）把结构化章节渲染成排版精美的 Word 或 PDF，支持标题块、分章节编号、正文段落、要点、表格、页码与按标题哈希确定的配色主题。 |
-| `deepseek_infra/services/mindmaps.py` | 本地 `.svg` 思维导图生成：`create_mindmap` 工具把模型给出的树状节点渲染成「分组流程图」式 SVG——顶层节点作为带标题的彩色容器（类似 Mermaid subgraph），容器内后代自上而下、用实心箭头连接的圆角卡片，并复用统一下载链路。 |
-| `deepseek_infra/services/generated_files.py` | 跨格式生成文件的统一生命周期：随机 id 落盘、按后缀解析下载路径（防目录遍历）、MIME 映射、过期清理与“另存到下载目录”，被 `presentations`、`documents` 与 `mindmaps` 共用。 |
-| `deepseek_infra/services/slides_skill.py` | 用户提供的 `slides` skill 参考文本与运行时路由提示，只在 PPT/幻灯片意图命中时注入本轮上下文。 |
-| `deepseek_infra/services/files.py` | 文件文本抽取、分块、缓存和附件上下文检索；并为豆包式文档阅读工作台提供原文件原样返回、PDF 逐页 PNG 渲染（PyMuPDF，回退 pdf2image）、按页文字坐标层、分页文本和跨页关键字搜索。 |
-| `deepseek_infra/services/ocr.py` | 可选 OCR：优先用 DeepSeek API 直接转写图片；API 不可用时再回退到 Android ML Kit、Windows OCR、Tesseract 或本地公式 OCR；支持扫描 PDF 转图识别和图片文字识别。 |
+| `deepseek_infra/infra/gateway/deepseek_client.py` | 请求校验、记忆/搜索编排、Prompt 组装、DeepSeek 同步和流式调用。 |
+| `deepseek_infra/infra/gateway/edge_inference.py` | 端侧推理基础设施：可选加载 llama.cpp / MLC-LLM 后端，管理 GGUF / MLC 模型路径、上下文窗口、量化诊断、懒加载卸载和简单任务端云路由判定。 |
+| `deepseek_infra/infra/agent_runtime/multi_agent.py` | Leader + 多 Agent 编排：任务拆解、worker 并行调用、搜索预算共享和最终综合。 |
+| `deepseek_infra/infra/agent_runtime/agent_runs.py` | 持久化 Agent Run、indexed event log、派生快照、断线重连游标、后台 run registry、计划确认和重跑。 |
+| `deepseek_infra/infra/observability/observability.py` | 本地可观测性：SQLite trace run/span 存储、输入/输出摘要脱敏、耗时、usage、prompt cache 命中率和 trace 查询 API。 |
+| `deepseek_infra/infra/gateway/semantic_cache.py` | 本地语义缓存：复用 Local RAG embedding 管线，把可缓存 prompt/response 写入 `.semantic-cache/cache.sqlite3`，在 DeepSeek API 前做相似度命中。 |
+| `deepseek_infra/infra/gateway/context_manager.py` | API 网关 Context Manager：稳定 JSON 序列化、固定工具定义顺序、在已有摘要时执行滑动窗口裁剪，并输出 prompt cache 友好的请求诊断。 |
+| `deepseek_infra/infra/gateway/resiliency.py` | API 网关韧性层：用 `.request-queue/queue.sqlite3` 记录上游请求队列项，对断网、超时、429 和网关类 5xx 做退避重试，并汇总 `gatewayResiliency` 诊断。 |
+| `deepseek_infra/infra/gateway/chat_payload.py` | 前端消息展开和附件计数。 |
+| `deepseek_infra/infra/rag/context_compressor.py` | 长对话的增量上下文摘要生成。 |
+| `deepseek_infra/infra/data/memory.py` | 本地长期记忆 CRUD、作用域过滤、检索排序、显式“记住/忘记”命令解析、记忆建议和冲突检测。 |
+| `deepseek_infra/infra/rag/local_rag.py` | 本地 RAG 数据层：SQLite / 可选 sqlite-vec 索引、哈希或 ONNX embedding、文件 chunk 与长期记忆同步、状态诊断和重建索引。 |
+| `deepseek_infra/infra/data/reminders.py` | 本地提醒队列、到期查询和轻量中文提醒解析。 |
+| `deepseek_infra/infra/data/projects.py` | 持久项目空间、项目元数据、项目文档库写入和删除。 |
+| `deepseek_infra/infra/tool_runtime/search.py` | 搜索触发、多轮 Tavily 查询、结果聚合、缓存和 Prompt 格式化。 |
+| `deepseek_infra/infra/tool_runtime/tools.py` | DeepSeek function calling 本地工具：受限数学计算、缓存文件搜索、公共网页二次精读、提醒、记忆、项目文件、数据转换、图表规格、PPT 生成、Word/PDF 文档生成、SVG 思维导图生成、多查询搜索对比和长期记忆建议。 |
+| `deepseek_infra/infra/tool_runtime/presentations.py` | 本地 `.pptx` 生成：`create_pptx` 工具用 `python-pptx` 生成真实 PowerPoint 文件，普通模型漏调工具时可从文本大纲兜底生成；渲染器会自动加入目录页并选择卡片、流程、对比、观点、总结等版式。 |
+| `deepseek_infra/infra/tool_runtime/documents.py` | 本地 `.docx` / `.pdf` 生成：`create_document` 工具用 `python-docx` / `reportlab`（内置中文 CID 字体，无需附带字体文件）把结构化章节渲染成排版精美的 Word 或 PDF，支持标题块、分章节编号、正文段落、要点、表格、页码与按标题哈希确定的配色主题。 |
+| `deepseek_infra/infra/tool_runtime/mindmaps.py` | 本地 `.svg` 思维导图生成：`create_mindmap` 工具把模型给出的树状节点渲染成「分组流程图」式 SVG——顶层节点作为带标题的彩色容器（类似 Mermaid subgraph），容器内后代自上而下、用实心箭头连接的圆角卡片，并复用统一下载链路。 |
+| `deepseek_infra/infra/tool_runtime/generated_files.py` | 跨格式生成文件的统一生命周期：随机 id 落盘、按后缀解析下载路径（防目录遍历）、MIME 映射、过期清理与“另存到下载目录”，被 `presentations`、`documents` 与 `mindmaps` 共用。 |
+| `deepseek_infra/infra/tool_runtime/slides_skill.py` | 用户提供的 `slides` skill 参考文本与运行时路由提示，只在 PPT/幻灯片意图命中时注入本轮上下文。 |
+| `deepseek_infra/infra/rag/files.py` | 文件文本抽取、分块、缓存和附件上下文检索；并为豆包式文档阅读工作台提供原文件原样返回、PDF 逐页 PNG 渲染（PyMuPDF，回退 pdf2image）、按页文字坐标层、分页文本和跨页关键字搜索。 |
+| `deepseek_infra/infra/tool_runtime/ocr.py` | 可选 OCR：优先用 DeepSeek API 直接转写图片；API 不可用时再回退到 Android ML Kit、Windows OCR、Tesseract 或本地公式 OCR；支持扫描 PDF 转图识别和图片文字识别。 |
 | `deepseek_infra/core/config.py` | 不可变设置、环境变量解析、兼容常量和 JSON 日志。 |
 | `deepseek_infra/core/errors.py` | `AppError` 和稳定 API 错误码。 |
 | `deepseek_infra/core/utils.py` | 模型名、评分、文件名、时间戳、token URL 和局域网 IP 工具函数。 |

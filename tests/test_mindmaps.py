@@ -6,10 +6,10 @@ import unittest.mock
 from pathlib import Path
 
 from deepseek_infra.core.errors import AppError, ErrorCode
-from deepseek_infra.services import generated_files
-from deepseek_infra.services.generated_files import resolve_generated_file, save_generated_file_to_downloads
-from deepseek_infra.services.mindmaps import create_mindmap
-from deepseek_infra.services.tools import available_tool_definitions
+from deepseek_infra.infra.tool_runtime import generated_files
+from deepseek_infra.infra.tool_runtime.generated_files import resolve_generated_file, save_generated_file_to_downloads
+from deepseek_infra.infra.tool_runtime.mindmaps import create_mindmap
+from deepseek_infra.infra.tool_runtime.tools import available_tool_definitions
 
 
 SAMPLE_NODES = [

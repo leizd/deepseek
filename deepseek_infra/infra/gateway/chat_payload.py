@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from deepseek_infra.services.files import build_attachment_context
+from deepseek_infra.infra.rag.files import build_attachment_context
 
 
 def expanded_message_content(message: dict[str, Any]) -> str:

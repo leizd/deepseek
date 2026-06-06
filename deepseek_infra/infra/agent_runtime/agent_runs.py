@@ -13,8 +13,8 @@ from typing import Any, Callable
 from deepseek_infra.core.config import AGENT_RUNS_DIR, DEFAULT_MODEL
 from deepseek_infra.core.errors import AppError, ErrorCode
 from deepseek_infra.core.utils import latest_user_query, normalize_model_name
-from deepseek_infra.services.deepseek_client import RequestCancelled, SearchBudget, validate_deepseek_payload
-from deepseek_infra.services.multi_agent import (
+from deepseek_infra.infra.gateway.deepseek_client import RequestCancelled, SearchBudget, validate_deepseek_payload
+from deepseek_infra.infra.agent_runtime.multi_agent import (
     AGENT_PROFILES,
     leader_done_text,
     layered_plan,

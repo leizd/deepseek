@@ -5,8 +5,8 @@ from pathlib import Path
 import pytest
 
 from deepseek_infra.core.errors import AppError, ErrorCode
-from deepseek_infra.services import projects
-from deepseek_infra.services.files import load_cached_file
+from deepseek_infra.infra.data import projects
+from deepseek_infra.infra.rag.files import load_cached_file
 
 
 def test_project_create_add_files_and_list(tmp_settings: Path) -> None:

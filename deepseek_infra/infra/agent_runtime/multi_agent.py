@@ -18,7 +18,7 @@ from deepseek_infra.core.config import (
 )
 from deepseek_infra.core.errors import ErrorCode
 from deepseek_infra.core.utils import latest_user_query, normalize_model_name
-from deepseek_infra.services.deepseek_client import (
+from deepseek_infra.infra.gateway.deepseek_client import (
     RequestCancelled,
     SearchBudget,
     TokenBudget,
@@ -29,7 +29,7 @@ from deepseek_infra.services.deepseek_client import (
     usage_int,
     validate_deepseek_payload,
 )
-from deepseek_infra.services.observability import ensure_trace, finish_trace, with_trace_diagnostics
+from deepseek_infra.infra.observability.observability import ensure_trace, finish_trace, with_trace_diagnostics
 
 MAX_AGENTS = 4
 # v1.3.1: long-running multi-Agent middle tiers use the shared config timeout.

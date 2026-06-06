@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-import deepseek_infra.services.agent_runs as agent_runs
+import deepseek_infra.infra.agent_runtime.agent_runs as agent_runs
 
 
 def valid_payload(**extra: object) -> dict[str, object]:

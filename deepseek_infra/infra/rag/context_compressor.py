@@ -18,7 +18,7 @@ from deepseek_infra.core.config import (
 )
 from deepseek_infra.core.errors import AppError, ErrorCode
 from deepseek_infra.core.utils import format_upstream_error, normalize_model_name
-from deepseek_infra.services.chat_payload import expanded_message_content
+from deepseek_infra.infra.gateway.chat_payload import expanded_message_content
 
 
 def format_context_summary_context(summary: str) -> str:

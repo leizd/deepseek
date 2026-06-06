@@ -14,7 +14,7 @@ import re
 from typing import Any
 
 from deepseek_infra.core.errors import AppError, ErrorCode
-from deepseek_infra.services.generated_files import store_generated_file
+from deepseek_infra.infra.tool_runtime.generated_files import store_generated_file
 
 MAX_NODES = 120
 MAX_DEPTH = 6
