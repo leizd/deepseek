@@ -51,6 +51,12 @@ from deepseek_infra.infra.agent_runtime.agent_runs import (
 )
 from deepseek_infra.infra.rag.context_compressor import compress_context_payload
 from deepseek_infra.infra.gateway.deepseek_client import RequestCancelled, call_deepseek, preflight_chat_payload, preflight_deepseek_payload, stream_deepseek
+from deepseek_infra.infra.gateway.openai_api import (
+    openai_chat_stream,
+    openai_completion_response,
+    openai_models_list,
+    openai_to_internal_payload,
+)
 from deepseek_infra.infra.gateway.edge_inference import edge_inference_status, edge_unload
 from deepseek_infra.infra.rag.files import (
     cached_file_source,
@@ -525,6 +531,27 @@ def create_app() -> FastAPI:
                 headers={"X-Accel-Buffering": "no"},
             )
         return json_response(call_deepseek(payload))
+
+    @api.post("/v1/chat/completions")
+    async def v1_chat_completions(request: Request) -> Response:
+        """OpenAI-compatible chat completions over the local DeepSeek runtime."""
+        require_api_auth(request)
+        body = await read_json_body(request, max_bytes=16_000_000)
+        payload = openai_to_internal_payload(body, local_base_url=request_base_url(request))
+        model = str(payload["model"])
+        if payload.get("stream"):
+            return StreamingResponse(
+                openai_chat_stream(payload, model),
+                media_type="text/event-stream",
+                headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
+            )
+        return json_response(openai_completion_response(call_deepseek(payload), model))
+
+    @api.get("/v1/models")
+    async def v1_models(request: Request) -> JSONResponse:
+        """OpenAI-compatible model listing from the configured catalog."""
+        require_api_auth(request)
+        return json_response(openai_models_list())
 
     @api.post("/api/agent-runs")
     async def api_agent_runs_create(request: Request) -> JSONResponse:
