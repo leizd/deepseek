@@ -52,11 +52,12 @@ from deepseek_infra.infra.agent_runtime.agent_runs import (
 from deepseek_infra.infra.rag.context_compressor import compress_context_payload
 from deepseek_infra.infra.gateway.deepseek_client import RequestCancelled, call_deepseek, preflight_chat_payload, preflight_deepseek_payload, stream_deepseek
 from deepseek_infra.infra.gateway.openai_api import (
+    openai_chat_completion,
     openai_chat_stream,
-    openai_completion_response,
     openai_models_list,
     openai_to_internal_payload,
 )
+from deepseek_infra.infra.gateway.providers.registry import providers_status
 from deepseek_infra.infra.observability.health import healthz, readyz
 from deepseek_infra.infra.observability.metrics import render_prometheus
 from deepseek_infra.infra.gateway.edge_inference import edge_inference_status, edge_unload
@@ -220,6 +221,7 @@ def create_app() -> FastAPI:
                 "tracing": trace_status(),
                 "semanticCache": semantic_cache_status(),
                 "gateway": gateway_status(),
+                "providers": providers_status(),
                 "computerUrl": computer_url,
                 "phoneUrl": phone_url,
             }
@@ -547,7 +549,7 @@ def create_app() -> FastAPI:
                 media_type="text/event-stream",
                 headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
             )
-        return json_response(openai_completion_response(call_deepseek(payload), model))
+        return json_response(openai_chat_completion(payload, model))
 
     @api.get("/v1/models")
     async def v1_models(request: Request) -> JSONResponse:

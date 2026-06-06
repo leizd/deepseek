@@ -2,6 +2,24 @@
 
 本项目使用类似 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的分组方式维护变更记录。未发布内容记录在 `[Unreleased]`，正式发版时迁移到具体版本。
 
+## [2.0.1]
+
+### 新增
+
+- **多 Provider 抽象 + Ollama**：新增 `deepseek_infra/infra/gateway/providers/` —— `BaseLLMProvider` 抽象（`chat` / `stream_chat` / `models` / `available`）、`DeepSeekProvider`（包装现有 `call_deepseek` / `stream_deepseek`）、`OllamaProvider`（本地 Ollama REST：`/api/chat` 流式与非流式、`/api/tags` 模型发现）和 `registry`（按模型名路由 + 多 Provider 模型目录）。
+- **OpenAI `/v1` 多 Provider 路由**：`/v1/chat/completions` 与 `/v1/models` 改为经 `resolve_provider()` 路由；启用 Ollama 后 `/v1/models` 会同时列出 `deepseek-v4-*` 与 `ollama/<tag>`，请求 `ollama/<tag>`（或已发现的本地 tag）走 Ollama，其余走 DeepSeek。`/api/config` 新增 `providers` 状态块。
+- **配置**：新增 `OLLAMA_ENABLED`（默认关）、`OLLAMA_BASE_URL`（默认 `http://127.0.0.1:11434`）、`OLLAMA_TIMEOUT_SECONDS`（默认 120）。
+
+### 边界
+
+- Ollama 仅做直连模型推理（plain chat + streaming）；DeepSeek 专属的工具调用、联网搜索、多 Agent、语义缓存与 RAG **不**路由到 Ollama，仍只在 DeepSeek 模型上可用。
+- Ollama 默认关闭，关闭时 `/v1` 行为与 2.0.0 完全一致、零网络探测；启用但不可达时，`/api/tags` 状态探测使用 3 秒短超时（避免 `/api/config` 卡住），生成请求才用完整 `OLLAMA_TIMEOUT_SECONDS`。
+
+### 测试 / 构建
+
+- 新增 `tests/test_providers.py`（12 项）：DeepSeekProvider 委派、OllamaProvider chat/stream 映射与不可达降级、模型发现与 `handles()`、registry 路由（前缀 / 已知 DeepSeek / 本地 tag）与多 Provider 目录。
+- 版本号 2.0.0 → 2.0.1（config / README badge / 5 docs / test_config / test_encoding_regression）。纯后端改动，`static/sw.js` 保持 `deepseek-mobile-v182` 不变。
+
 ## [2.0.0]
 
 **重大版本：从「DeepSeek Mobile：本地 AI 聊天客户端」重定位为「DeepSeek Infra：Local-first AI Runtime / Agent Infrastructure」。** 本次以抽象层、工程指标和项目叙事升级为主，既有运行时能力（多 Agent DAG、本地 RAG、链路追踪、语义缓存、端云路由、网关韧性）保持不变，并新增 OpenAI 兼容网关与运维端点。

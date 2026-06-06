@@ -63,7 +63,7 @@ class OpenAIStreamTests(unittest.TestCase):
             emit({"type": "content", "text": " world"})
             emit({"type": "done"})
 
-        with patch.object(openai_api, "stream_deepseek", fake):
+        with patch("deepseek_infra.infra.gateway.providers.deepseek.stream_deepseek", fake):
             text = self._collect()
         self.assertIn('"role":"assistant"', text)
         self.assertIn('"content":"Hello"', text)
@@ -76,7 +76,7 @@ class OpenAIStreamTests(unittest.TestCase):
         def fake(payload: dict[str, Any], emit: Callable[[dict[str, Any]], None], **kwargs: Any) -> None:
             emit({"type": "error", "error": "内容安全提示：DeepSeek 判定本轮内容存在风险"})
 
-        with patch.object(openai_api, "stream_deepseek", fake):
+        with patch("deepseek_infra.infra.gateway.providers.deepseek.stream_deepseek", fake):
             text = self._collect()
         self.assertIn('"error"', text)
         self.assertIn("内容安全提示", text)
@@ -129,7 +129,7 @@ class OpenAIRouteTests(unittest.TestCase):
             "usage": {"prompt_tokens": 4, "completion_tokens": 2, "total_tokens": 6},
         }
         try:
-            with patch.object(server_module, "call_deepseek", return_value=canned):
+            with patch("deepseek_infra.infra.gateway.providers.deepseek.call_deepseek", return_value=canned):
                 status, payload = self.request(
                     server,
                     "POST",

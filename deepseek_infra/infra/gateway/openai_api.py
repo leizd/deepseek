@@ -23,7 +23,7 @@ from typing import Any, Generator
 from deepseek_infra.core.config import settings
 from deepseek_infra.core.errors import AppError, ErrorCode
 from deepseek_infra.core.utils import normalize_model_name
-from deepseek_infra.infra.gateway.deepseek_client import stream_deepseek
+from deepseek_infra.infra.gateway.providers.registry import model_catalog, resolve_provider
 
 
 def openai_to_internal_payload(body: dict[str, Any], *, local_base_url: str = "") -> dict[str, Any]:
@@ -49,15 +49,8 @@ def openai_to_internal_payload(body: dict[str, Any], *, local_base_url: str = ""
 
 
 def openai_models_list() -> dict[str, Any]:
-    """OpenAI ``GET /v1/models`` payload built from the configured model catalog."""
-    created = int(time.time())
-    return {
-        "object": "list",
-        "data": [
-            {"id": model_id, "object": "model", "created": created, "owned_by": "deepseek-infra"}
-            for model_id in settings.supported_models
-        ],
-    }
+    """OpenAI ``GET /v1/models`` payload across all active providers (DeepSeek + Ollama)."""
+    return {"object": "list", "data": model_catalog()}
 
 
 def openai_completion_response(result: dict[str, Any], model: str) -> dict[str, Any]:
@@ -87,6 +80,12 @@ def openai_completion_response(result: dict[str, Any], model: str) -> dict[str, 
     }
 
 
+def openai_chat_completion(payload: dict[str, Any], model: str) -> dict[str, Any]:
+    """Non-streaming /v1/chat/completions via the resolved provider (DeepSeek or Ollama)."""
+    result = resolve_provider(model).chat(payload)
+    return openai_completion_response(result, model)
+
+
 def _sse(obj: dict[str, Any]) -> bytes:
     return b"data: " + json.dumps(obj, ensure_ascii=False, separators=(",", ":")).encode("utf-8") + b"\n\n"
 
@@ -101,9 +100,11 @@ def openai_chat_stream(payload: dict[str, Any], model: str) -> Generator[bytes, 
     def emit(data: dict[str, Any]) -> None:
         events.put(data)
 
+    provider = resolve_provider(model)
+
     def worker() -> None:
         try:
-            stream_deepseek(payload, emit, cancel_event=cancel_event)
+            provider.stream_chat(payload, emit, cancel_event=cancel_event)
         except Exception as exc:  # noqa: BLE001 - surface upstream failures as an OpenAI error chunk
             events.put({"type": "error", "error": str(exc)})
         finally:
