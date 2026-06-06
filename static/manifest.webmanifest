@@ -1,5 +1,5 @@
 {
-  "name": "DeepSeek Mobile",
+  "name": "DeepSeek Infra",
   "short_name": "DeepSeek",
   "description": "A mobile-first DeepSeek chat client with local Seek assistants.",
   "start_url": "/",

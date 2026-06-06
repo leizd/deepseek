@@ -1,4 +1,4 @@
-"""Console launcher for running DeepSeek Mobile directly on a phone.
+"""Console launcher for running DeepSeek Infra directly on a phone.
 
 The desktop launcher depends on Tk/customtkinter. Android Python environments
 such as Termux or Pydroid usually do not provide a desktop GUI stack, so this
@@ -48,7 +48,7 @@ def parse_port(value: str) -> int:
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run DeepSeek Mobile on this phone.")
+    parser = argparse.ArgumentParser(description="Run DeepSeek Infra on this phone.")
     parser.add_argument("--host", default=os.environ.get("HOST") or DEFAULT_MOBILE_HOST, help="Bind host. Defaults to 127.0.0.1.")
     parser.add_argument("--port", type=parse_port, default=parse_port(os.environ.get("PORT") or str(DEFAULT_PORT)), help="Bind port.")
     parser.add_argument("--lan", action="store_true", help="Bind to 0.0.0.0 so other devices can access this phone.")
@@ -99,7 +99,7 @@ def open_mobile_browser(url: str) -> bool:
 
 def print_mobile_banner(computer_url: str, phone_url: str, opened: bool) -> None:
     print("", flush=True)
-    print("DeepSeek Mobile is running on this phone.", flush=True)
+    print("DeepSeek Infra is running on this phone.", flush=True)
     print(f"Open on this phone: {computer_url}", flush=True)
     print(f"LAN URL: {phone_url}", flush=True)
     if opened:
@@ -122,7 +122,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         handle.server.serve_forever(poll_interval=0.5)
     except KeyboardInterrupt:
-        print("\nStopping DeepSeek Mobile...", flush=True)
+        print("\nStopping DeepSeek Infra...", flush=True)
     finally:
         shutdown_handle(handle)
     return 0

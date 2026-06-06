@@ -162,7 +162,7 @@ multipart_module = load_multipart_module()
 
 
 def create_app() -> FastAPI:
-    api = FastAPI(title="DeepSeek Mobile", version=APP_VERSION)
+    api = FastAPI(title="DeepSeek Infra", version=APP_VERSION)
 
     @api.middleware("http")
     async def security_headers(request: Request, call_next: Any) -> Response:

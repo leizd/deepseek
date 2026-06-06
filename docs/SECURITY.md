@@ -1,6 +1,6 @@
 # 安全说明
 
-适用版本：v1.9.1。
+适用版本：v2.0.0。
 
 ## 威胁模型
 
@@ -66,7 +66,7 @@ v1.8.0 新增的 `.request-queue/queue.sqlite3` 用于 API 网关韧性：云端
 
 ## 浏览器侧清理
 
-设置面板中的“清空本地数据”会删除浏览器侧保存的 DeepSeek Mobile `localStorage` / `sessionStorage` 项，并调用 `/api/auth/logout` 清除 HttpOnly `auth_token` Cookie。清理后需要重新使用服务端打印的 token 链接进入应用。
+设置面板中的“清空本地数据”会删除浏览器侧保存的 DeepSeek Infra `localStorage` / `sessionStorage` 项，并调用 `/api/auth/logout` 清除 HttpOnly `auth_token` Cookie。清理后需要重新使用服务端打印的 token 链接进入应用。
 
 - 不建议在共享电脑或不可信网络中保存 API Key。
 

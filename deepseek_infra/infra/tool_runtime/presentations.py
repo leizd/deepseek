@@ -80,7 +80,7 @@ def infer_presentation_title(prompt: str, outline: str = "") -> str:
 def create_presentation_from_text(prompt: str, outline: str) -> dict[str, Any]:
     title = infer_presentation_title(prompt, outline)
     slides = slides_from_outline_text(outline, topic=title)
-    return create_presentation(title, slides, subtitle=f"由 DeepSeek Mobile {SLIDES_SKILL_NAME} skill 本地生成")
+    return create_presentation(title, slides, subtitle=f"由 DeepSeek Infra {SLIDES_SKILL_NAME} skill 本地生成")
 
 
 def slides_from_outline_text(outline: str, *, topic: str = "") -> list[dict[str, Any]]:

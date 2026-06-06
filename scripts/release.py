@@ -1,4 +1,4 @@
-"""Build a privacy-safe DeepSeek Mobile release zip."""
+"""Build a privacy-safe DeepSeek Infra release zip."""
 
 from __future__ import annotations
 

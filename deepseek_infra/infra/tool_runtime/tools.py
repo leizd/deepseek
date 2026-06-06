@@ -514,7 +514,7 @@ def additional_tool_definitions() -> list[dict[str, Any]]:
                 "name": "create_pptx",
                 "strict": True,
                 "description": (
-                    f"这是 DeepSeek Mobile 的 `{SLIDES_SKILL_NAME}` skill 本地执行入口：{SLIDES_SKILL_DESCRIPTION} "
+                    f"这是 DeepSeek Infra 的 `{SLIDES_SKILL_NAME}` skill 本地执行入口：{SLIDES_SKILL_DESCRIPTION} "
                     "生成一个可下载的 PowerPoint (.pptx) 演示文稿。只要用户要求做 PPT / 幻灯片 / 演示文稿，"
                     "就必须调用本工具生成真实文件，绝不要用 Marp / Markdown 幻灯片大纲文本来代替。"
                     "传入标题和分页大纲；按 `slides` skill 组织页面标题、要点和视觉辅助内容。"

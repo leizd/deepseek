@@ -1,8 +1,8 @@
 # Android APK 打包说明
 
-适用版本：v1.9.1。
+适用版本：v2.0.0。
 
-本仓库现在包含 `android/` Android Studio 工程，可把 DeepSeek Mobile 打包成手机上直接运行的 APK。APK 的结构是：
+本仓库现在包含 `android/` Android Studio 工程，可把 DeepSeek Infra 打包成手机上直接运行的 APK。APK 的结构是：
 
 - Android 原生 `MainActivity` 负责启动 WebView、文件选择器和外链跳转。
 - Chaquopy 在 APK 内嵌 Python 3.13 运行 `deepseek_infra` 后端；项目代码仍保持 Python 3.10+ 兼容。

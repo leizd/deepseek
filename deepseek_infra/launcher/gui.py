@@ -1,4 +1,4 @@
-"""Tkinter GUI launcher for DeepSeek Mobile.
+"""Tkinter GUI launcher for DeepSeek Infra.
 
 Lets the user enter API keys, choose host/port, and start/stop the local HTTP
 server without ever typing a command. Credentials are persisted to an
@@ -31,7 +31,7 @@ from deepseek_infra.launcher.credentials import (
 from deepseek_infra.launcher.runtime import LauncherRuntime, launcher_url_from_log
 
 logger = logging.getLogger("deepseek_infra.launcher.gui")
-APP_TITLE = f"DeepSeek Mobile {settings.app_version} 启动器"
+APP_TITLE = f"DeepSeek Infra {settings.app_version} 启动器"
 LOG_BUFFER_LINES = 400
 POLL_INTERVAL_MS = 80
 

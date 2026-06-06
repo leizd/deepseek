@@ -7746,7 +7746,7 @@ async function clearLocalBrowserData() {
   if (
     !(await confirmAction({
       title: "清空本地数据？",
-      message: "清空本机浏览器保存的所有 DeepSeek Mobile 数据并退出登录？",
+      message: "清空本机浏览器保存的所有 DeepSeek Infra 数据并退出登录？",
       okText: "清空并退出",
       danger: true,
     }))

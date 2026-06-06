@@ -1,4 +1,4 @@
-"""Phone-friendly entry point for DeepSeek Mobile."""
+"""Phone-friendly entry point for DeepSeek Infra."""
 
 from __future__ import annotations
 

@@ -2,6 +2,33 @@
 
 本项目使用类似 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的分组方式维护变更记录。未发布内容记录在 `[Unreleased]`，正式发版时迁移到具体版本。
 
+## [2.0.0]
+
+**重大版本：从「DeepSeek Mobile：本地 AI 聊天客户端」重定位为「DeepSeek Infra：Local-first AI Runtime / Agent Infrastructure」。** 本次以抽象层、工程指标和项目叙事升级为主，既有运行时能力（多 Agent DAG、本地 RAG、链路追踪、语义缓存、端云路由、网关韧性）保持不变，并新增 OpenAI 兼容网关与运维端点。
+
+### 重构（破坏性）
+
+- **包重命名**：Python 包 `deepseek_mobile` → `deepseek_infra`（365 处引用 / 76 文件统一更新；`git mv` 保留历史）。导入路径、`pyproject` 覆盖率源、`conftest`、`build_exe` / `release` 脚本、`launch*`、Android Chaquopy 与 `android_entry` 全部同步。
+- **目录分层**：`deepseek_infra/services/` 重构为 `deepseek_infra/infra/` 下 6 个语义基础设施模块——`gateway`（`deepseek_client` / `context_manager` / `resiliency` / `chat_payload` / `edge_inference` / `semantic_cache` / `title_generator`）、`agent_runtime`（`multi_agent` / `agent_runs`）、`rag`（`local_rag` / `files` / `context_compressor`）、`observability`、`tool_runtime`（`tools` / `search` / `ocr` / `documents` / `presentations` / `mindmaps` / `generated_files` / `slides_skill`）、`data`（`memory` / `projects` / `reminders`）。
+- **产品名**：UI 标题、PWA manifest、桌面 / APK 应用名、FastAPI title、图标与文案中的「DeepSeek Mobile」→「DeepSeek Infra」（运行时数据目录名与 `DeepSeekMobile.exe` 产物名不变，避免破坏既有数据与打包链路）。
+
+### 新增
+
+- **OpenAI 兼容 Gateway**：新增 `deepseek_infra/infra/gateway/openai_api.py` 与 `POST /v1/chat/completions`、`GET /v1/models`，作为现有 `call_deepseek` / `stream_deepseek` 的薄翻译层（非流式 → `chat.completion`，流式 → `chat.completion.chunk` SSE + `[DONE]`）。任何 OpenAI SDK 把 `base_url` 指向本机 `/v1` 即可复用整套运行时；`api_key` 携带本地访问 token，上游 DeepSeek Key 由服务端配置提供。
+- **运维端点**：新增 `GET /healthz`（liveness）、`GET /readyz`（readiness）、`GET /metrics`（Prometheus 文本，`ai_requests_total` / `ai_agent_runs_total` / `ai_model_calls_total` / `ai_semantic_cache_hits_total` / `ai_tokens_total` / `ai_run_latency_ms_avg` 等，来源为本地 trace SQLite 聚合 `metrics_snapshot()`），均不鉴权、默认绑定 `127.0.0.1`。新增 `infra/observability/health.py` 与 `infra/observability/metrics.py`。
+
+### 文档
+
+- README 重写为基础设施叙事：6 大核心模块、分层架构图、OpenAI 兼容网关与运维端点用法，保留快速开始 / 环境变量 / 安装依赖 / 本地数据参考段。
+- `docs/ARCHITECTURE.md` 改为按 `infra/` 分层组织，补充 `/v1` 网关与 `/metrics`；API / APK / 前端模块 / 安全说明同步「适用版本」。
+
+### 测试 / 构建
+
+- 新增 `tests/test_gateway_openai.py`（8 项：payload 翻译、`/v1/models`、流式 SSE + `[DONE]`、错误 chunk、路由鉴权、非流式响应 schema）与 `tests/test_observability_metrics.py`（4 项：healthz / readyz / Prometheus 文本 / 未鉴权探针）。
+- `tests/test_encoding_regression.py` 哨兵随包重命名、目录分层、版本戳（`version-2.0.0-blue` / `适用版本：v2.0.0。` / `app_version: str = "2.0.0"`）与缓存版本更新。
+- 前端静态资源有改，Service Worker 缓存版本 `deepseek-mobile-v181` → `deepseek-mobile-v182`（保留 `deepseek-mobile-` 前缀，避免破坏旧端缓存键）。
+- 全量 `pytest` + `ruff` + `mypy` 全绿，分阶段（重命名 → 重构 → 网关 → 运维端点 → 叙事）各自落地、每阶段可独立验证。
+
 ## [1.9.1]
 
 ### 修复

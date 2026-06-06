@@ -1,3 +1,3 @@
-"""DeepSeek Mobile backend package."""
+"""DeepSeek Infra backend package."""
 
 

@@ -1,4 +1,4 @@
-"""Bundle the DeepSeek Mobile launcher into a single executable.
+"""Bundle the DeepSeek Infra launcher into a single executable.
 
 Usage:
 

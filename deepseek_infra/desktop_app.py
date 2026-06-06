@@ -11,7 +11,7 @@ from urllib.request import urlopen
 
 from deepseek_infra.app import ServerHandle, prepare_and_start, shutdown_handle
 
-APP_TITLE = "DeepSeek Mobile"
+APP_TITLE = "DeepSeek Infra"
 DEFAULT_WIDTH = 1180
 DEFAULT_HEIGHT = 820
 MIN_WIDTH = 760
@@ -81,7 +81,7 @@ def wait_for_server_ready(url: str, timeout_seconds: float = SERVER_READY_TIMEOU
 
 def show_startup_error(exc: BaseException) -> None:
     if sys.stderr is not None:
-        print(f"DeepSeek Mobile failed to start: {exc}", file=sys.stderr)
+        print(f"DeepSeek Infra failed to start: {exc}", file=sys.stderr)
         return
 
     try:
@@ -94,7 +94,7 @@ def show_startup_error(exc: BaseException) -> None:
     try:
         root = tk.Tk()
         root.withdraw()
-        messagebox.showerror("DeepSeek Mobile", f"DeepSeek Mobile failed to start:\n{exc}")
+        messagebox.showerror("DeepSeek Infra", f"DeepSeek Infra failed to start:\n{exc}")
     finally:
         if root is not None:
             root.destroy()
