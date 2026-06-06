@@ -115,7 +115,7 @@ def main() -> int:
     args = parse_args()
     version = args.version
     if not version:
-        from deepseek_mobile.core.config import settings
+        from deepseek_infra.core.config import settings
 
         version = settings.app_version
     root = args.root.resolve()

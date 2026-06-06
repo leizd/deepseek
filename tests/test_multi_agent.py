@@ -5,9 +5,9 @@ import threading
 from typing import Any
 from unittest.mock import patch
 
-from deepseek_mobile.core.config import MULTI_AGENT_TIMEOUT_SECONDS
-from deepseek_mobile.services import multi_agent, tools
-from deepseek_mobile.services.deepseek_client import SearchBudget, TokenBudget
+from deepseek_infra.core.config import MULTI_AGENT_TIMEOUT_SECONDS
+from deepseek_infra.services import multi_agent, tools
+from deepseek_infra.services.deepseek_client import SearchBudget, TokenBudget
 
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from deepseek_mobile.launcher import mobile
+from deepseek_infra.launcher import mobile
 
 
 def test_mobile_environment_detects_android_markers() -> None:

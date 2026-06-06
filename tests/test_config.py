@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from deepseek_mobile.core.config import (
+from deepseek_infra.core.config import (
     DEFAULT_HOST,
     FILE_CACHE_DIR,
     FILE_CHUNK_CHARS,

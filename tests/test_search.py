@@ -9,9 +9,9 @@ from datetime import date
 from pathlib import Path
 from unittest.mock import patch
 
-import deepseek_mobile.services.search as search
-from deepseek_mobile.core.errors import AppError, ErrorCode
-from deepseek_mobile.services.search import aggregate_search_rounds, format_search_context, search_for_client, search_queries_for, should_search_for_query
+import deepseek_infra.services.search as search
+from deepseek_infra.core.errors import AppError, ErrorCode
+from deepseek_infra.services.search import aggregate_search_rounds, format_search_context, search_for_client, search_queries_for, should_search_for_query
 
 
 class FakeTavilyResponse:

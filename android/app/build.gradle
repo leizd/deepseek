@@ -7,8 +7,8 @@ def syncedPythonDir = layout.buildDirectory.dir("generated/python")
 
 tasks.register("syncPythonSources", Sync) {
     into syncedPythonDir
-    from("${rootProject.projectDir}/../deepseek_mobile") {
-        into "deepseek_mobile"
+    from("${rootProject.projectDir}/../deepseek_infra") {
+        into "deepseek_infra"
         exclude "**/__pycache__/**", "**/*.pyc"
     }
     from("${rootProject.projectDir}/../static") {
@@ -41,7 +41,7 @@ chaquopy {
     defaultConfig {
         version = "3.13"
         buildPython "D:/python/python.exe"
-        extractPackages("deepseek_mobile")
+        extractPackages("deepseek_infra")
         pip {
             install "-r", "${rootProject.projectDir}/../requirements-mobile.txt"
         }

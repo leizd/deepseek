@@ -6,11 +6,11 @@ import unittest.mock
 import zipfile
 from pathlib import Path
 
-from deepseek_mobile.core.errors import AppError, ErrorCode
-from deepseek_mobile.services import generated_files
-from deepseek_mobile.services.documents import create_document
-from deepseek_mobile.services.generated_files import resolve_generated_file, save_generated_file_to_downloads
-from deepseek_mobile.services.tools import available_tool_definitions
+from deepseek_infra.core.errors import AppError, ErrorCode
+from deepseek_infra.services import generated_files
+from deepseek_infra.services.documents import create_document
+from deepseek_infra.services.generated_files import resolve_generated_file, save_generated_file_to_downloads
+from deepseek_infra.services.tools import available_tool_definitions
 
 SAMPLE_SECTIONS = [
     {

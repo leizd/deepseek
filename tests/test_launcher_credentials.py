@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-import deepseek_mobile.core.config as config
-import deepseek_mobile.launcher.credentials as credentials
+import deepseek_infra.core.config as config
+import deepseek_infra.launcher.credentials as credentials
 
 
 @pytest.fixture

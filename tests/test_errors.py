@@ -6,10 +6,10 @@ import threading
 import unittest
 from http.cookies import SimpleCookie
 
-import deepseek_mobile.web.server as server_module
-from deepseek_mobile.core.errors import AppError, ErrorCode
-from deepseek_mobile.core.utils import url_with_token
-from deepseek_mobile.web.server import FastAPIServer
+import deepseek_infra.web.server as server_module
+from deepseek_infra.core.errors import AppError, ErrorCode
+from deepseek_infra.core.utils import url_with_token
+from deepseek_infra.web.server import FastAPIServer
 
 
 class ErrorTests(unittest.TestCase):

@@ -15,7 +15,7 @@ def png_dimensions(path: Path) -> tuple[int, int]:
 
 class EncodingRegressionTests(unittest.TestCase):
     def test_python_sources_do_not_start_with_utf8_bom(self) -> None:
-        python_files = [Path("app.py")] + list(Path("deepseek_mobile").rglob("*.py")) + list(Path("tests").rglob("*.py"))
+        python_files = [Path("app.py")] + list(Path("deepseek_infra").rglob("*.py")) + list(Path("tests").rglob("*.py"))
         offenders = [str(path) for path in python_files if path.read_bytes().startswith(b"\xef\xbb\xbf")]
 
         self.assertEqual(offenders, [])
@@ -28,7 +28,7 @@ class EncodingRegressionTests(unittest.TestCase):
             "\u6924?",
             "\u6fb6\u8fab\u89e6",
         ]
-        runtime_files = list(Path("deepseek_mobile").rglob("*.py")) + [
+        runtime_files = list(Path("deepseek_infra").rglob("*.py")) + [
             path for path in Path("static").rglob("*.js") if "vendor" not in path.parts
         ]
         offenders: list[str] = []
@@ -380,9 +380,9 @@ class EncodingRegressionTests(unittest.TestCase):
 
     def test_v073_memory_suggestions_and_scopes_are_present(self) -> None:
         app = Path("static/modules/chat.js").read_text(encoding="utf-8")
-        client = Path("deepseek_mobile/services/deepseek_client.py").read_text(encoding="utf-8")
-        tools = Path("deepseek_mobile/services/tools.py").read_text(encoding="utf-8")
-        memory = Path("deepseek_mobile/services/memory.py").read_text(encoding="utf-8")
+        client = Path("deepseek_infra/services/deepseek_client.py").read_text(encoding="utf-8")
+        tools = Path("deepseek_infra/services/tools.py").read_text(encoding="utf-8")
+        memory = Path("deepseek_infra/services/memory.py").read_text(encoding="utf-8")
         sw = Path("static/sw.js").read_text(encoding="utf-8")
 
         self.assertIn('event.type === "memory_suggestion"', app)
@@ -457,7 +457,7 @@ class EncodingRegressionTests(unittest.TestCase):
         html = Path("static/index.html").read_text(encoding="utf-8")
         css = Path("static/styles.css").read_text(encoding="utf-8")
         manifest = Path("static/manifest.webmanifest").read_text(encoding="utf-8")
-        server = Path("deepseek_mobile/web/server.py").read_text(encoding="utf-8")
+        server = Path("deepseek_infra/web/server.py").read_text(encoding="utf-8")
 
         self.assertIn('id="voiceInputButton"', html)
         self.assertIn("function startVoiceInput()", app)
@@ -474,7 +474,7 @@ class EncodingRegressionTests(unittest.TestCase):
         speech = Path("static/modules/speech_text.js").read_text(encoding="utf-8")
         html = Path("static/index.html").read_text(encoding="utf-8")
         manifest = Path("static/manifest.webmanifest").read_text(encoding="utf-8")
-        server = Path("deepseek_mobile/web/server.py").read_text(encoding="utf-8")
+        server = Path("deepseek_infra/web/server.py").read_text(encoding="utf-8")
 
         self.assertIn("SHARE_TARGET_TTL_SECONDS = 30 * 60", server)
         self.assertIn("require_allowed_host(request)", server)
@@ -504,8 +504,8 @@ class EncodingRegressionTests(unittest.TestCase):
         html = Path("static/index.html").read_text(encoding="utf-8")
         manifest = json.loads(Path("static/manifest.webmanifest").read_text(encoding="utf-8"))
         sw = Path("static/sw.js").read_text(encoding="utf-8")
-        app = Path("deepseek_mobile/app.py").read_text(encoding="utf-8")
-        server = Path("deepseek_mobile/web/server.py").read_text(encoding="utf-8")
+        app = Path("deepseek_infra/app.py").read_text(encoding="utf-8")
+        server = Path("deepseek_infra/web/server.py").read_text(encoding="utf-8")
 
         self.assertIn('<link rel="icon" href="/icons/favicon.svg" type="image/svg+xml" />', html)
         self.assertIn('<link rel="icon" href="/icons/favicon-32x32.png" sizes="32x32" type="image/png" />', html)
@@ -686,7 +686,7 @@ class EncodingRegressionTests(unittest.TestCase):
         app = Path("static/modules/chat.js").read_text(encoding="utf-8")
         readme = Path("README.md").read_text(encoding="utf-8")
         changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
-        config = Path("deepseek_mobile/core/config.py").read_text(encoding="utf-8")
+        config = Path("deepseek_infra/core/config.py").read_text(encoding="utf-8")
         sw = Path("static/sw.js").read_text(encoding="utf-8")
 
         for token in [
@@ -766,8 +766,8 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn("## [0.9.0]", changelog)
 
     def test_v091_tool_calling_improvements_are_present(self) -> None:
-        client = Path("deepseek_mobile/services/deepseek_client.py").read_text(encoding="utf-8")
-        tools = Path("deepseek_mobile/services/tools.py").read_text(encoding="utf-8")
+        client = Path("deepseek_infra/services/deepseek_client.py").read_text(encoding="utf-8")
+        tools = Path("deepseek_infra/services/tools.py").read_text(encoding="utf-8")
         app = Path("static/modules/chat.js").read_text(encoding="utf-8")
         html = Path("static/index.html").read_text(encoding="utf-8")
         sw = Path("static/sw.js").read_text(encoding="utf-8")
@@ -818,8 +818,8 @@ class EncodingRegressionTests(unittest.TestCase):
         html = Path("static/index.html").read_text(encoding="utf-8")
         css = Path("static/styles.css").read_text(encoding="utf-8")
         normalize = Path("static/modules/normalize.js").read_text(encoding="utf-8")
-        server = Path("deepseek_mobile/web/server.py").read_text(encoding="utf-8")
-        config = Path("deepseek_mobile/core/config.py").read_text(encoding="utf-8")
+        server = Path("deepseek_infra/web/server.py").read_text(encoding="utf-8")
+        config = Path("deepseek_infra/core/config.py").read_text(encoding="utf-8")
         sw = Path("static/sw.js").read_text(encoding="utf-8")
         readme = Path("README.md").read_text(encoding="utf-8")
         changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
@@ -900,9 +900,9 @@ class EncodingRegressionTests(unittest.TestCase):
         app = Path("static/modules/chat.js").read_text(encoding="utf-8")
         html = Path("static/index.html").read_text(encoding="utf-8")
         css = Path("static/styles.css").read_text(encoding="utf-8")
-        tools = Path("deepseek_mobile/services/tools.py").read_text(encoding="utf-8")
-        search = Path("deepseek_mobile/services/search.py").read_text(encoding="utf-8")
-        client = Path("deepseek_mobile/services/deepseek_client.py").read_text(encoding="utf-8")
+        tools = Path("deepseek_infra/services/tools.py").read_text(encoding="utf-8")
+        search = Path("deepseek_infra/services/search.py").read_text(encoding="utf-8")
+        client = Path("deepseek_infra/services/deepseek_client.py").read_text(encoding="utf-8")
         sw = Path("static/sw.js").read_text(encoding="utf-8")
         readme = Path("README.md").read_text(encoding="utf-8")
 
@@ -968,11 +968,11 @@ class EncodingRegressionTests(unittest.TestCase):
         app = Path("static/modules/chat.js").read_text(encoding="utf-8")
         markdown = Path("static/modules/markdown.js").read_text(encoding="utf-8")
         css = Path("static/styles.css").read_text(encoding="utf-8")
-        search = Path("deepseek_mobile/services/search.py").read_text(encoding="utf-8")
-        client = Path("deepseek_mobile/services/deepseek_client.py").read_text(encoding="utf-8")
-        tools = Path("deepseek_mobile/services/tools.py").read_text(encoding="utf-8")
-        server = Path("deepseek_mobile/web/server.py").read_text(encoding="utf-8")
-        title = Path("deepseek_mobile/services/title_generator.py").read_text(encoding="utf-8")
+        search = Path("deepseek_infra/services/search.py").read_text(encoding="utf-8")
+        client = Path("deepseek_infra/services/deepseek_client.py").read_text(encoding="utf-8")
+        tools = Path("deepseek_infra/services/tools.py").read_text(encoding="utf-8")
+        server = Path("deepseek_infra/web/server.py").read_text(encoding="utf-8")
+        title = Path("deepseek_infra/services/title_generator.py").read_text(encoding="utf-8")
         sw = Path("static/sw.js").read_text(encoding="utf-8")
         readme = Path("README.md").read_text(encoding="utf-8")
         changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
@@ -1029,9 +1029,9 @@ class EncodingRegressionTests(unittest.TestCase):
     def test_v096_search_hotfix_and_tool_expansion_are_present(self) -> None:
         app = Path("static/modules/chat.js").read_text(encoding="utf-8")
         css = Path("static/styles.css").read_text(encoding="utf-8")
-        search = Path("deepseek_mobile/services/search.py").read_text(encoding="utf-8")
-        client = Path("deepseek_mobile/services/deepseek_client.py").read_text(encoding="utf-8")
-        tools = Path("deepseek_mobile/services/tools.py").read_text(encoding="utf-8")
+        search = Path("deepseek_infra/services/search.py").read_text(encoding="utf-8")
+        client = Path("deepseek_infra/services/deepseek_client.py").read_text(encoding="utf-8")
+        tools = Path("deepseek_infra/services/tools.py").read_text(encoding="utf-8")
         sw = Path("static/sw.js").read_text(encoding="utf-8")
         readme = Path("README.md").read_text(encoding="utf-8")
         changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
@@ -1190,7 +1190,7 @@ class EncodingRegressionTests(unittest.TestCase):
 
     def test_v111_search_round_recovery_is_present(self) -> None:
         app = Path("static/modules/chat.js").read_text(encoding="utf-8")
-        search = Path("deepseek_mobile/services/search.py").read_text(encoding="utf-8")
+        search = Path("deepseek_infra/services/search.py").read_text(encoding="utf-8")
         sw = Path("static/sw.js").read_text(encoding="utf-8")
         readme = Path("README.md").read_text(encoding="utf-8")
         changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
@@ -1219,11 +1219,11 @@ class EncodingRegressionTests(unittest.TestCase):
         app = Path("static/modules/chat.js").read_text(encoding="utf-8")
         html = Path("static/index.html").read_text(encoding="utf-8")
         css = Path("static/styles.css").read_text(encoding="utf-8")
-        client = Path("deepseek_mobile/services/deepseek_client.py").read_text(encoding="utf-8")
-        tools = Path("deepseek_mobile/services/tools.py").read_text(encoding="utf-8")
-        server = Path("deepseek_mobile/web/server.py").read_text(encoding="utf-8")
-        multi_agent = Path("deepseek_mobile/services/multi_agent.py").read_text(encoding="utf-8")
-        config = Path("deepseek_mobile/core/config.py").read_text(encoding="utf-8")
+        client = Path("deepseek_infra/services/deepseek_client.py").read_text(encoding="utf-8")
+        tools = Path("deepseek_infra/services/tools.py").read_text(encoding="utf-8")
+        server = Path("deepseek_infra/web/server.py").read_text(encoding="utf-8")
+        multi_agent = Path("deepseek_infra/services/multi_agent.py").read_text(encoding="utf-8")
+        config = Path("deepseek_infra/core/config.py").read_text(encoding="utf-8")
         markdown = Path("static/modules/markdown.js").read_text(encoding="utf-8")
 
         for token in [
@@ -1355,9 +1355,9 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn("flushPendingCodeAsText", markdown)
 
     def test_v072_local_tools_and_url_fetch_are_present(self) -> None:
-        client = Path("deepseek_mobile/services/deepseek_client.py").read_text(encoding="utf-8")
-        tools = Path("deepseek_mobile/services/tools.py").read_text(encoding="utf-8")
-        server = Path("deepseek_mobile/web/server.py").read_text(encoding="utf-8")
+        client = Path("deepseek_infra/services/deepseek_client.py").read_text(encoding="utf-8")
+        tools = Path("deepseek_infra/services/tools.py").read_text(encoding="utf-8")
+        server = Path("deepseek_infra/web/server.py").read_text(encoding="utf-8")
 
         self.assertIn("available_tool_definitions()", client)
         self.assertIn("execute_tool_calls(", client)
@@ -1466,9 +1466,9 @@ class EncodingRegressionTests(unittest.TestCase):
         app = Path("static/modules/chat.js").read_text(encoding="utf-8")
         html = Path("static/index.html").read_text(encoding="utf-8")
         css = Path("static/styles.css").read_text(encoding="utf-8")
-        server = Path("deepseek_mobile/web/server.py").read_text(encoding="utf-8")
-        agent_runs = Path("deepseek_mobile/services/agent_runs.py").read_text(encoding="utf-8")
-        multi_agent = Path("deepseek_mobile/services/multi_agent.py").read_text(encoding="utf-8")
+        server = Path("deepseek_infra/web/server.py").read_text(encoding="utf-8")
+        agent_runs = Path("deepseek_infra/services/agent_runs.py").read_text(encoding="utf-8")
+        multi_agent = Path("deepseek_infra/services/multi_agent.py").read_text(encoding="utf-8")
         release = Path("scripts/release.py").read_text(encoding="utf-8")
         readme = Path("README.md").read_text(encoding="utf-8")
         changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
@@ -1521,12 +1521,12 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn("可恢复 Agent Run", readme)
         self.assertIn("## [1.4.0]", changelog)
         self.assertIn("## Agent Run API", api)
-        self.assertIn("deepseek_mobile/services/agent_runs.py", architecture)
+        self.assertIn("deepseek_infra/services/agent_runs.py", architecture)
         self.assertIn("deepseek-mobile-v181", sw)
 
     def test_v160_mobile_launcher_is_present(self) -> None:
         launch_py = Path("launch.py").read_text(encoding="utf-8")
-        mobile_launcher = Path("deepseek_mobile/launcher/mobile.py").read_text(encoding="utf-8")
+        mobile_launcher = Path("deepseek_infra/launcher/mobile.py").read_text(encoding="utf-8")
         readme = Path("README.md").read_text(encoding="utf-8")
         changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
         sw = Path("static/sw.js").read_text(encoding="utf-8")
@@ -1548,7 +1548,7 @@ class EncodingRegressionTests(unittest.TestCase):
         readme = Path("README.md").read_text(encoding="utf-8")
         changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
         architecture = Path("docs/ARCHITECTURE.md").read_text(encoding="utf-8")
-        config = Path("deepseek_mobile/core/config.py").read_text(encoding="utf-8")
+        config = Path("deepseek_infra/core/config.py").read_text(encoding="utf-8")
 
         for token in [
             "function hasClosablePanelOpen()",
@@ -1572,9 +1572,9 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn("v1.6.0", architecture)
 
     def test_v161_web_search_tool_cache_stability_is_present(self) -> None:
-        client = Path("deepseek_mobile/services/deepseek_client.py").read_text(encoding="utf-8")
-        search = Path("deepseek_mobile/services/search.py").read_text(encoding="utf-8")
-        tools = Path("deepseek_mobile/services/tools.py").read_text(encoding="utf-8")
+        client = Path("deepseek_infra/services/deepseek_client.py").read_text(encoding="utf-8")
+        search = Path("deepseek_infra/services/search.py").read_text(encoding="utf-8")
+        tools = Path("deepseek_infra/services/tools.py").read_text(encoding="utf-8")
         readme = Path("README.md").read_text(encoding="utf-8")
         changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
         api = Path("docs/API.md").read_text(encoding="utf-8")
@@ -1617,8 +1617,8 @@ class EncodingRegressionTests(unittest.TestCase):
         android_ocr = Path("android/app/src/main/java/com/deepseek/mobile/AndroidOcrBridge.java").read_text(encoding="utf-8")
         main_activity = Path("android/app/src/main/java/com/deepseek/mobile/MainActivity.java").read_text(encoding="utf-8")
         build_gradle = Path("android/app/build.gradle").read_text(encoding="utf-8")
-        android_entry = Path("deepseek_mobile/android_entry.py").read_text(encoding="utf-8")
-        ocr = Path("deepseek_mobile/services/ocr.py").read_text(encoding="utf-8")
+        android_entry = Path("deepseek_infra/android_entry.py").read_text(encoding="utf-8")
+        ocr = Path("deepseek_infra/services/ocr.py").read_text(encoding="utf-8")
         readme = Path("README.md").read_text(encoding="utf-8")
         changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
         apk_docs = Path("docs/APK.md").read_text(encoding="utf-8")
@@ -1653,7 +1653,7 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn("deepseek-mobile-v181", sw)
 
     def test_v163_desktop_local_app_shell_is_present(self) -> None:
-        desktop_app = Path("deepseek_mobile/desktop_app.py").read_text(encoding="utf-8")
+        desktop_app = Path("deepseek_infra/desktop_app.py").read_text(encoding="utf-8")
         launch_py = Path("launch.py").read_text(encoding="utf-8")
         build_exe = Path("scripts/build_exe.py").read_text(encoding="utf-8")
         requirements = Path("requirements.txt").read_text(encoding="utf-8")
@@ -1681,7 +1681,7 @@ class EncodingRegressionTests(unittest.TestCase):
 
         for token in [
             "local desktop app window",
-            "deepseek_mobile.desktop_app",
+            "deepseek_infra.desktop_app",
             "--gui",
             "--server",
         ]:
@@ -1702,17 +1702,17 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn("内嵌 WebView", readme)
         self.assertIn("## [1.6.3]", changelog)
         self.assertIn("适用版本：v1.9.1。", api)
-        self.assertIn("deepseek_mobile/desktop_app.py", architecture)
+        self.assertIn("deepseek_infra/desktop_app.py", architecture)
         self.assertIn("pywebview", architecture)
         self.assertIn("pywebview", frontend_docs)
         self.assertIn("内嵌 WebView", security)
         self.assertIn("deepseek-mobile-v181", sw)
 
     def test_v165_multi_agent_budget_revision_and_dynamic_dag_are_present(self) -> None:
-        multi_agent = Path("deepseek_mobile/services/multi_agent.py").read_text(encoding="utf-8")
+        multi_agent = Path("deepseek_infra/services/multi_agent.py").read_text(encoding="utf-8")
         chat = Path("static/modules/chat.js").read_text(encoding="utf-8")
-        config = Path("deepseek_mobile/core/config.py").read_text(encoding="utf-8")
-        client = Path("deepseek_mobile/services/deepseek_client.py").read_text(encoding="utf-8")
+        config = Path("deepseek_infra/core/config.py").read_text(encoding="utf-8")
+        client = Path("deepseek_infra/services/deepseek_client.py").read_text(encoding="utf-8")
         readme = Path("README.md").read_text(encoding="utf-8")
         changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
         api = Path("docs/API.md").read_text(encoding="utf-8")
@@ -1748,7 +1748,7 @@ class EncodingRegressionTests(unittest.TestCase):
         gemini_css = Path("static/gemini.css").read_text(encoding="utf-8")
         chat_js = Path("static/modules/chat.js").read_text(encoding="utf-8")
         sw = Path("static/sw.js").read_text(encoding="utf-8")
-        config = Path("deepseek_mobile/core/config.py").read_text(encoding="utf-8")
+        config = Path("deepseek_infra/core/config.py").read_text(encoding="utf-8")
         build_gradle = Path("android/app/build.gradle").read_text(encoding="utf-8")
         readme = Path("README.md").read_text(encoding="utf-8")
         changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
@@ -1776,11 +1776,11 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn("## [1.6.6]", changelog)
 
     def test_v176_local_rag_data_infra_is_present(self) -> None:
-        config = Path("deepseek_mobile/core/config.py").read_text(encoding="utf-8")
-        local_rag = Path("deepseek_mobile/services/local_rag.py").read_text(encoding="utf-8")
-        files = Path("deepseek_mobile/services/files.py").read_text(encoding="utf-8")
-        tools = Path("deepseek_mobile/services/tools.py").read_text(encoding="utf-8")
-        server = Path("deepseek_mobile/web/server.py").read_text(encoding="utf-8")
+        config = Path("deepseek_infra/core/config.py").read_text(encoding="utf-8")
+        local_rag = Path("deepseek_infra/services/local_rag.py").read_text(encoding="utf-8")
+        files = Path("deepseek_infra/services/files.py").read_text(encoding="utf-8")
+        tools = Path("deepseek_infra/services/tools.py").read_text(encoding="utf-8")
+        server = Path("deepseek_infra/web/server.py").read_text(encoding="utf-8")
         readme = Path("README.md").read_text(encoding="utf-8")
         changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
         api = Path("docs/API.md").read_text(encoding="utf-8")
@@ -1804,14 +1804,14 @@ class EncodingRegressionTests(unittest.TestCase):
 
 
     def test_v180_gateway_resiliency_is_present(self) -> None:
-        config = Path("deepseek_mobile/core/config.py").read_text(encoding="utf-8")
-        context_manager = Path("deepseek_mobile/services/context_manager.py").read_text(encoding="utf-8")
-        observability = Path("deepseek_mobile/services/observability.py").read_text(encoding="utf-8")
-        resiliency = Path("deepseek_mobile/services/resiliency.py").read_text(encoding="utf-8")
-        semantic_cache = Path("deepseek_mobile/services/semantic_cache.py").read_text(encoding="utf-8")
-        deepseek_client = Path("deepseek_mobile/services/deepseek_client.py").read_text(encoding="utf-8")
-        multi_agent = Path("deepseek_mobile/services/multi_agent.py").read_text(encoding="utf-8")
-        server = Path("deepseek_mobile/web/server.py").read_text(encoding="utf-8")
+        config = Path("deepseek_infra/core/config.py").read_text(encoding="utf-8")
+        context_manager = Path("deepseek_infra/services/context_manager.py").read_text(encoding="utf-8")
+        observability = Path("deepseek_infra/services/observability.py").read_text(encoding="utf-8")
+        resiliency = Path("deepseek_infra/services/resiliency.py").read_text(encoding="utf-8")
+        semantic_cache = Path("deepseek_infra/services/semantic_cache.py").read_text(encoding="utf-8")
+        deepseek_client = Path("deepseek_infra/services/deepseek_client.py").read_text(encoding="utf-8")
+        multi_agent = Path("deepseek_infra/services/multi_agent.py").read_text(encoding="utf-8")
+        server = Path("deepseek_infra/web/server.py").read_text(encoding="utf-8")
         chat_js = Path("static/modules/chat.js").read_text(encoding="utf-8")
         styles = Path("static/styles.css").read_text(encoding="utf-8")
         readme = Path("README.md").read_text(encoding="utf-8")
@@ -1855,13 +1855,13 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn(".request-queue/queue.sqlite3", security)
 
     def test_v191_content_risk_graceful_degradation_is_present(self) -> None:
-        utils = Path("deepseek_mobile/core/utils.py").read_text(encoding="utf-8")
-        errors = Path("deepseek_mobile/core/errors.py").read_text(encoding="utf-8")
-        deepseek_client = Path("deepseek_mobile/services/deepseek_client.py").read_text(encoding="utf-8")
+        utils = Path("deepseek_infra/core/utils.py").read_text(encoding="utf-8")
+        errors = Path("deepseek_infra/core/errors.py").read_text(encoding="utf-8")
+        deepseek_client = Path("deepseek_infra/services/deepseek_client.py").read_text(encoding="utf-8")
         chat_js = Path("static/modules/chat.js").read_text(encoding="utf-8")
         styles = Path("static/styles.css").read_text(encoding="utf-8")
         sw = Path("static/sw.js").read_text(encoding="utf-8")
-        config = Path("deepseek_mobile/core/config.py").read_text(encoding="utf-8")
+        config = Path("deepseek_infra/core/config.py").read_text(encoding="utf-8")
         readme = Path("README.md").read_text(encoding="utf-8")
         changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
 

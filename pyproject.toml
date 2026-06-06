@@ -16,7 +16,7 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["deepseek_mobile"]
+source = ["deepseek_infra"]
 omit = ["tests/*", "static/*", "*/__pycache__/*"]
 
 [tool.coverage.report]

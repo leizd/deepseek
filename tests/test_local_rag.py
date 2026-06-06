@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-import deepseek_mobile.services.local_rag as local_rag
+import deepseek_infra.services.local_rag as local_rag
 
 
 def test_local_rag_indexes_and_searches_file_chunks(tmp_settings) -> None:

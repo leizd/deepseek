@@ -20,8 +20,8 @@ from __future__ import annotations
 import json
 import unittest
 
-from deepseek_mobile.services import deepseek_client
-from deepseek_mobile.services.deepseek_client import (
+from deepseek_infra.services import deepseek_client
+from deepseek_infra.services.deepseek_client import (
     append_tool_exchange,
     build_deepseek_request,
     force_final_answer_without_tools,

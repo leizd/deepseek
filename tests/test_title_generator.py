@@ -4,9 +4,9 @@ import json
 import unittest
 from unittest.mock import patch
 
-from deepseek_mobile.core.errors import AppError, ErrorCode
-from deepseek_mobile.services import title_generator
-from deepseek_mobile.services.title_generator import _sanitize_title, generate_title_payload
+from deepseek_infra.core.errors import AppError, ErrorCode
+from deepseek_infra.services import title_generator
+from deepseek_infra.services.title_generator import _sanitize_title, generate_title_payload
 
 
 class TitleGeneratorTests(unittest.TestCase):

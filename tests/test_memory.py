@@ -9,8 +9,8 @@ import uuid
 from pathlib import Path
 from unittest.mock import patch
 
-import deepseek_mobile.services.memory as memory
-from deepseek_mobile.core.errors import AppError
+import deepseek_infra.services.memory as memory
+from deepseek_infra.core.errors import AppError
 
 
 class MemoryTests(unittest.TestCase):
@@ -119,7 +119,7 @@ class MemoryTests(unittest.TestCase):
         script = (
             "from pathlib import Path; "
             "import sys; "
-            "import deepseek_mobile.services.memory as memory; "
+            "import deepseek_infra.services.memory as memory; "
             "memory.MEMORY_DIR = Path(sys.argv[1]); "
             "memory.MEMORY_FILE = memory.MEMORY_DIR / 'memories.json'; "
             "memory.upsert_memory(sys.argv[2], category='project')"

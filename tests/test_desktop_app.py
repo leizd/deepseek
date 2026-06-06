@@ -5,7 +5,7 @@ from types import ModuleType, SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
-import deepseek_mobile.desktop_app as desktop_app
+import deepseek_infra.desktop_app as desktop_app
 
 
 def test_desktop_app_starts_webview_and_shuts_down() -> None:

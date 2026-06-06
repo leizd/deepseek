@@ -9,8 +9,8 @@ from types import ModuleType, SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
-import deepseek_mobile.services.ocr as ocr
-from deepseek_mobile.core.errors import AppError, ErrorCode
+import deepseek_infra.services.ocr as ocr
+from deepseek_infra.core.errors import AppError, ErrorCode
 
 
 class FakeResponse:

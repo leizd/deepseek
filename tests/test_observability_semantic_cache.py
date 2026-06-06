@@ -4,9 +4,9 @@ import json
 from typing import Any
 from unittest.mock import patch
 
-import deepseek_mobile.services.deepseek_client as deepseek_client
-from deepseek_mobile.services.deepseek_client import call_deepseek
-from deepseek_mobile.services import observability, semantic_cache
+import deepseek_infra.services.deepseek_client as deepseek_client
+from deepseek_infra.services.deepseek_client import call_deepseek
+from deepseek_infra.services import observability, semantic_cache
 
 
 class FakeResponse:

@@ -3,8 +3,8 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-import deepseek_mobile.core.utils as utils
-from deepseek_mobile.core.utils import (
+import deepseek_infra.core.utils as utils
+from deepseek_infra.core.utils import (
     clean_filename,
     clear_local_ip_cache,
     format_upstream_error,

@@ -4,8 +4,8 @@ import json
 import unittest
 from unittest.mock import patch
 
-import deepseek_mobile.services.context_compressor as compressor
-from deepseek_mobile.core.errors import AppError, ErrorCode
+import deepseek_infra.services.context_compressor as compressor
+from deepseek_infra.core.errors import AppError, ErrorCode
 
 
 class ContextCompressorTests(unittest.TestCase):

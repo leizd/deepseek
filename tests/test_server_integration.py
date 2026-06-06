@@ -14,12 +14,12 @@ from typing import Any, cast
 from urllib.parse import parse_qs, urlsplit
 from unittest.mock import patch
 
-import deepseek_mobile.services.files as files_module
-import deepseek_mobile.services.agent_runs as agent_runs_module
-import deepseek_mobile.services.memory as memory_module
-import deepseek_mobile.services.projects as projects_module
-import deepseek_mobile.web.server as server_module
-from deepseek_mobile.core.errors import ErrorCode
+import deepseek_infra.services.files as files_module
+import deepseek_infra.services.agent_runs as agent_runs_module
+import deepseek_infra.services.memory as memory_module
+import deepseek_infra.services.projects as projects_module
+import deepseek_infra.web.server as server_module
+from deepseek_infra.core.errors import ErrorCode
 
 
 class ServerIntegrationTests(unittest.TestCase):
