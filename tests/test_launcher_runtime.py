@@ -6,9 +6,9 @@ import sys
 
 import pytest
 
-import deepseek_mobile.launcher.runtime as runtime_module
-from deepseek_mobile.launcher.credentials import LAN_HOST, LauncherCredentials
-from deepseek_mobile.launcher.runtime import (
+import deepseek_infra.launcher.runtime as runtime_module
+from deepseek_infra.launcher.credentials import LAN_HOST, LauncherCredentials
+from deepseek_infra.launcher.runtime import (
     LauncherRuntime,
     build_env,
     launcher_url_from_log,
@@ -66,7 +66,7 @@ def test_build_env_passes_ocr_disabled_explicitly() -> None:
 def test_server_command_dev_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delattr(sys, "frozen", raising=False)
     cmd = server_command()
-    assert cmd == [sys.executable, "-m", "deepseek_mobile.app"]
+    assert cmd == [sys.executable, "-m", "deepseek_infra.app"]
 
 
 def test_server_command_frozen_mode(monkeypatch: pytest.MonkeyPatch) -> None:

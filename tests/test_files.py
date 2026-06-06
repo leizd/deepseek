@@ -11,9 +11,9 @@ from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import patch
 
-import deepseek_mobile.services.files as files
-from deepseek_mobile.core.errors import AppError, ErrorCode
-from deepseek_mobile.services.files import (
+import deepseek_infra.infra.rag.files as files
+from deepseek_infra.core.errors import AppError, ErrorCode
+from deepseek_infra.infra.rag.files import (
     cached_file_source,
     chunk_text,
     decode_text_file,

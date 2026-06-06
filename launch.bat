@@ -1,5 +1,5 @@
 @echo off
-REM Double-click this file to open the DeepSeek Mobile local app window.
+REM Double-click this file to open the DeepSeek Infra local app window.
 REM Uses pythonw so there is no black console window behind the app.
 setlocal
 cd /d "%~dp0"

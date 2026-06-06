@@ -8,11 +8,11 @@ from unittest.mock import patch
 
 import pytest
 
-import deepseek_mobile.services.deepseek_client as deepseek_client
-import deepseek_mobile.services.resiliency as resiliency
-from deepseek_mobile.services.context_manager import stable_json_dumps
-from deepseek_mobile.services.deepseek_client import build_deepseek_request, call_deepseek, stream_deepseek
-from deepseek_mobile.services.edge_inference import EdgeRouteDecision
+import deepseek_infra.infra.gateway.deepseek_client as deepseek_client
+import deepseek_infra.infra.gateway.resiliency as resiliency
+from deepseek_infra.infra.gateway.context_manager import stable_json_dumps
+from deepseek_infra.infra.gateway.deepseek_client import build_deepseek_request, call_deepseek, stream_deepseek
+from deepseek_infra.infra.gateway.edge_inference import EdgeRouteDecision
 
 
 def test_stable_json_dumps_sorts_keys_without_spacing() -> None:

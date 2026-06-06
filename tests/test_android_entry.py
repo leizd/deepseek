@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-import deepseek_mobile.android_entry as android_entry
+import deepseek_infra.android_entry as android_entry
 
 
 def test_configure_android_environment_sets_private_runtime_paths(tmp_path: Path) -> None:

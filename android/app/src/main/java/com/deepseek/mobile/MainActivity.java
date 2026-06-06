@@ -118,7 +118,7 @@ public class MainActivity extends Activity {
                     Python.start(new AndroidPlatform(this));
                 }
                 AndroidOcrBridge.initialize(getApplicationContext());
-                PyObject module = Python.getInstance().getModule("deepseek_mobile.android_entry");
+                PyObject module = Python.getInstance().getModule("deepseek_infra.android_entry");
                 PyObject result = module.callAttr("start_json", getFilesDir().getAbsolutePath(), SERVER_PORT, "", "", false);
                 JSONObject payload = new JSONObject(result.toString());
                 String url = payload.getString("url");
@@ -199,7 +199,7 @@ public class MainActivity extends Activity {
     private void stopPythonServer() {
         try {
             if (Python.isStarted()) {
-                Python.getInstance().getModule("deepseek_mobile.android_entry").callAttr("stop");
+                Python.getInstance().getModule("deepseek_infra.android_entry").callAttr("stop");
             }
         } catch (Exception ignored) {
         }

@@ -5,7 +5,7 @@ from types import ModuleType, SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
-import deepseek_mobile.desktop_app as desktop_app
+import deepseek_infra.desktop_app as desktop_app
 
 
 def test_desktop_app_starts_webview_and_shuts_down() -> None:
@@ -74,7 +74,7 @@ def test_open_app_window_uses_pywebview() -> None:
         desktop_app.open_app_window("http://127.0.0.1:8000/")
 
     assert calls[0][0] == "create_window"
-    assert calls[0][1][0] == "DeepSeek Mobile"
+    assert calls[0][1][0] == "DeepSeek Infra"
     assert calls[0][1][1] == "http://127.0.0.1:8000/"
     assert calls[1] == ("start", (), {"debug": False, "private_mode": False})
 

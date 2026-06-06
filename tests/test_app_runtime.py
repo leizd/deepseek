@@ -8,7 +8,7 @@ import urllib.request
 
 import pytest
 
-from deepseek_mobile.app import prepare_and_start, shutdown_handle
+from deepseek_infra.app import prepare_and_start, shutdown_handle
 
 
 def _free_port() -> int:

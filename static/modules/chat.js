@@ -3889,7 +3889,7 @@ async function onSubmit(event) {
     assistantMessage.streaming = false;
     assistantMessage.error = true;
     settleStuckSearchSteps(assistantMessage);
-    assistantMessage.content = `调用失败：${error.message}`;
+    applyAssistantFailure(assistantMessage, error);
     clearAssistantRequestMarkers(assistantMessage);
     updateStreamingMessage(assistantMessage);
     persistMessages();
@@ -4128,7 +4128,7 @@ async function continueGeneration(messageId) {
     assistantMessage.error = true;
     assistantMessage.interrupted = false;
     settleStuckSearchSteps(assistantMessage);
-    assistantMessage.content = `调用失败：${error.message}`;
+    applyAssistantFailure(assistantMessage, error);
     clearAssistantRequestMarkers(assistantMessage);
     updateStreamingMessage(assistantMessage);
     persistMessages();
@@ -4244,7 +4244,7 @@ async function regenerateMessage(messageId) {
     assistantMessage.error = true;
     assistantMessage.interrupted = false;
     settleStuckSearchSteps(assistantMessage);
-    assistantMessage.content = `调用失败：${error.message}`;
+    applyAssistantFailure(assistantMessage, error);
     clearAssistantRequestMarkers(assistantMessage);
     updateStreamingMessage(assistantMessage);
     persistMessages();
@@ -4378,7 +4378,7 @@ async function submitMessageEdit(messageId, content) {
     assistantMessage.streaming = false;
     assistantMessage.error = true;
     settleStuckSearchSteps(assistantMessage);
-    assistantMessage.content = `调用失败：${error.message}`;
+    applyAssistantFailure(assistantMessage, error);
     clearAssistantRequestMarkers(assistantMessage);
     updateStreamingMessage(assistantMessage);
     persistMessages();
@@ -4697,7 +4697,7 @@ function renderMessage(message) {
   if (!message.id) message.id = createId();
 
   const wrapper = document.createElement("article");
-  wrapper.className = `message ${message.role}${message.error ? " error" : ""}`;
+  wrapper.className = `message ${message.role}${message.error ? " error" : ""}${message.contentFiltered ? " content-filtered" : ""}`;
   wrapper.dataset.messageId = message.id;
   decorateFreshMessage(wrapper, message.id);
 
@@ -6371,7 +6371,9 @@ function handleStreamEvent(event, assistantMessage) {
 
   if (event.type === "error") {
     assistantMessage.agentRunStatus = "failed";
-    throw new Error(event.error || "流式响应失败");
+    const streamError = new Error(event.error || "流式响应失败");
+    if (event.code === "upstream_content_risk") streamError.contentFiltered = true;
+    throw streamError;
   }
 
   if (event.type === "run_status") {
@@ -6615,7 +6617,7 @@ function renderStreamingMessage(message) {
     renderPauseButton();
     return;
   }
-  node.className = `message ${message.role}${message.error ? " error" : ""}`;
+  node.className = `message ${message.role}${message.error ? " error" : ""}${message.contentFiltered ? " content-filtered" : ""}`;
   const bubble = node.querySelector(".bubble");
   if (!bubble) {
     render();
@@ -7744,7 +7746,7 @@ async function clearLocalBrowserData() {
   if (
     !(await confirmAction({
       title: "清空本地数据？",
-      message: "清空本机浏览器保存的所有 DeepSeek Mobile 数据并退出登录？",
+      message: "清空本机浏览器保存的所有 DeepSeek Infra 数据并退出登录？",
       okText: "清空并退出",
       danger: true,
     }))
@@ -12130,7 +12132,7 @@ async function confirmAgentRunPlan(messageId) {
     }
     message.streaming = false;
     message.error = true;
-    message.content = `调用失败：${error.message}`;
+    applyAssistantFailure(message, error);
     updateStreamingMessage(message);
     persistMessages();
   } finally {
@@ -12177,7 +12179,7 @@ async function rerunAgentPhase(messageId, phase) {
     }
     message.streaming = false;
     message.error = true;
-    message.content = `调用失败：${error.message}`;
+    applyAssistantFailure(message, error);
     updateStreamingMessage(message);
     persistMessages();
   } finally {
@@ -12194,6 +12196,19 @@ function completeAgentRunMessage(message) {
   clearAssistantRequestMarkers(message);
   updateStreamingMessage(message);
   persistMessages();
+}
+
+function applyAssistantFailure(message, error) {
+  const text = error && error.message ? String(error.message) : "请求失败";
+  // 内容安全拦截：保留已生成的思考/正文，用「内容安全提示」软展示，而不是生硬的「调用失败」。
+  if (error && error.contentFiltered) {
+    message.contentFiltered = true;
+    const existing = String(message.content || "").trim();
+    message.content = existing ? `${existing}\n\n---\n\n${text}` : text;
+    return;
+  }
+  message.contentFiltered = false;
+  message.content = `调用失败：${text}`;
 }
 
 function ensureAssistantHasVisibleContent(message) {
@@ -12825,6 +12840,7 @@ function normalizeMessage(value) {
     projectName: typeof value.projectName === "string" ? value.projectName : "",
     projectAttachments: normalizeProjectAttachments(value.projectAttachments || []),
     interrupted: Boolean(value.interrupted),
+    contentFiltered: Boolean(value.contentFiltered),
     diagnostics: value.diagnostics && typeof value.diagnostics === "object" ? value.diagnostics : null,
     feedback: ["up", "down"].includes(value.feedback) ? value.feedback : "",
     completedAt: Number(value.completedAt) || undefined,

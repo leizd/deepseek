@@ -2,6 +2,69 @@
 
 本项目使用类似 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的分组方式维护变更记录。未发布内容记录在 `[Unreleased]`，正式发版时迁移到具体版本。
 
+## [2.0.0]
+
+**重大版本：从「DeepSeek Mobile：本地 AI 聊天客户端」重定位为「DeepSeek Infra：Local-first AI Runtime / Agent Infrastructure」。** 本次以抽象层、工程指标和项目叙事升级为主，既有运行时能力（多 Agent DAG、本地 RAG、链路追踪、语义缓存、端云路由、网关韧性）保持不变，并新增 OpenAI 兼容网关与运维端点。
+
+### 重构（破坏性）
+
+- **包重命名**：Python 包 `deepseek_mobile` → `deepseek_infra`（365 处引用 / 76 文件统一更新；`git mv` 保留历史）。导入路径、`pyproject` 覆盖率源、`conftest`、`build_exe` / `release` 脚本、`launch*`、Android Chaquopy 与 `android_entry` 全部同步。
+- **目录分层**：`deepseek_infra/services/` 重构为 `deepseek_infra/infra/` 下 6 个语义基础设施模块——`gateway`（`deepseek_client` / `context_manager` / `resiliency` / `chat_payload` / `edge_inference` / `semantic_cache` / `title_generator`）、`agent_runtime`（`multi_agent` / `agent_runs`）、`rag`（`local_rag` / `files` / `context_compressor`）、`observability`、`tool_runtime`（`tools` / `search` / `ocr` / `documents` / `presentations` / `mindmaps` / `generated_files` / `slides_skill`）、`data`（`memory` / `projects` / `reminders`）。
+- **产品名**：UI 标题、PWA manifest、桌面 / APK 应用名、FastAPI title、图标与文案中的「DeepSeek Mobile」→「DeepSeek Infra」（运行时数据目录名与 `DeepSeekMobile.exe` 产物名不变，避免破坏既有数据与打包链路）。
+
+### 新增
+
+- **OpenAI 兼容 Gateway**：新增 `deepseek_infra/infra/gateway/openai_api.py` 与 `POST /v1/chat/completions`、`GET /v1/models`，作为现有 `call_deepseek` / `stream_deepseek` 的薄翻译层（非流式 → `chat.completion`，流式 → `chat.completion.chunk` SSE + `[DONE]`）。任何 OpenAI SDK 把 `base_url` 指向本机 `/v1` 即可复用整套运行时；`api_key` 携带本地访问 token，上游 DeepSeek Key 由服务端配置提供。
+- **运维端点**：新增 `GET /healthz`（liveness）、`GET /readyz`（readiness）、`GET /metrics`（Prometheus 文本，`ai_requests_total` / `ai_agent_runs_total` / `ai_model_calls_total` / `ai_semantic_cache_hits_total` / `ai_tokens_total` / `ai_run_latency_ms_avg` 等，来源为本地 trace SQLite 聚合 `metrics_snapshot()`），均不鉴权、默认绑定 `127.0.0.1`。新增 `infra/observability/health.py` 与 `infra/observability/metrics.py`。
+
+### 文档
+
+- README 重写为基础设施叙事：6 大核心模块、分层架构图、OpenAI 兼容网关与运维端点用法，保留快速开始 / 环境变量 / 安装依赖 / 本地数据参考段。
+- `docs/ARCHITECTURE.md` 改为按 `infra/` 分层组织，补充 `/v1` 网关与 `/metrics`；API / APK / 前端模块 / 安全说明同步「适用版本」。
+
+### 测试 / 构建
+
+- 新增 `tests/test_gateway_openai.py`（8 项：payload 翻译、`/v1/models`、流式 SSE + `[DONE]`、错误 chunk、路由鉴权、非流式响应 schema）与 `tests/test_observability_metrics.py`（4 项：healthz / readyz / Prometheus 文本 / 未鉴权探针）。
+- `tests/test_encoding_regression.py` 哨兵随包重命名、目录分层、版本戳（`version-2.0.0-blue` / `适用版本：v2.0.0。` / `app_version: str = "2.0.0"`）与缓存版本更新。
+- 前端静态资源有改，Service Worker 缓存版本 `deepseek-mobile-v181` → `deepseek-mobile-v182`（保留 `deepseek-mobile-` 前缀，避免破坏旧端缓存键）。
+- 全量 `pytest` + `ruff` + `mypy` 全绿，分阶段（重命名 → 重构 → 网关 → 运维端点 → 叙事）各自落地、每阶段可独立验证。
+
+## [1.9.1]
+
+### 修复
+
+- **内容安全拦截不再丢掉整轮成果**：当 DeepSeek 在流式响应里返回内容安全拦截（如 `Content Exists Risk`，常见于联网搜索「今天的新闻」这类敏感时政话题）时，旧逻辑会把整轮替换成生硬的 `调用失败：Content Exists Risk` 并连带丢失已生成的思考过程。现在后端用 `humanize_upstream_error()` 把这类错误转成清晰、可操作的中文说明（解释这是 DeepSeek 内容安全拦截，并建议换个问法、缩小到具体主题或关闭联网搜索后重试），并用专用错误码 `ErrorCode.UPSTREAM_CONTENT_RISK`（`upstream_content_risk`）标记，便于前端区分处理。
+
+### 改进
+
+- 前端对内容安全拦截改为「软展示」：新增 `applyAssistantFailure()`，命中 `upstream_content_risk` 时保留已流式产出的思考过程与正文，正文区显示「内容安全提示」而不是红色「调用失败」；助手气泡叠加 `content-filtered` 类，用克制的琥珀色基调区别于普通失败。`contentFiltered` 标记随消息持久化，刷新后保持。
+- `humanize_upstream_error()` / `is_content_risk_error()` 同时覆盖同步与流式两条上游错误路径（`HTTPError` 与 SSE `event: error`）；限流、网络、鉴权等非内容拦截类错误原样透传，行为不变。
+
+### 测试
+
+- `tests/test_utils.py` 新增 `format_upstream_error` / `is_content_risk_error` / `humanize_upstream_error` 单元测试，覆盖中英文内容拦截签名、敏感词命中，以及非拦截类错误的原样返回。
+- `tests/test_encoding_regression.py` 新增 `test_v191_content_risk_graceful_degradation_is_present` 哨兵，钉住后端识别函数与错误码、前端 `applyAssistantFailure` / `contentFiltered` / `content-filtered` 样式与缓存版本。
+
+### 构建 / 发布
+
+- 前端静态资源（`static/modules/chat.js`、`static/styles.css`）有改动，Service Worker 缓存版本更新到 `deepseek-mobile-v181`。
+- 版本号升到 `1.9.1`：`deepseek_mobile/core/config.py`、README badge、`docs/`（API / ARCHITECTURE / FRONTEND_MODULES / APK / SECURITY）「适用版本」、`tests/test_config.py` 与 `tests/test_encoding_regression.py` 版本戳同步更新。
+
+## [1.9.0]
+
+本次为文档与版本维护发版，不改动任何运行时行为；`static/sw.js` 缓存版本保持 `deepseek-mobile-v180`，无需重拉前端缓存。
+
+### 文档
+
+- **README 重构**：把 README 从「逐版本更新日志堆叠」改写为以产品能力为主线的结构——顶部是产品定位与亮点，中部按「对话与推理 / 多 Agent 协作 / 联网搜索 / 文件理解与文档工作台 / 图片视觉与 OCR / 生成式产物 / 端云协同推理 / 本地数据层与可观测性 / 长期记忆 / Seek 助手 / 前端体验」分类介绍当前能力，随后是快速开始、环境变量、安装与依赖、本地数据与隐私、文档索引和注意事项。逐版本历史完全交给本 `CHANGELOG.md`，README 不再保留 `## vX.Y.Z 更新` 段落和开头的版本流水叙述。
+- README「本地数据与隐私」补全 `.request-queue/queue.sqlite3` 和 `.agent-runs/`，并新增「文档」索引指向 `CHANGELOG.md` 与 `docs/` 下的 API / 架构 / 前端模块 / APK / 安全说明。
+- 版本号统一升到 `1.9.0`：`deepseek_mobile/core/config.py`、README badge、`docs/`（API / ARCHITECTURE / FRONTEND_MODULES / APK / SECURITY）的「适用版本」同步更新。
+
+### 测试
+
+- `tests/test_config.py`、`tests/test_encoding_regression.py` 的版本戳升到 `1.9.0`（`version-1.9.0-blue` ×17、`适用版本：v1.9.0。` ×8、`app_version: str = "1.9.0"` ×5）。
+- `test_encoding_regression.py` 中原本锚定旧 README 逐版本段落（`## v1.7.0 更新` / `## v1.4.0 更新` / `Local Data Infra` / `Gateway & Resiliency`）的哨兵断言，改为锚定重构后 README 仍稳定包含的能力字样：`图片视觉理解`、`可恢复 Agent Run`、`create_pptx`、`.local-rag`、`.request-queue`。
+
 ## [1.8.1]
 
 ### 修复

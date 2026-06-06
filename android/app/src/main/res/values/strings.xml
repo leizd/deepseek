@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">DeepSeek Mobile</string>
+    <string name="app_name">DeepSeek Infra</string>
     <string name="external_browser_unavailable">No browser can open this link.</string>
     <string name="file_picker_unavailable">No file picker is available on this phone.</string>
-    <string name="startup_failed">DeepSeek Mobile failed to start: %1$s</string>
+    <string name="startup_failed">DeepSeek Infra failed to start: %1$s</string>
 </resources>

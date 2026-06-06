@@ -10,10 +10,10 @@ from unittest.mock import patch
 
 import pytest
 
-import deepseek_mobile.services.memory as memory
-import deepseek_mobile.services.projects as projects
-import deepseek_mobile.services.tools as tools
-from deepseek_mobile.core.errors import AppError, ErrorCode
+import deepseek_infra.infra.data.memory as memory
+import deepseek_infra.infra.data.projects as projects
+import deepseek_infra.infra.tool_runtime.tools as tools
+from deepseek_infra.core.errors import AppError, ErrorCode
 
 
 class ToolServiceTests(unittest.TestCase):

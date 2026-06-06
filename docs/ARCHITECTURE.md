@@ -1,44 +1,71 @@
 # 架构说明
 
-适用版本：v1.8.1。
+适用版本：v2.0.0。
 
-DeepSeek Mobile 是一个本地优先的 AI 客户端：桌面端可通过内嵌 WebView 的本地应用窗口运行，手机端可通过 APK WebView 运行；Python HTTP 后端负责模型调用、端云协同路由、搜索、长期记忆、文件解析、OCR、鉴权和静态资源服务。
+DeepSeek Infra 是一个本地优先的 **AI Runtime / Agent 基础设施平台**：桌面端可通过内嵌 WebView 的本地应用窗口运行，手机端可通过 APK WebView 运行；本机 FastAPI 后端把 LLM 网关（含 OpenAI 兼容 `/v1`）、多 Agent DAG 运行时、本地向量 RAG、工具调用运行时、链路可观测性（`/metrics`、`/healthz`）和端云模型路由组装成一个可私有化、多端运行、可观测、可扩展的 Agentic AI 系统。
+
+## 分层架构
+
+```
+Client Layer        Web UI / PWA · Desktop WebView · Android APK
+      │  HTTP · NDJSON · SSE · OpenAI /v1
+Local AI Runtime    FastAPI: Auth · Streaming · /v1/chat · /healthz · /metrics
+      │
+  ┌───┴───────────────┬───────────────────┐
+LLM Gateway        Agent DAG Runtime     Tool Runtime
++ Model Router                           + Sandbox
+  └───┬───────────────┴───────────────────┘
+      │
+Local Data & Observability   Vector RAG · Memory · Trace · Semantic Cache · Request Queue
+```
+
+后端代码按基础设施分层组织在 `deepseek_infra/` 下：
+
+- `infra/gateway/` — **LLM Gateway**：模型路由、Prompt Cache 上下文管理（`context_manager`）、网关韧性请求队列（`resiliency`）、端云路由（`edge_inference`）、语义缓存（`semantic_cache`）、OpenAI 兼容门面（`openai_api`，`/v1/chat/completions` + `/v1/models`）。
+- `infra/agent_runtime/` — **Agent DAG Runtime**：`multi_agent` 编排 + `agent_runs` 持久化 / 断线重放。
+- `infra/rag/` — **Local RAG Data Layer**：`local_rag` 向量索引、`files` 解析分块、`context_compressor`。
+- `infra/tool_runtime/` — **Tool Calling Runtime**：`tools` 注册执行 + `search` / `ocr` / `documents` / `presentations` / `mindmaps` / `generated_files` / `slides_skill`。
+- `infra/observability/` — **Observability**：`observability`（trace/span）+ `metrics`（Prometheus `/metrics`）+ `health`（`/healthz`·`/readyz`）。
+- `infra/data/` — **本地存储**：`memory` / `projects` / `reminders`。
+- `core/`、`web/`、`launcher/`、`android_entry.py`、`desktop_app.py` — 配置 / 错误 / 工具、HTTP 运行时、跨端打包入口。
+
+下表按文件列出各模块职责（路径以 `deepseek_infra/infra/` 为前缀，核心/入口层在 `deepseek_infra/` 下）。
 
 ## 模块划分
 
 | 模块 | 职责 |
 | --- | --- |
 | `app.py` | 兼容启动入口，保留 `python app.py` 的使用方式。 |
-| `deepseek_mobile/app.py` | 进程启动、日志、MIME 注册、缓存清理和 HTTP 服务绑定。 |
-| `deepseek_mobile/web/server.py` | HTTP 路由、本地 token 鉴权、流式 multipart 解析、JSON/NDJSON 响应和静态文件服务。 |
-| `deepseek_mobile/services/deepseek_client.py` | 请求校验、记忆/搜索编排、Prompt 组装、DeepSeek 同步和流式调用。 |
-| `deepseek_mobile/services/edge_inference.py` | 端侧推理基础设施：可选加载 llama.cpp / MLC-LLM 后端，管理 GGUF / MLC 模型路径、上下文窗口、量化诊断、懒加载卸载和简单任务端云路由判定。 |
-| `deepseek_mobile/services/multi_agent.py` | Leader + 多 Agent 编排：任务拆解、worker 并行调用、搜索预算共享和最终综合。 |
-| `deepseek_mobile/services/agent_runs.py` | 持久化 Agent Run、indexed event log、派生快照、断线重连游标、后台 run registry、计划确认和重跑。 |
-| `deepseek_mobile/services/observability.py` | 本地可观测性：SQLite trace run/span 存储、输入/输出摘要脱敏、耗时、usage、prompt cache 命中率和 trace 查询 API。 |
-| `deepseek_mobile/services/semantic_cache.py` | 本地语义缓存：复用 Local RAG embedding 管线，把可缓存 prompt/response 写入 `.semantic-cache/cache.sqlite3`，在 DeepSeek API 前做相似度命中。 |
-| `deepseek_mobile/services/context_manager.py` | API 网关 Context Manager：稳定 JSON 序列化、固定工具定义顺序、在已有摘要时执行滑动窗口裁剪，并输出 prompt cache 友好的请求诊断。 |
-| `deepseek_mobile/services/resiliency.py` | API 网关韧性层：用 `.request-queue/queue.sqlite3` 记录上游请求队列项，对断网、超时、429 和网关类 5xx 做退避重试，并汇总 `gatewayResiliency` 诊断。 |
-| `deepseek_mobile/services/chat_payload.py` | 前端消息展开和附件计数。 |
-| `deepseek_mobile/services/context_compressor.py` | 长对话的增量上下文摘要生成。 |
-| `deepseek_mobile/services/memory.py` | 本地长期记忆 CRUD、作用域过滤、检索排序、显式“记住/忘记”命令解析、记忆建议和冲突检测。 |
-| `deepseek_mobile/services/local_rag.py` | 本地 RAG 数据层：SQLite / 可选 sqlite-vec 索引、哈希或 ONNX embedding、文件 chunk 与长期记忆同步、状态诊断和重建索引。 |
-| `deepseek_mobile/services/reminders.py` | 本地提醒队列、到期查询和轻量中文提醒解析。 |
-| `deepseek_mobile/services/projects.py` | 持久项目空间、项目元数据、项目文档库写入和删除。 |
-| `deepseek_mobile/services/search.py` | 搜索触发、多轮 Tavily 查询、结果聚合、缓存和 Prompt 格式化。 |
-| `deepseek_mobile/services/tools.py` | DeepSeek function calling 本地工具：受限数学计算、缓存文件搜索、公共网页二次精读、提醒、记忆、项目文件、数据转换、图表规格、PPT 生成、Word/PDF 文档生成、SVG 思维导图生成、多查询搜索对比和长期记忆建议。 |
-| `deepseek_mobile/services/presentations.py` | 本地 `.pptx` 生成：`create_pptx` 工具用 `python-pptx` 生成真实 PowerPoint 文件，普通模型漏调工具时可从文本大纲兜底生成；渲染器会自动加入目录页并选择卡片、流程、对比、观点、总结等版式。 |
-| `deepseek_mobile/services/documents.py` | 本地 `.docx` / `.pdf` 生成：`create_document` 工具用 `python-docx` / `reportlab`（内置中文 CID 字体，无需附带字体文件）把结构化章节渲染成排版精美的 Word 或 PDF，支持标题块、分章节编号、正文段落、要点、表格、页码与按标题哈希确定的配色主题。 |
-| `deepseek_mobile/services/mindmaps.py` | 本地 `.svg` 思维导图生成：`create_mindmap` 工具把模型给出的树状节点渲染成「分组流程图」式 SVG——顶层节点作为带标题的彩色容器（类似 Mermaid subgraph），容器内后代自上而下、用实心箭头连接的圆角卡片，并复用统一下载链路。 |
-| `deepseek_mobile/services/generated_files.py` | 跨格式生成文件的统一生命周期：随机 id 落盘、按后缀解析下载路径（防目录遍历）、MIME 映射、过期清理与“另存到下载目录”，被 `presentations`、`documents` 与 `mindmaps` 共用。 |
-| `deepseek_mobile/services/slides_skill.py` | 用户提供的 `slides` skill 参考文本与运行时路由提示，只在 PPT/幻灯片意图命中时注入本轮上下文。 |
-| `deepseek_mobile/services/files.py` | 文件文本抽取、分块、缓存和附件上下文检索；并为豆包式文档阅读工作台提供原文件原样返回、PDF 逐页 PNG 渲染（PyMuPDF，回退 pdf2image）、按页文字坐标层、分页文本和跨页关键字搜索。 |
-| `deepseek_mobile/services/ocr.py` | 可选 OCR：优先用 DeepSeek API 直接转写图片；API 不可用时再回退到 Android ML Kit、Windows OCR、Tesseract 或本地公式 OCR；支持扫描 PDF 转图识别和图片文字识别。 |
-| `deepseek_mobile/core/config.py` | 不可变设置、环境变量解析、兼容常量和 JSON 日志。 |
-| `deepseek_mobile/core/errors.py` | `AppError` 和稳定 API 错误码。 |
-| `deepseek_mobile/core/utils.py` | 模型名、评分、文件名、时间戳、token URL 和局域网 IP 工具函数。 |
-| `deepseek_mobile/desktop_app.py` | Windows 本地桌面应用壳：启动本机 HTTP 后端，用 `desktop=1` token 入口完成 WebView Cookie 握手，并用 pywebview 打开内嵌应用窗口。 |
-| `deepseek_mobile/android_entry.py` | Android APK 的 Chaquopy 桥接层：设置应用私有数据目录，启动/停止本机 Python HTTP 服务，并把带 token 的 WebView URL 返回给原生 Activity。 |
+| `deepseek_infra/app.py` | 进程启动、日志、MIME 注册、缓存清理和 HTTP 服务绑定。 |
+| `deepseek_infra/web/server.py` | HTTP 路由、本地 token 鉴权、流式 multipart 解析、JSON/NDJSON 响应和静态文件服务。 |
+| `deepseek_infra/infra/gateway/deepseek_client.py` | 请求校验、记忆/搜索编排、Prompt 组装、DeepSeek 同步和流式调用。 |
+| `deepseek_infra/infra/gateway/edge_inference.py` | 端侧推理基础设施：可选加载 llama.cpp / MLC-LLM 后端，管理 GGUF / MLC 模型路径、上下文窗口、量化诊断、懒加载卸载和简单任务端云路由判定。 |
+| `deepseek_infra/infra/agent_runtime/multi_agent.py` | Leader + 多 Agent 编排：任务拆解、worker 并行调用、搜索预算共享和最终综合。 |
+| `deepseek_infra/infra/agent_runtime/agent_runs.py` | 持久化 Agent Run、indexed event log、派生快照、断线重连游标、后台 run registry、计划确认和重跑。 |
+| `deepseek_infra/infra/observability/observability.py` | 本地可观测性：SQLite trace run/span 存储、输入/输出摘要脱敏、耗时、usage、prompt cache 命中率和 trace 查询 API。 |
+| `deepseek_infra/infra/gateway/semantic_cache.py` | 本地语义缓存：复用 Local RAG embedding 管线，把可缓存 prompt/response 写入 `.semantic-cache/cache.sqlite3`，在 DeepSeek API 前做相似度命中。 |
+| `deepseek_infra/infra/gateway/context_manager.py` | API 网关 Context Manager：稳定 JSON 序列化、固定工具定义顺序、在已有摘要时执行滑动窗口裁剪，并输出 prompt cache 友好的请求诊断。 |
+| `deepseek_infra/infra/gateway/resiliency.py` | API 网关韧性层：用 `.request-queue/queue.sqlite3` 记录上游请求队列项，对断网、超时、429 和网关类 5xx 做退避重试，并汇总 `gatewayResiliency` 诊断。 |
+| `deepseek_infra/infra/gateway/chat_payload.py` | 前端消息展开和附件计数。 |
+| `deepseek_infra/infra/rag/context_compressor.py` | 长对话的增量上下文摘要生成。 |
+| `deepseek_infra/infra/data/memory.py` | 本地长期记忆 CRUD、作用域过滤、检索排序、显式“记住/忘记”命令解析、记忆建议和冲突检测。 |
+| `deepseek_infra/infra/rag/local_rag.py` | 本地 RAG 数据层：SQLite / 可选 sqlite-vec 索引、哈希或 ONNX embedding、文件 chunk 与长期记忆同步、状态诊断和重建索引。 |
+| `deepseek_infra/infra/data/reminders.py` | 本地提醒队列、到期查询和轻量中文提醒解析。 |
+| `deepseek_infra/infra/data/projects.py` | 持久项目空间、项目元数据、项目文档库写入和删除。 |
+| `deepseek_infra/infra/tool_runtime/search.py` | 搜索触发、多轮 Tavily 查询、结果聚合、缓存和 Prompt 格式化。 |
+| `deepseek_infra/infra/tool_runtime/tools.py` | DeepSeek function calling 本地工具：受限数学计算、缓存文件搜索、公共网页二次精读、提醒、记忆、项目文件、数据转换、图表规格、PPT 生成、Word/PDF 文档生成、SVG 思维导图生成、多查询搜索对比和长期记忆建议。 |
+| `deepseek_infra/infra/tool_runtime/presentations.py` | 本地 `.pptx` 生成：`create_pptx` 工具用 `python-pptx` 生成真实 PowerPoint 文件，普通模型漏调工具时可从文本大纲兜底生成；渲染器会自动加入目录页并选择卡片、流程、对比、观点、总结等版式。 |
+| `deepseek_infra/infra/tool_runtime/documents.py` | 本地 `.docx` / `.pdf` 生成：`create_document` 工具用 `python-docx` / `reportlab`（内置中文 CID 字体，无需附带字体文件）把结构化章节渲染成排版精美的 Word 或 PDF，支持标题块、分章节编号、正文段落、要点、表格、页码与按标题哈希确定的配色主题。 |
+| `deepseek_infra/infra/tool_runtime/mindmaps.py` | 本地 `.svg` 思维导图生成：`create_mindmap` 工具把模型给出的树状节点渲染成「分组流程图」式 SVG——顶层节点作为带标题的彩色容器（类似 Mermaid subgraph），容器内后代自上而下、用实心箭头连接的圆角卡片，并复用统一下载链路。 |
+| `deepseek_infra/infra/tool_runtime/generated_files.py` | 跨格式生成文件的统一生命周期：随机 id 落盘、按后缀解析下载路径（防目录遍历）、MIME 映射、过期清理与“另存到下载目录”，被 `presentations`、`documents` 与 `mindmaps` 共用。 |
+| `deepseek_infra/infra/tool_runtime/slides_skill.py` | 用户提供的 `slides` skill 参考文本与运行时路由提示，只在 PPT/幻灯片意图命中时注入本轮上下文。 |
+| `deepseek_infra/infra/rag/files.py` | 文件文本抽取、分块、缓存和附件上下文检索；并为豆包式文档阅读工作台提供原文件原样返回、PDF 逐页 PNG 渲染（PyMuPDF，回退 pdf2image）、按页文字坐标层、分页文本和跨页关键字搜索。 |
+| `deepseek_infra/infra/tool_runtime/ocr.py` | 可选 OCR：优先用 DeepSeek API 直接转写图片；API 不可用时再回退到 Android ML Kit、Windows OCR、Tesseract 或本地公式 OCR；支持扫描 PDF 转图识别和图片文字识别。 |
+| `deepseek_infra/core/config.py` | 不可变设置、环境变量解析、兼容常量和 JSON 日志。 |
+| `deepseek_infra/core/errors.py` | `AppError` 和稳定 API 错误码。 |
+| `deepseek_infra/core/utils.py` | 模型名、评分、文件名、时间戳、token URL 和局域网 IP 工具函数。 |
+| `deepseek_infra/desktop_app.py` | Windows 本地桌面应用壳：启动本机 HTTP 后端，用 `desktop=1` token 入口完成 WebView Cookie 握手，并用 pywebview 打开内嵌应用窗口。 |
+| `deepseek_infra/android_entry.py` | Android APK 的 Chaquopy 桥接层：设置应用私有数据目录，启动/停止本机 Python HTTP 服务，并把带 token 的 WebView URL 返回给原生 Activity。 |
 | `android/` | Android Studio / Gradle 工程：原生 WebView 壳、Chaquopy 打包配置、Android 权限和 APK 资源。 |
 
 前端使用原生 ES modules，不引入打包工具。`static/app.js` 只负责启动 `static/modules/chat.js`；`network.js` 处理 token、认证头、API 请求和上传；`markdown.js` 处理 Markdown、代码块和公式 glue；`settings.js` 放 PWA 注册等设置侧辅助；`panels.js` 放跨面板纯工具。v0.8.2 起，图表、朗读文本、流式解析、格式化、规范化和提醒短语解析等纯函数拆到独立模块，索引见 `docs/FRONTEND_MODULES.md`。`math_core.js` 和 `seek_core.js` 仍以全局 IIFE 方式加载，避免扩大迁移面。
@@ -103,7 +130,7 @@ v1.8.0 在 `deepseek_client` 与真实 `urlopen` 之间加入 API 网关层。`c
 
 稳定 Prompt 前缀会尽量保持小而固定。首个 system message 只放角色提示和通用工具提示；`contextSummary`、长期记忆、当前本地/UTC 时间、搜索工具提示、搜索结果和继续生成上下文都会作为本轮尾部 dynamic system message 追加。这样打开/关闭搜索、刷新搜索结果或时间变化时，只会影响尾部动态块，不会让前面的长历史从 system message 后就全部 cache miss。
 
-v1.6.3 将 Windows exe 的默认路径改为 `deepseek_mobile/desktop_app.py`：入口先在当前进程启动 `127.0.0.1` 本机 HTTP 后端，再用 pywebview 打开内嵌应用窗口。v1.6.6 的 `webview_entry_url()` 会给 token URL 追加 `desktop=1`，服务端验证后直接返回首页并写入 Cookie，避免 WebView 在 302 跳转中丢认证；旧图形启动器仍通过 `--gui` 保留，纯后端模式仍通过 `--server` 保留给打包验证和内部启动。v1.6.0 新增手机本机启动路径：`deepseek_mobile/launcher/mobile.py` 在导入后端配置前先解析手机控制台参数和环境变量，随后调用 `prepare_and_start(host, port, serve=False)` 复用同一个 HTTP 服务；`launch.py` 在检测到 Android/Termux/Pydroid 环境时自动走该控制台启动器。手机模式不导入 `gui.py`，因此不依赖 Tk 或 `customtkinter`。v1.5.1 继续收紧前端交互底座：Activity 面板复制 Agent 过程只走事件委托，避免重复触发；Escape 会统一关闭当前可见的工作台面板；焦点陷阱改为栈式管理，确认框叠在设置、项目、搜索或 Activity 面板上时，关闭后仍能恢复到底层面板的键盘焦点循环。
+v1.6.3 将 Windows exe 的默认路径改为 `deepseek_infra/desktop_app.py`：入口先在当前进程启动 `127.0.0.1` 本机 HTTP 后端，再用 pywebview 打开内嵌应用窗口。v1.6.6 的 `webview_entry_url()` 会给 token URL 追加 `desktop=1`，服务端验证后直接返回首页并写入 Cookie，避免 WebView 在 302 跳转中丢认证；旧图形启动器仍通过 `--gui` 保留，纯后端模式仍通过 `--server` 保留给打包验证和内部启动。v1.6.0 新增手机本机启动路径：`deepseek_infra/launcher/mobile.py` 在导入后端配置前先解析手机控制台参数和环境变量，随后调用 `prepare_and_start(host, port, serve=False)` 复用同一个 HTTP 服务；`launch.py` 在检测到 Android/Termux/Pydroid 环境时自动走该控制台启动器。手机模式不导入 `gui.py`，因此不依赖 Tk 或 `customtkinter`。v1.5.1 继续收紧前端交互底座：Activity 面板复制 Agent 过程只走事件委托，避免重复触发；Escape 会统一关闭当前可见的工作台面板；焦点陷阱改为栈式管理，确认框叠在设置、项目、搜索或 Activity 面板上时，关闭后仍能恢复到底层面板的键盘焦点循环。
 
 ## 对话与生产力
 

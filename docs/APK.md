@@ -1,11 +1,11 @@
 # Android APK 打包说明
 
-适用版本：v1.8.1。
+适用版本：v2.0.0。
 
-本仓库现在包含 `android/` Android Studio 工程，可把 DeepSeek Mobile 打包成手机上直接运行的 APK。APK 的结构是：
+本仓库现在包含 `android/` Android Studio 工程，可把 DeepSeek Infra 打包成手机上直接运行的 APK。APK 的结构是：
 
 - Android 原生 `MainActivity` 负责启动 WebView、文件选择器和外链跳转。
-- Chaquopy 在 APK 内嵌 Python 3.13 运行 `deepseek_mobile` 后端；项目代码仍保持 Python 3.10+ 兼容。
+- Chaquopy 在 APK 内嵌 Python 3.13 运行 `deepseek_infra` 后端；项目代码仍保持 Python 3.10+ 兼容。
 - Python 后端只监听 `127.0.0.1:8000`，WebView 打开带 token 的本机地址。
 - `.auth-token`、文件缓存、记忆、项目、Agent Run、trace 和语义缓存写入 Android 应用私有目录，不会写到 APK 只读资源区。
 - v1.8.0 的 API 网关请求队列写入 Android 应用私有目录下的 `.request-queue/queue.sqlite3`，用于网络切换、后台等待和 DeepSeek 网关类错误的退避重试状态记录。

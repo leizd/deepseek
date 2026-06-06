@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from deepseek_mobile.services import reminders
+from deepseek_infra.infra.data import reminders
 
 
 def test_create_and_mark_due_reminder(tmp_settings) -> None:

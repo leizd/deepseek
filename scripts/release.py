@@ -1,4 +1,4 @@
-"""Build a privacy-safe DeepSeek Mobile release zip."""
+"""Build a privacy-safe DeepSeek Infra release zip."""
 
 from __future__ import annotations
 
@@ -115,7 +115,7 @@ def main() -> int:
     args = parse_args()
     version = args.version
     if not version:
-        from deepseek_mobile.core.config import settings
+        from deepseek_infra.core.config import settings
 
         version = settings.app_version
     root = args.root.resolve()

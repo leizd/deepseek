@@ -7,18 +7,18 @@ from unittest.mock import patch
 
 import pytest
 
-import deepseek_mobile.core.config as config
-import deepseek_mobile.services.files as files
-import deepseek_mobile.services.agent_runs as agent_runs
-import deepseek_mobile.services.memory as memory
-import deepseek_mobile.services.local_rag as local_rag
-import deepseek_mobile.services.observability as observability
-import deepseek_mobile.services.projects as projects
-import deepseek_mobile.services.reminders as reminders
-import deepseek_mobile.services.search as search
-import deepseek_mobile.services.resiliency as resiliency
-import deepseek_mobile.services.semantic_cache as semantic_cache
-import deepseek_mobile.services.tools as tools
+import deepseek_infra.core.config as config
+import deepseek_infra.infra.rag.files as files
+import deepseek_infra.infra.agent_runtime.agent_runs as agent_runs
+import deepseek_infra.infra.data.memory as memory
+import deepseek_infra.infra.rag.local_rag as local_rag
+import deepseek_infra.infra.observability.observability as observability
+import deepseek_infra.infra.data.projects as projects
+import deepseek_infra.infra.data.reminders as reminders
+import deepseek_infra.infra.tool_runtime.search as search
+import deepseek_infra.infra.gateway.resiliency as resiliency
+import deepseek_infra.infra.gateway.semantic_cache as semantic_cache
+import deepseek_infra.infra.tool_runtime.tools as tools
 
 
 @pytest.fixture

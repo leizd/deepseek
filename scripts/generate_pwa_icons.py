@@ -1,4 +1,4 @@
-"""Generate the DeepSeek Mobile PWA icon and favicon assets."""
+"""Generate the DeepSeek Infra PWA icon and favicon assets."""
 
 from __future__ import annotations
 
@@ -119,7 +119,7 @@ def icon_image(size: int, *, maskable: bool = False) -> Image.Image:
 
 def write_svg(path: Path) -> None:
     path.write_text(
-        """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="DeepSeek Mobile">
+        """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="DeepSeek Infra">
   <defs>
     <linearGradient id="bg" x1="74" y1="32" x2="438" y2="480" gradientUnits="userSpaceOnUse">
       <stop stop-color="#315cff"/>

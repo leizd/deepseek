@@ -1,4 +1,4 @@
-"""Bundle the DeepSeek Mobile launcher into a single executable.
+"""Bundle the DeepSeek Infra launcher into a single executable.
 
 Usage:
 
@@ -7,7 +7,7 @@ Usage:
     python scripts/build_exe.py
 
 The resulting ``dist/DeepSeekMobile.exe`` (or ``DeepSeekMobile`` on macOS /
-Linux) bundles ``launch.py``, the entire ``deepseek_mobile`` package, the
+Linux) bundles ``launch.py``, the entire ``deepseek_infra`` package, the
 ``static`` web assets, and KaTeX fonts. The same exe opens the local desktop
 app window by default, can launch the legacy GUI with ``--gui``, or run as the
 HTTP server with ``--server``.

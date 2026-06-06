@@ -4,7 +4,7 @@ import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
-import deepseek_mobile.app as app_module
+import deepseek_infra.app as app_module
 
 
 def test_startup_structured_log_redacts_token_urls() -> None:
