@@ -161,9 +161,16 @@ class GatewaySettings:
 
 
 @dataclass(frozen=True, slots=True)
+class OllamaSettings:
+    enabled: bool = False
+    base_url: str = "http://127.0.0.1:11434"
+    timeout_seconds: int = 120
+
+
+@dataclass(frozen=True, slots=True)
 class Settings:
     root: Path = ROOT
-    app_version: str = "2.0.0"
+    app_version: str = "2.0.1"
     deepseek_url: str = "https://api.deepseek.com/chat/completions"
     tavily_url: str = "https://api.tavily.com/search"
     deepseek_timeout_seconds: int = 180
@@ -222,6 +229,7 @@ class Settings:
     tracing: TracingSettings = field(default_factory=TracingSettings)
     semantic_cache: SemanticCacheSettings = field(default_factory=SemanticCacheSettings)
     gateway: GatewaySettings = field(default_factory=GatewaySettings)
+    ollama: OllamaSettings = field(default_factory=OllamaSettings)
 
     @property
     def static_dir(self) -> Path:
@@ -385,6 +393,11 @@ class Settings:
                 request_queue_initial_backoff_seconds=_env_float_clamped("GATEWAY_REQUEST_QUEUE_INITIAL_BACKOFF_SECONDS", 2.0, 0.0, 60.0),
                 request_queue_max_backoff_seconds=_env_float_clamped("GATEWAY_REQUEST_QUEUE_MAX_BACKOFF_SECONDS", 120.0, 0.0, 600.0),
             ),
+            ollama=OllamaSettings(
+                enabled=_env_bool("OLLAMA_ENABLED", False),
+                base_url=os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434").strip() or "http://127.0.0.1:11434",
+                timeout_seconds=_env_int_clamped("OLLAMA_TIMEOUT_SECONDS", 120, 5, 1800),
+            ),
         )
 
 
@@ -510,6 +523,9 @@ EDGE_INFERENCE_ENABLED = settings.edge.enabled
 EDGE_INFERENCE_PROVIDER = settings.edge.provider
 EDGE_MODEL_PATH = settings.edge.model_path
 EDGE_MODEL_NAME = settings.edge.model_name
+OLLAMA_ENABLED = settings.ollama.enabled
+OLLAMA_BASE_URL = settings.ollama.base_url
+OLLAMA_TIMEOUT_SECONDS = settings.ollama.timeout_seconds
 LOCAL_RAG_ENABLED = settings.local_rag.enabled
 LOCAL_RAG_BACKEND = settings.local_rag.backend
 LOCAL_RAG_EMBEDDING_PROVIDER = settings.local_rag.embedding_provider

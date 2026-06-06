@@ -1,6 +1,6 @@
 # DeepSeek Infra
 
-![版本](https://img.shields.io/badge/version-2.0.0-blue)
+![版本](https://img.shields.io/badge/version-2.0.1-blue)
 ![Python](https://img.shields.io/badge/python-3.10%2B-green)
 ![许可证](https://img.shields.io/badge/license-MIT-black)
 
@@ -125,6 +125,7 @@ curl http://127.0.0.1:8000/v1/models -H "Authorization: Bearer <本地访问 tok
 
 - `POST /v1/chat/completions`：支持 `stream` 流式（标准 `chat.completion.chunk` SSE + `[DONE]`）与非流式（`chat.completion`）。
 - `GET /v1/models`：列出可用模型（`deepseek-v4-pro` / `deepseek-v4-flash`）。
+- **多 Provider**：启用 Ollama（`OLLAMA_ENABLED=1`）后，`/v1/models` 会额外列出 `ollama/<本地模型>`，请求该模型即走本地 Ollama；DeepSeek 专属的工具 / 搜索 / 多 Agent 仍只在 DeepSeek 模型上可用。
 - 完整字段见 [docs/API.md](docs/API.md)。
 
 ## 运维端点
@@ -233,6 +234,7 @@ gradle :app:assembleDebug
 - `TAVILY_TIMEOUT_SECONDS`：Tavily 搜索请求超时，默认 `45`。
 - `UPLOAD_FILE_MAX_BYTES` / `UPLOAD_MAX_BYTES`：单文件 / 单次请求体上限，默认 `200000000` / `220000000`。
 - `EDGE_INFERENCE_ENABLED=1` / `EDGE_INFERENCE_PROVIDER` / `EDGE_MODEL_PATH`：可选的本地端侧推理开关、后端与 GGUF 模型路径，详见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+- `OLLAMA_ENABLED=1` / `OLLAMA_BASE_URL` / `OLLAMA_TIMEOUT_SECONDS`：可选的本地 Ollama provider 开关、地址（默认 `http://127.0.0.1:11434`）与超时；启用后本地模型经 `/v1` 网关以 `ollama/<tag>` 暴露。
 
 ## 安装与依赖
 

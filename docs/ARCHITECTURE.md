@@ -1,6 +1,6 @@
 # 架构说明
 
-适用版本：v2.0.0。
+适用版本：v2.0.1。
 
 DeepSeek Infra 是一个本地优先的 **AI Runtime / Agent 基础设施平台**：桌面端可通过内嵌 WebView 的本地应用窗口运行，手机端可通过 APK WebView 运行；本机 FastAPI 后端把 LLM 网关（含 OpenAI 兼容 `/v1`）、多 Agent DAG 运行时、本地向量 RAG、工具调用运行时、链路可观测性（`/metrics`、`/healthz`）和端云模型路由组装成一个可私有化、多端运行、可观测、可扩展的 Agentic AI 系统。
 
@@ -21,7 +21,7 @@ Local Data & Observability   Vector RAG · Memory · Trace · Semantic Cache · 
 
 后端代码按基础设施分层组织在 `deepseek_infra/` 下：
 
-- `infra/gateway/` — **LLM Gateway**：模型路由、Prompt Cache 上下文管理（`context_manager`）、网关韧性请求队列（`resiliency`）、端云路由（`edge_inference`）、语义缓存（`semantic_cache`）、OpenAI 兼容门面（`openai_api`，`/v1/chat/completions` + `/v1/models`）。
+- `infra/gateway/` — **LLM Gateway**：模型路由、Prompt Cache 上下文管理（`context_manager`）、网关韧性请求队列（`resiliency`）、端云路由（`edge_inference`）、语义缓存（`semantic_cache`）、OpenAI 兼容门面（`openai_api`，`/v1/chat/completions` + `/v1/models`）、多 Provider 抽象（`providers/`：`BaseLLMProvider` + `DeepSeekProvider` / `OllamaProvider` + `registry` 路由）。
 - `infra/agent_runtime/` — **Agent DAG Runtime**：`multi_agent` 编排 + `agent_runs` 持久化 / 断线重放。
 - `infra/rag/` — **Local RAG Data Layer**：`local_rag` 向量索引、`files` 解析分块、`context_compressor`。
 - `infra/tool_runtime/` — **Tool Calling Runtime**：`tools` 注册执行 + `search` / `ocr` / `documents` / `presentations` / `mindmaps` / `generated_files` / `slides_skill`。
