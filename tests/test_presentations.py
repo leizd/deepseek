@@ -120,6 +120,27 @@ class PresentationTests(unittest.TestCase):
         self.assertEqual(slides[0]["title"], "什么是版本控制？")
         self.assertGreaterEqual(len(slides), 3)
 
+    def test_outline_text_accepts_markdown_and_chinese_slide_variants(self) -> None:
+        slides = slides_from_outline_text(
+            """
+            ## PPT 大纲
+            **幻灯片 1：封面**
+            - AI 产品路线图
+            幻灯片 2：市场背景
+            1、用户需要更快的原型验证
+            2、团队需要统一交付节奏
+            ## 解决方案
+            建立从需求到演示的自动化生成流程
+            - 保留人工编辑入口
+            """,
+            topic="AI 产品路线图",
+        )
+
+        self.assertEqual([slide["title"] for slide in slides[:2]], ["市场背景", "解决方案"])
+        self.assertEqual(slides[0]["bullets"][:2], ["用户需要更快的原型验证", "团队需要统一交付节奏"])
+        self.assertIn("建立从需求到演示的自动化生成流程", slides[1]["bullets"])
+        self.assertIn("保留人工编辑入口", slides[1]["bullets"])
+
 
 if __name__ == "__main__":
     unittest.main()

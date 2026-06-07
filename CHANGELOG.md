@@ -2,6 +2,17 @@
 
 本项目使用类似 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的分组方式维护变更记录。未发布内容记录在 `[Unreleased]`，正式发版时迁移到具体版本。
 
+## [2.0.2]
+
+### 改进
+
+- **PPT 大纲解析增强**（移植自 `main` 分支的「优化PPT制作流程」提交，叠加在 release 线已有的版式系统之上、互不冲突）：`slides_from_outline_text` 现在能识别更多模型输出形态——`**加粗**` 包裹的页头、`幻灯片 / 页面 / 页 / 张` 多种中文页头、Markdown `##` / `###` 标题作为页标题、`1、` 中文编号正文行，并过滤「PPT 大纲 / 演示文稿大纲」这类元标题，减少模型只返回大纲时的误拆页与漏内容。新增 `_outline_slide_title` / `_looks_like_body_line` / `_looks_like_numbered_body_line` / `_MARKDOWN_SLIDE_HEADING_RE` / `_OUTLINE_META_TITLE_RE`，并放宽 `_OUTLINE_HEADING_RE` / `_BULLET_RE`。
+
+### 测试
+
+- `tests/test_presentations.py` 新增 `test_outline_text_accepts_markdown_and_chinese_slide_variants`，覆盖 Markdown 标题、`幻灯片 N：`、`1、` 编号正文与元标题过滤。
+- 版本号 2.0.1 → 2.0.2（纯后端改动，`static/sw.js` 保持 `deepseek-mobile-v182` 不变）。
+
 ## [2.0.1]
 
 ### 新增
