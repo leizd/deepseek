@@ -35,11 +35,17 @@ __all__ = [
 MAX_SLIDES = 60
 MAX_BULLETS_PER_SLIDE = 24
 _OUTLINE_HEADING_RE = re.compile(
-    r"^\s*(?:#{1,4}\s*)?(?:(?:第\s*)?\d{1,2}\s*[页、.．):：-]|slide\s+\d{1,2}\s*[:：.-])\s*(.+?)\s*$",
+    r"^\s*(?:#{1,4}\s*)?(?:\*\*)?\s*"
+    r"(?:(?:第\s*)?\d{1,2}\s*(?:页|张)?\s*[、.．):：-]|(?:幻灯片|页面|页|slide)\s*\d{1,2}\s*[、.．):：-]?)"
+    r"\s*(.+?)\s*(?:\*\*)?\s*$",
     flags=re.IGNORECASE,
 )
-_BULLET_RE = re.compile(r"^\s*(?:[-*•·]|[（(]?[a-zA-Z][）)]|[（(]?\d{1,2}[）)])\s+(.+?)\s*$")
+_MARKDOWN_SLIDE_HEADING_RE = re.compile(r"^\s*#{2,4}\s+(.+?)\s*$")
+_BULLET_RE = re.compile(
+    r"^\s*(?:[-*•·]\s+|[（(]?[a-zA-Z][）).、]\s*|[（(]?\d{1,2}[）)]\s*|\d{1,2}[、.．)]\s*)(.+?)\s*$"
+)
 _REFUSAL_RE = re.compile(r"(?:无法|不能|没有.*能力|只能|可以帮.*大纲|不能直接|无法直接)")
+_OUTLINE_META_TITLE_RE = re.compile(r"(?:ppt|powerpoint|presentation|幻灯片|演示文稿).{0,12}大纲|^大纲$", re.IGNORECASE)
 
 
 def _normalize_bullets(item: dict[str, Any]) -> list[str]:
@@ -92,9 +98,15 @@ def slides_from_outline_text(outline: str, *, topic: str = "") -> list[dict[str,
         line = raw_line.strip()
         if not line or line.startswith("```"):
             continue
-        heading = _OUTLINE_HEADING_RE.match(line)
-        if heading:
-            title = _clean_outline_title(heading.group(1))
+        if current is not None and _looks_like_numbered_body_line(line):
+            bullet = _BULLET_RE.match(line)
+            if bullet:
+                text = _clean_outline_bullet(bullet.group(1))
+                if text and not _REFUSAL_RE.search(text):
+                    current["bullets"].append(text)
+                continue
+        title = _outline_slide_title(line, has_slides=bool(slides))
+        if title is not None:
             if not title or _REFUSAL_RE.search(title):
                 continue
             current = {"title": title, "bullets": []}
@@ -110,6 +122,10 @@ def slides_from_outline_text(outline: str, *, topic: str = "") -> list[dict[str,
         elif raw_line.startswith((" ", "\t")):
             text = _clean_outline_bullet(line)
             if text and not _REFUSAL_RE.search(text):
+                current["bullets"].append(text)
+        else:
+            text = _clean_outline_bullet(line)
+            if _looks_like_body_line(text) and not _REFUSAL_RE.search(text):
                 current["bullets"].append(text)
 
     slides = _drop_duplicate_cover_slide(slides, topic)
@@ -138,6 +154,20 @@ def _outline_relevant_tail(text: str) -> str:
     return text[best:] if best >= 0 else text
 
 
+def _outline_slide_title(line: str, *, has_slides: bool) -> str | None:
+    heading = _OUTLINE_HEADING_RE.match(line)
+    if heading:
+        return _clean_outline_title(heading.group(1))
+
+    markdown_heading = _MARKDOWN_SLIDE_HEADING_RE.match(line)
+    if not markdown_heading:
+        return None
+    title = _clean_outline_title(markdown_heading.group(1))
+    if not has_slides and _OUTLINE_META_TITLE_RE.search(title):
+        return None
+    return title
+
+
 def _clean_outline_title(value: object) -> str:
     text = str(value or "").strip().strip("#*`-—:：.。 ")
     text = re.sub(r"^(?:标题|页面|幻灯片|Slide)\s*[:：-]\s*", "", text, flags=re.IGNORECASE)
@@ -148,6 +178,20 @@ def _clean_outline_title(value: object) -> str:
 def _clean_outline_bullet(value: object) -> str:
     text = str(value or "").strip().strip("-*•· ")
     return text[:500].strip()
+
+
+def _looks_like_body_line(text: str) -> bool:
+    if not text:
+        return False
+    if _OUTLINE_META_TITLE_RE.search(text):
+        return False
+    if text.startswith(("```", "|")):
+        return False
+    return len(text) <= 240
+
+
+def _looks_like_numbered_body_line(line: str) -> bool:
+    return bool(re.match(r"^\s*(?:\d{1,2}[、)]|[（(]\d{1,2}[）)])", str(line or "")))
 
 
 def _normalize_topic_name(value: str) -> str:
