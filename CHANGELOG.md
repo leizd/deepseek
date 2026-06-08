@@ -2,7 +2,7 @@
 
 本项目使用类似 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的分组方式维护变更记录。未发布内容记录在 `[Unreleased]`，正式发版时迁移到具体版本。
 
-## [2.0.9]
+## [2.0.10]
 
 ### 新增
 
@@ -21,9 +21,9 @@
 ### 测试
 
 - 新增 `tests/test_budget_manager.py`（9 项）：按模型定价的费用估算、BudgetPolicy 解析、ToolBudget 限额、TokenBudget per-agent、每日账本累计与 scope 隔离、超预算/降级判定、`build_deepseek_request` 超预算降级、`call_deepseek` 记账与 `costUsd`、budget status。
-- 版本号 2.0.8 → 2.0.9（config / README badge / 5 docs / test_config / test_encoding_regression 新增 `test_v209_cost_and_token_budget_manager_is_present`）。前端有改动，Service Worker 缓存版本 `deepseek-mobile-v184` → `deepseek-mobile-v185`。
+- 版本号 2.0.9 → 2.0.10（config / README badge / 5 docs / test_config / test_encoding_regression 新增 `test_v210_cost_and_token_budget_manager_is_present`）。前端有改动，Service Worker 缓存版本 `deepseek-mobile-v184` → `deepseek-mobile-v185`。
 
-## [2.0.8]
+## [2.0.9]
 
 ### 新增
 
@@ -41,9 +41,9 @@
 ### 测试
 
 - 新增 `tests/test_model_router.py`（8 项）：显式选模、auto 的延迟/能力/成本路由、质量门控（过短/拒答/不确定/引用不足）、`build_deepseek_request` auto 选模 + `modelRouter` 诊断、cascade 草稿通过/升级/未请求回退。
-- 版本号 2.0.7 → 2.0.8（config / README badge / 5 docs / test_config / test_encoding_regression 新增 `test_v208_model_router_and_cascade_are_present`）。前端有改动，Service Worker 缓存版本 `deepseek-mobile-v183` → `deepseek-mobile-v184`（保留前缀）。
+- 版本号 2.0.8 → 2.0.9（config / README badge / 5 docs / test_config / test_encoding_regression 新增 `test_v209_model_router_and_cascade_are_present`）。前端有改动，Service Worker 缓存版本 `deepseek-mobile-v183` → `deepseek-mobile-v184`（保留前缀）。
 
-## [2.0.7]
+## [2.0.8]
 
 ### 新增
 
@@ -62,9 +62,9 @@
 ### 测试
 
 - `tests/test_local_rag.py` 新增 6 项：BM25 词法排序、chunk lineage（hash/page/offset/docVersion）、增量索引跳过未变文档、未变 chunk 复用向量、引用真实性校验（命中/未命中/缺失）、Recall@K 评估。
-- 版本号 2.0.6 → 2.0.7（config / README badge / 5 docs / test_config / test_encoding_regression 新增 `test_v207_local_rag_data_plane_is_present`）。纯后端改动，`static/sw.js` 保持 `deepseek-mobile-v183` 不变。
+- 版本号 2.0.7 → 2.0.8（config / README badge / 5 docs / test_config / test_encoding_regression 新增 `test_v208_local_rag_data_plane_is_present`）。纯后端改动，`static/sw.js` 保持 `deepseek-mobile-v183` 不变。
 
-## [2.0.6]
+## [2.0.7]
 
 ### 新增
 
@@ -83,9 +83,9 @@
 ### 测试
 
 - `tests/test_observability_semantic_cache.py` 新增 4 项：缓存版本隔离、scope 隔离、低质量答案不缓存、文件上下文「精确命中 + 非附件仍走模糊」对照（mock cosine=1.0 验证 exact-only 守卫）。
-- 版本号 2.0.5 → 2.0.6（config / README badge / 5 docs / test_config / test_encoding_regression 新增 `test_v206_semantic_cache_advanced_mechanisms_are_present`）。纯后端改动，`static/sw.js` 保持 `deepseek-mobile-v183` 不变。
+- 版本号 2.0.6 → 2.0.7（config / README badge / 5 docs / test_config / test_encoding_regression 新增 `test_v207_semantic_cache_advanced_mechanisms_are_present`）。纯后端改动，`static/sw.js` 保持 `deepseek-mobile-v183` 不变。
 
-## [2.0.5]
+## [2.0.6]
 
 ### 新增
 
@@ -105,9 +105,9 @@
 
 - 新增 `tests/test_observability_trace_tree.py`（4 项）：`prepare_deepseek_call` 产 `context.build`+`memory.retrieve` 子树、`execute_agent_tier` 把 `llm` span 嵌在 `agent.<id>` 下、`call_deepseek(parent_span_id=...)` 把 deepseek/semantic/context span 挂到指定父 span、单聊路径 span 仍为 run 根直挂。
 - `tests/test_frontend_utils.py` 新增 `buildTraceSpanTree` 用例（嵌套 + dangling/环兜底）。
-- 版本号 2.0.4 → 2.0.5（config / README badge / 5 docs / test_config / test_encoding_regression 新增 `test_v205_agent_trace_span_tree_is_present`）。前端静态资源有改动，Service Worker 缓存版本 `deepseek-mobile-v182` → `deepseek-mobile-v183`（保留 `deepseek-mobile-` 前缀）。
+- 版本号 2.0.5 → 2.0.6（config / README badge / 5 docs / test_config / test_encoding_regression 新增 `test_v206_agent_trace_span_tree_is_present`）。前端静态资源有改动，Service Worker 缓存版本 `deepseek-mobile-v182` → `deepseek-mobile-v183`（保留 `deepseek-mobile-` 前缀）。
 
-## [2.0.4]
+## [2.0.5]
 
 ### 新增
 
@@ -125,9 +125,9 @@
 
 - 新增 `tests/test_agent_state.py`（9 项）：状态机迁移表、created/queued 依赖推导、running→succeeded 指标、失败节点保持未完成、`agent_reset` 重开节点、取消时非终态节点置 cancelled、忽略 leader/synthesizer 编排相、无 plan 快照时纯按事件推导。
 - `tests/test_agent_runs.py` 新增 5 项：`append_event` 持久化 `nodes` 快照、`resume_run` 跳过已成功 / 重跑未完成 + 发 `agent_reset`、全成功无正文时只重新综合、全成功有正文直接 `done`、`resume_orphaned_runs` 受 `AGENT_RUNTIME_AUTO_RESUME` 门控。
-- 版本号 2.0.3 → 2.0.4（config / README badge / 5 docs / test_config / test_encoding_regression 新增 `test_v204_durable_agent_runtime_is_present`）。纯后端改动，`static/sw.js` 保持 `deepseek-mobile-v182` 不变。
+- 版本号 2.0.4 → 2.0.5（config / README badge / 5 docs / test_config / test_encoding_regression 新增 `test_v205_durable_agent_runtime_is_present`）。纯后端改动，`static/sw.js` 保持 `deepseek-mobile-v182` 不变。
 
-## [2.0.3]
+## [2.0.4]
 
 ### 新增
 
@@ -146,7 +146,7 @@
 ### 测试
 
 - 新增 `tests/test_context_engine.py`（15 项）：token 估算与 CJK 加权、分项预算求和、按模型窗口与默认回落、预算阈值（`ok` / `compress` / `trim`）、token 裁剪保留首尾 system 锚点与 `min_keep`、`fixed_overhead` 计入预算、`baseContextId` 跨轮稳定、Context Diff 构成、`manage_request_body` 接入与禁用短路、`build_deepseek_request` 端到端透出 `tokenBudget`。
-- 版本号 2.0.2 → 2.0.3（config / README badge / 5 docs / test_config / test_encoding_regression 新增 `test_v203_context_engine_is_present`）。纯后端改动，`static/sw.js` 保持 `deepseek-mobile-v182` 不变。
+- 版本号 2.0.3 → 2.0.4（config / README badge / 5 docs / test_config / test_encoding_regression 新增 `test_v204_context_engine_is_present`）。纯后端改动，`static/sw.js` 保持 `deepseek-mobile-v182` 不变。
 
 ## [2.0.2]
 
