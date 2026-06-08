@@ -2305,6 +2305,27 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn("costUsd", api)
         self.assertIn("budget_manager.py", architecture)
 
+    def test_v203_slides_skill_quality_upgrade_is_present(self) -> None:
+        slides_skill = Path("deepseek_infra/infra/tool_runtime/slides_skill.py").read_text(encoding="utf-8")
+        presentations = Path("deepseek_infra/infra/tool_runtime/presentations.py").read_text(encoding="utf-8")
+        deepseek_request = Path("tests/test_deepseek_request.py").read_text(encoding="utf-8")
+        changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
+
+        for marker in (
+            "win the contact-sheet test",
+            "noun-swap test",
+            "Blocking anti-patterns",
+        ):
+            self.assertIn(marker, slides_skill)
+        # 与本应用不符的 pptxgenjs / artifact-tool 参考已移除，运行时只剩 create_pptx 边界
+        self.assertNotIn("pptxgenjs", slides_skill)
+        self.assertIn('self.assertIn("contact-sheet", dynamic_context)', deepseek_request)
+        # 渲染器升级：统一 _rule helper 取代散落的描边/盒子，去掉写死英文 kicker 与填充卡片
+        self.assertIn("def _rule(", presentations)
+        self.assertNotIn("Key Points", presentations)
+        self.assertNotIn("F8FAFC", presentations)
+        self.assertIn("## [2.0.3]", changelog)
+
 
 if __name__ == "__main__":
     unittest.main()
