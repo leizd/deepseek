@@ -10,9 +10,14 @@
 .request-queue/
 .budget/
 .tool-audit/
+.scheduler/
 .memory/
 .projects/
 .reminders/
+
+# Eval harness: generated reports (keep the dir + .gitkeep)
+evals/reports/*
+!evals/reports/.gitkeep
 
 .coverage
 .mypy_cache/

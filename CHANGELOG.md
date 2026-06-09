@@ -2,6 +2,36 @@
 
 本项目使用类似 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的分组方式维护变更记录。未发布内容记录在 `[Unreleased]`，正式发版时迁移到具体版本。
 
+## [2.1.2]
+
+### 新增
+
+- **本地请求调度层（Queue / Backpressure / Rate Limit）**：在上游唯一咽喉点前加一层进程内准入控制，让「多个 Agent 同时调模型 / 多工具并发 / 移动端断网 / API 限流 / 用户连续点生成」这些场景优雅降级而不是雪崩。
+  - **调度核心**：新增 `deepseek_infra/infra/gateway/scheduler.py`，`RequestScheduler` 提供 **优先级队列**（交互 > Agent worker > 后台，`priority_for_payload` 按请求 `capability` 推断）、**并发上限**（最大在途请求数）、**令牌桶限流**（`TokenBucket`，requests/sec + burst）、**backpressure**（waiting+in-flight 越过 `max_queue_depth` 即快速 503 卸载而非无界堆积）、**请求取消**（`cancel_checker`）与**准入超时**。准入路径纯内存、无每请求 SQLite 写入，默认配置（`rate_per_second=0` 不限流、并发 16、队列 256）下对正常/测试负载透明。
+  - **Dead Letter Queue + 持久化 + 后台恢复**：耗尽重试的基础设施失败与被 backpressure 卸载的请求落入 `.scheduler/scheduler.sqlite3` 的 DLQ（best-effort、不阻断请求路径）。`recover_orphans()` 在启动时对账既有请求队列：把上次进程崩溃残留的 `running`/`queued` 行标记 `failed` 并 dead-letter（背景恢复）。指数退避重试仍由 `resiliency.open_with_resiliency` 承担。
+  - **准入异常**：`SchedulerOverloaded` / `SchedulerTimeout` 都是 `AppError`（`code=rate_limited`、`status=503`），过载时以干净的 503「服务繁忙」回给用户。
+- **接入 / 端点 / 诊断**：`call_deepseek` 与 `stream_deepseek` 的两处上游调用各包一层 `scheduler.lease(priority, kind)`（流式按整段 SSE 时长持有 lease，并接同一 cancel_checker）。新增 `GET /api/scheduler`（调度快照 + DLQ + 最近死信），`gateway_status()` / `/api/config.gateway` 增补 `scheduler`，每轮 `gatewayResiliency` 诊断增补 `scheduler` 快照（在途/等待/放行/卸载/限流等待/峰值并发）。
+
+### 测试
+
+- 新增 `tests/test_scheduler.py`（16 项）：令牌桶消耗/补充/无限模式、优先级映射、disabled 透传、并发上限串行化、优先级准入顺序、backpressure 卸载（503/rate_limited）、限流节流、准入超时、取消并清理等待者、DLQ 持久化与按原因聚合、lease 在基础设施失败时 dead-letter（客户端错误不入 DLQ）、`recover_orphans` 对账陈旧行、缺库 no-op、状态结构。
+- 版本号 2.1.1 → 2.1.2（config / README badge / 5 docs / test_config / test_encoding_regression 新增 `test_v213_request_scheduler_is_present`）。纯后端改动，无前端变更，`static/sw.js` 保持 `deepseek-mobile-v186` 不变。
+
+## [2.1.1]
+
+### 新增
+
+- **AI Runtime Evaluation Harness（自动化回归评测）**：一个高大上的 AI Infra 项目不能只「能跑」，还要「可评测」。新增对核心运行时能力的自动化回归评测：
+  - **评分核心（纯函数库）**：新增 `deepseek_infra/infra/evaluation/harness.py`，把预测 + golden 标注打成指标族——`keyword_coverage`、`recall_at_k`（Recall@K + MRR）、`citation_case`（Citation Accuracy：top 来源正确 **且** 期望关键词在检索上下文里 grounded）、`tool_call_score`/`tool_call_accuracy`（工具调用精确匹配 + 精确率/召回/F1）、`agent_success`（Agent Success Rate）、`latency_benchmark`（avg/P50/P95/max）、`cost_benchmark`（token 与 USD，复用 `budget_manager` 定价）、`keyword_regression`（Prompt 回归门禁）。无 I/O、可单测、不 import sqlite RAG 层，保持轻量。
+  - **报告**：`EvalReport` 同时产机器可读 dict（落 `evals/reports/*.json`）与人读报告文本（`RAG Recall@5: 0.86`、`Avg Latency: 3.2s`、`Avg Token Cost: 4.8k`…）。
+  - **Golden 数据集**：`evals/golden/rag_questions.jsonl`（答案落在具体 `docs/` 文档的标注问题）、`agent_tasks.jsonl`（期望工具计划 + 成功关键词）、`agent_predictions.sample.jsonl`（可直接打分的录制样例）。
+  - **Runner**：`evals/runners/run_rag_eval.py` 对仓库自身 `docs/` 做**真实但离线**的检索（把每个 `expected_source` 索引进一个临时本地 RAG 索引，hash embedding + BM25，无需 API Key，不动你真实的 `.local-rag`），逐题打 Recall@K / Citation / 延迟；`run_agent_eval.py` 把录制 predictions 与 golden 任务按 id 关联，打工具调用准确率 / Agent 完成率 / 延迟 / 成本 / Prompt 回归。两者都支持 `--json` / `--no-report`，详见 `evals/README.md`。
+
+### 测试
+
+- 新增 `tests/test_eval_harness.py`（16 项）：JSONL 加载、关键词覆盖、Recall@K + MRR、引用准确率（来源 + grounding）、工具调用 P/R/F1 与聚合、Agent 成功判定、延迟分位、按模型定价的成本基准、Prompt 回归、报告文本/JSON/落盘格式、RAG/Agent 报告聚合，以及对 `run_rag_eval` 真实离线检索的端到端集成测试。
+- 版本号 2.1.0 → 2.1.1（config / README badge / 5 docs / test_config / test_encoding_regression 新增 `test_v212_eval_harness_is_present`）。纯后端 + 工具链改动，无前端变更，`static/sw.js` 保持 `deepseek-mobile-v186` 不变。
+
 ## [2.1.0]
 
 ### 新增

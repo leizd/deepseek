@@ -291,6 +291,31 @@ class ToolPolicySettings:
 
 
 @dataclass(frozen=True, slots=True)
+class SchedulerSettings:
+    """Local request scheduler / backpressure / rate-limit knobs.
+
+    A small in-process admission layer in front of the single upstream chokepoint:
+    priority queue + concurrency cap + token-bucket rate limit + bounded backpressure,
+    plus a durable SQLite dead-letter queue for requests that exhaust retries.
+
+    Defaults are deliberately *generous* so the live path stays transparent under
+    normal/test load (``rate_per_second=0`` means unlimited); tighten via env to make
+    the limits bite. ``max_queue_depth`` bounds waiting+in-flight — once exceeded the
+    scheduler sheds load (fast 503) instead of growing unboundedly.
+    """
+
+    enabled: bool = True
+    max_concurrency: int = 16
+    max_queue_depth: int = 256
+    rate_per_second: float = 0.0  # 0 = unlimited
+    rate_burst: int = 0  # 0 = derive from max_concurrency
+    acquire_timeout_seconds: float = 30.0
+    dlq_enabled: bool = True
+    dlq_max_rows: int = 500
+    orphan_seconds: int = 900  # running rows older than this on boot are recovered
+
+
+@dataclass(frozen=True, slots=True)
 class OllamaSettings:
     enabled: bool = False
     base_url: str = "http://127.0.0.1:11434"
@@ -300,7 +325,7 @@ class OllamaSettings:
 @dataclass(frozen=True, slots=True)
 class Settings:
     root: Path = ROOT
-    app_version: str = "2.1.0"
+    app_version: str = "2.1.2"
     deepseek_url: str = "https://api.deepseek.com/chat/completions"
     tavily_url: str = "https://api.tavily.com/search"
     deepseek_timeout_seconds: int = 180
@@ -364,6 +389,7 @@ class Settings:
     budget: BudgetSettings = field(default_factory=BudgetSettings)
     agent_runtime: AgentRuntimeSettings = field(default_factory=AgentRuntimeSettings)
     tool_policy: ToolPolicySettings = field(default_factory=ToolPolicySettings)
+    scheduler: SchedulerSettings = field(default_factory=SchedulerSettings)
     ollama: OllamaSettings = field(default_factory=OllamaSettings)
 
     @property
@@ -437,6 +463,14 @@ class Settings:
     @property
     def budget_db(self) -> Path:
         return self.budget_dir / "budget.sqlite3"
+
+    @property
+    def scheduler_dir(self) -> Path:
+        return self.root / ".scheduler"
+
+    @property
+    def scheduler_db(self) -> Path:
+        return self.scheduler_dir / "scheduler.sqlite3"
 
     @property
     def tool_audit_dir(self) -> Path:
@@ -587,6 +621,17 @@ class Settings:
                 require_confirm=_env_bool("TOOL_POLICY_REQUIRE_CONFIRM", False),
                 sanitize_results=_env_bool("TOOL_POLICY_SANITIZE_RESULTS", True),
                 audit_enabled=_env_bool("TOOL_POLICY_AUDIT_ENABLED", True),
+            ),
+            scheduler=SchedulerSettings(
+                enabled=_env_bool("SCHEDULER_ENABLED", True),
+                max_concurrency=_env_int_clamped("SCHEDULER_MAX_CONCURRENCY", 16, 1, 1024),
+                max_queue_depth=_env_int_clamped("SCHEDULER_MAX_QUEUE_DEPTH", 256, 1, 100_000),
+                rate_per_second=_env_float_clamped("SCHEDULER_RATE_PER_SECOND", 0.0, 0.0, 100_000.0),
+                rate_burst=_env_int_min("SCHEDULER_RATE_BURST", 0, 0),
+                acquire_timeout_seconds=_env_float_clamped("SCHEDULER_ACQUIRE_TIMEOUT_SECONDS", 30.0, 0.0, 3600.0),
+                dlq_enabled=_env_bool("SCHEDULER_DLQ_ENABLED", True),
+                dlq_max_rows=_env_int_clamped("SCHEDULER_DLQ_MAX_ROWS", 500, 10, 100_000),
+                orphan_seconds=_env_int_clamped("SCHEDULER_ORPHAN_SECONDS", 900, 30, 86_400),
             ),
             ollama=OllamaSettings(
                 enabled=_env_bool("OLLAMA_ENABLED", False),
@@ -872,6 +917,17 @@ TOOL_POLICY_SANITIZE_RESULTS = settings.tool_policy.sanitize_results
 TOOL_POLICY_AUDIT_ENABLED = settings.tool_policy.audit_enabled
 TOOL_POLICY_AUDIT_DIR = settings.tool_audit_dir
 TOOL_POLICY_AUDIT_LOG = settings.tool_audit_log
+SCHEDULER_ENABLED = settings.scheduler.enabled
+SCHEDULER_MAX_CONCURRENCY = settings.scheduler.max_concurrency
+SCHEDULER_MAX_QUEUE_DEPTH = settings.scheduler.max_queue_depth
+SCHEDULER_RATE_PER_SECOND = settings.scheduler.rate_per_second
+SCHEDULER_RATE_BURST = settings.scheduler.rate_burst
+SCHEDULER_ACQUIRE_TIMEOUT_SECONDS = settings.scheduler.acquire_timeout_seconds
+SCHEDULER_DLQ_ENABLED = settings.scheduler.dlq_enabled
+SCHEDULER_DLQ_MAX_ROWS = settings.scheduler.dlq_max_rows
+SCHEDULER_ORPHAN_SECONDS = settings.scheduler.orphan_seconds
+SCHEDULER_DIR = settings.scheduler_dir
+SCHEDULER_DB = settings.scheduler_db
 AUTH_TOKEN_FILE = settings.auth_token_file
 
 TEXT_EXTENSIONS = {
