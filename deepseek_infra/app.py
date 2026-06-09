@@ -12,6 +12,7 @@ from typing import Callable, Protocol
 from deepseek_infra.core.config import DEFAULT_HOST, DEFAULT_PORT, STATIC_DIR, configure_logging, settings
 from deepseek_infra.infra.rag.files import cleanup_file_cache
 from deepseek_infra.infra.agent_runtime.agent_runs import mark_orphan_runs_on_startup, resume_orphaned_runs
+from deepseek_infra.infra.gateway.scheduler import recover_orphans as recover_scheduler_orphans
 from deepseek_infra.web.server import MULTIPART_IMPORT_ERROR, create_server, multipart_module, supported_multipart_module
 from deepseek_infra.core.utils import local_ip, url_with_token
 from deepseek_infra.infra.tool_runtime.search import cleanup_search_cache
@@ -74,6 +75,14 @@ def prepare_and_start(
         resume_orphaned_runs()
     except Exception:
         logger.exception("agent_run_auto_resume_failed")
+    # Background recovery: reconcile request-queue rows left mid-flight by a crash
+    # (mark stale running/queued as failed and dead-letter them). Best-effort.
+    try:
+        recovered = recover_scheduler_orphans()
+        if recovered:
+            logger.info("scheduler_recovered_orphans count=%d", recovered)
+    except Exception:
+        logger.exception("scheduler_orphan_recovery_failed")
     stop_event = start_periodic_cache_cleanup()
 
     bind_host = host or settings.default_host or DEFAULT_HOST

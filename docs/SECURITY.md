@@ -1,6 +1,6 @@
 # 安全说明
 
-适用版本：v2.1.0。
+适用版本：v2.1.2。
 
 ## 威胁模型
 
@@ -117,6 +117,10 @@ v2.1.0 起，上面这些零散的工具安全约束被收敛进一个统一的 
 - **审计日志**：每条决策（放行 / 拒绝 / 待确认）追加写入本地 `.tool-audit/audit.jsonl`（append-only，best-effort，不阻断工具调用），可经 `TOOL_POLICY_AUDIT_ENABLED` 关闭；发布脚本与 `.gitignore` 排除该目录。
 
 默认配置（`TOOL_POLICY_ENABLED=1`，`enforce_schema` / `require_confirm` 关闭，结果清洗与审计开启）下，主聊天用 full 画像、不强制确认，行为与 v2.0.x 一致；能力收窄、强制 schema 与强制确认是按需开启的更严格档位。被策略拦截的工具调用返回 `{"ok": false, "code": "forbidden"|"requires_confirmation", "policy": {...}}`，不会真正执行。
+
+## 请求调度与 backpressure
+
+v2.1.2 起，所有上游模型调用先经过本地请求调度层（`deepseek_infra/infra/gateway/scheduler.py`）的进程内准入控制：优先级队列、并发上限、令牌桶限流与 **backpressure**。这层主要是稳定性/资源边界，而非鉴权边界，但有安全意义：用户连续点「生成」、多个 Agent 同时调模型或上游限流时，等待+在途请求一旦越过 `max_queue_depth` 会被**快速卸载**（503 `{"code":"rate_limited"}`），避免无界排队耗尽本机内存/连接、把瞬时尖峰放大成雪崩。被卸载或耗尽重试的请求写入本地 Dead Letter Queue（`.scheduler/scheduler.sqlite3`），只含 `kind`/原因/尝试次数等元数据，不含 prompt 正文、工具结果或模型输出；发布脚本与 `.gitignore` 排除 `.scheduler/`。准入路径不发起任何新的外部请求，也不放宽 `/api/*` 本地鉴权；默认配置（不限流、并发 16、队列 256）对正常负载透明，仅在压力下生效，可经 `SCHEDULER_*` 环境变量收紧。
 
 ## 前端渲染
 

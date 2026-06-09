@@ -152,6 +152,7 @@ def request_queue_status() -> dict[str, Any]:
 
 def gateway_status() -> dict[str, Any]:
     from deepseek_infra.core.config import GATEWAY_CONTEXT_MANAGER_ENABLED, GATEWAY_CONTEXT_WINDOW_MESSAGES
+    from deepseek_infra.infra.gateway.scheduler import scheduler_status
 
     return {
         "contextManager": {
@@ -161,6 +162,7 @@ def gateway_status() -> dict[str, Any]:
             "slidingWindowMessages": int(GATEWAY_CONTEXT_WINDOW_MESSAGES),
         },
         "requestQueue": request_queue_status(),
+        "scheduler": scheduler_status(),
     }
 
 
@@ -176,6 +178,8 @@ def diagnostics_from_attempts(attempts: list[dict[str, Any]]) -> dict[str, Any]:
     total_attempt_count = sum(max(0, int(item.get("attemptCount") or 0)) for item in final_attempts)
     retry_count = sum(max(0, int(item.get("retryCount") or 0)) for item in final_attempts)
     last = attempts[-1] if attempts else {}
+    from deepseek_infra.infra.gateway.scheduler import snapshot as scheduler_snapshot
+
     return {
         "requestQueueEnabled": bool(GATEWAY_REQUEST_QUEUE_ENABLED),
         "upstreamRequestCount": len(final_attempts),
@@ -185,6 +189,7 @@ def diagnostics_from_attempts(attempts: list[dict[str, Any]]) -> dict[str, Any]:
         "lastStatus": last.get("status") or "",
         "lastQueueId": last.get("queueId") or "",
         "lastError": last.get("lastError") or "",
+        "scheduler": scheduler_snapshot(),
     }
 
 

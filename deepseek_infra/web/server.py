@@ -60,6 +60,8 @@ from deepseek_infra.infra.gateway.deepseek_client import (
 )
 from deepseek_infra.infra.gateway.budget_manager import budget_status as budget_status_for_scope
 from deepseek_infra.infra.tool_runtime.tool_policy import read_recent_audit, tool_policy_status
+from deepseek_infra.infra.gateway.scheduler import dead_letters as scheduler_dead_letters
+from deepseek_infra.infra.gateway.scheduler import scheduler_status
 from deepseek_infra.infra.gateway.model_router import cascade_requested as model_router_cascade_requested
 from deepseek_infra.infra.gateway.model_router import router_status as model_router_status
 from deepseek_infra.infra.gateway.openai_api import (
@@ -262,6 +264,15 @@ def create_app() -> FastAPI:
         except ValueError:
             limit = 50
         return json_response({"ok": True, "toolPolicy": tool_policy_status(), "audit": read_recent_audit(limit)})
+
+    @api.get("/api/scheduler")
+    async def api_scheduler(request: Request) -> JSONResponse:
+        require_api_auth(request)
+        try:
+            limit = int(request.query_params.get("limit", "50"))
+        except ValueError:
+            limit = 50
+        return json_response({"ok": True, "scheduler": scheduler_status(), "deadLetters": scheduler_dead_letters(limit)})
 
     @api.post("/api/rag/reindex")
     async def api_rag_reindex(request: Request) -> JSONResponse:

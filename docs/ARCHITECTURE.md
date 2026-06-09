@@ -1,6 +1,6 @@
 # 架构说明
 
-适用版本：v2.1.0。
+适用版本：v2.1.2。
 
 DeepSeek Infra 是一个本地优先的 **AI Runtime / Agent 基础设施平台**：桌面端可通过内嵌 WebView 的本地应用窗口运行，手机端可通过 APK WebView 运行；本机 FastAPI 后端把 LLM 网关（含 OpenAI 兼容 `/v1`）、多 Agent DAG 运行时、本地向量 RAG、工具调用运行时、链路可观测性（`/metrics`、`/healthz`）和端云模型路由组装成一个可私有化、多端运行、可观测、可扩展的 Agentic AI 系统。
 
@@ -49,7 +49,8 @@ Local Data & Observability   Vector RAG · Memory · Trace · Semantic Cache · 
 | `deepseek_infra/infra/gateway/model_router.py` | 策略驱动 Model Router（v2.0.9）：`route_request` 按能力（图片→vision/pro）、复杂度、成本预算、延迟在 flash/pro 间路由（仅 `autoRoute`/`model="auto"` 时接管，显式选模不变）；`cascade_plan` + `quality_gate`（长度/拒答/不确定/引用不足）驱动级联推理；纯决策与打分，实际调用与 Judge 评分在 `deepseek_client`（`call_deepseek_cascade` / `judge_draft`）。 |
 | `deepseek_infra/infra/gateway/context_manager.py` | API 网关 Context Manager：稳定 JSON 序列化、固定工具定义顺序、在已有摘要时执行滑动窗口裁剪，并输出 prompt cache 友好的请求诊断。 |
 | `deepseek_infra/infra/gateway/context_engine.py` | Prompt-cache-aware Context Engine：无 tokenizer 的 token 预算预估（按 system/tools/history/dynamic 分项）、按模型上下文窗口适配（`context_window_for_model`，端侧/Ollama/未知模型回落默认窗口）、叠加在条数窗口之上的 token 感知裁剪（`token_trim`，仅在压缩摘要+溢出预算时多丢最旧历史，保留首尾 system 锚点）、以及 Context Diff（稳定 `baseContextId` + 本轮 `delta`）。纯函数、零 I/O，只观测与决策，不改写缓存锚定的 prompt 前缀。 |
-| `deepseek_infra/infra/gateway/resiliency.py` | API 网关韧性层：用 `.request-queue/queue.sqlite3` 记录上游请求队列项，对断网、超时、429 和网关类 5xx 做退避重试，并汇总 `gatewayResiliency` 诊断。 |
+| `deepseek_infra/infra/gateway/resiliency.py` | API 网关韧性层：用 `.request-queue/queue.sqlite3` 记录上游请求队列项，对断网、超时、429 和网关类 5xx 做退避重试，并汇总 `gatewayResiliency` 诊断（含 scheduler 快照）。 |
+| `deepseek_infra/infra/gateway/scheduler.py` | 本地请求调度层（v2.1.2）：进程内准入控制——优先级队列（交互>Agent>后台，`priority_for_payload`）、并发上限、令牌桶限流（`TokenBucket`）、backpressure（越过 `max_queue_depth` 即 503 卸载）、请求取消与准入超时；`RequestScheduler.lease` 在两处上游调用各包一层。耗尽重试/被卸载的请求落入 `.scheduler/scheduler.sqlite3` 的 Dead Letter Queue（`record_dead_letter`/`dead_letters`/`dlq_status`），`recover_orphans` 在启动时对账既有请求队列的陈旧行（背景恢复）。准入路径纯内存、无每请求 SQLite 写入；`SchedulerOverloaded`/`SchedulerTimeout` 为 503 `AppError`。 |
 | `deepseek_infra/infra/gateway/chat_payload.py` | 前端消息展开和附件计数。 |
 | `deepseek_infra/infra/rag/context_compressor.py` | 长对话的增量上下文摘要生成。 |
 | `deepseek_infra/infra/data/memory.py` | 本地长期记忆 CRUD、作用域过滤、检索排序、显式“记住/忘记”命令解析、记忆建议和冲突检测。 |
@@ -59,6 +60,7 @@ Local Data & Observability   Vector RAG · Memory · Trace · Semantic Cache · 
 | `deepseek_infra/infra/tool_runtime/search.py` | 搜索触发、多轮 Tavily 查询、结果聚合、缓存和 Prompt 格式化。 |
 | `deepseek_infra/infra/tool_runtime/tools.py` | DeepSeek function calling 本地工具：受限数学计算、缓存文件搜索、公共网页二次精读、提醒、记忆、项目文件、数据转换、图表规格、PPT 生成、Word/PDF 文档生成、SVG 思维导图生成、多查询搜索对比和长期记忆建议。`execute_tool_call` / `execute_tool_calls` 接受可选 `policy`，在分发前过 Tool Policy Engine、成功后清洗结果。 |
 | `deepseek_infra/infra/tool_runtime/tool_policy.py` | Capability-based Tool Policy Engine（v2.1.0）：工具元数据 risk card（`ToolMetadata` / `TOOL_METADATA`）、按角色切片的能力画像（`CAPABILITY_PROFILES` / `capability_tools`，`multi_agent.agent_tools_for` 的单一事实源）、轻量 schema 校验（`validate_arguments`）、静态 SSRF 防护（`evaluate_url_safety`）、路径越界检测（`evaluate_path_safety`）、敏感写入拦截、人工确认、`PolicyDecision` / `ToolPolicy` 闸门、工具结果 prompt injection 清洗（`sanitize_tool_result`）、`.tool-audit/audit.jsonl` 审计日志与 `tool_policy_status`。纯函数 + 唯一 best-effort 审计 I/O，不 import `tools`，无循环依赖。 |
+| `deepseek_infra/infra/evaluation/harness.py` | AI Runtime Evaluation Harness（v2.1.1）：把预测 + golden 标注打成回归指标族——`keyword_coverage`、`recall_at_k`（Recall@K + MRR）、`citation_case`（Citation Accuracy）、`tool_call_score` / `tool_call_accuracy`（工具调用 P/R/F1）、`agent_success`（Agent Success Rate）、`latency_benchmark`、`cost_benchmark`（复用 `budget_manager` 定价）、`keyword_regression`，以及自描述的 `EvalReport`（机器 dict + 人读报告文本）。纯函数、零 I/O、不 import sqlite RAG 层。CLI 编排在 `evals/runners/`，golden 数据在 `evals/golden/`。 |
 | `deepseek_infra/infra/tool_runtime/presentations.py` | 本地 `.pptx` 生成：`create_pptx` 工具用 `python-pptx` 生成真实 PowerPoint 文件，普通模型漏调工具时可从文本大纲兜底生成；渲染器会自动加入目录页并选择卡片、流程、对比、观点、总结等版式。 |
 | `deepseek_infra/infra/tool_runtime/documents.py` | 本地 `.docx` / `.pdf` 生成：`create_document` 工具用 `python-docx` / `reportlab`（内置中文 CID 字体，无需附带字体文件）把结构化章节渲染成排版精美的 Word 或 PDF，支持标题块、分章节编号、正文段落、要点、表格、页码与按标题哈希确定的配色主题。 |
 | `deepseek_infra/infra/tool_runtime/mindmaps.py` | 本地 `.svg` 思维导图生成：`create_mindmap` 工具把模型给出的树状节点渲染成「分组流程图」式 SVG——顶层节点作为带标题的彩色容器（类似 Mermaid subgraph），容器内后代自上而下、用实心箭头连接的圆角卡片，并复用统一下载链路。 |

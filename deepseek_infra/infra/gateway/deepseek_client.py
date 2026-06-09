@@ -23,7 +23,7 @@ from deepseek_infra.core.config import (
 from deepseek_infra.infra.gateway.chat_payload import count_payload_attachments, expanded_message_content
 from deepseek_infra.infra.rag.context_compressor import format_context_summary_context
 from deepseek_infra.infra.gateway.context_manager import manage_request_body, merge_context_manager_diagnostics, stable_json_dumps
-from deepseek_infra.infra.gateway import budget_manager, model_router
+from deepseek_infra.infra.gateway import budget_manager, model_router, scheduler
 from deepseek_infra.core.errors import AppError, ErrorCode
 from deepseek_infra.infra.gateway.edge_inference import (
     EdgeRouteDecision,
@@ -1484,7 +1484,11 @@ def call_deepseek(
             parent_span_id=span_parent,
         )
         try:
-            with open_with_resiliency(
+            with scheduler.lease(
+                scheduler.priority_for_payload(payload),
+                kind="deepseek_json",
+                key=budget_key,
+            ), open_with_resiliency(
                 request,
                 timeout=DEEPSEEK_TIMEOUT_SECONDS,
                 kind="deepseek_json",
@@ -1888,7 +1892,12 @@ def stream_deepseek(
                 parent_span_id=span_parent,
             )
             try:
-                with open_with_resiliency(
+                with scheduler.lease(
+                    scheduler.priority_for_payload(payload),
+                    kind="deepseek_stream",
+                    key=budget_key,
+                    cancel_checker=lambda: raise_if_cancelled(cancel_event),
+                ), open_with_resiliency(
                     request,
                     timeout=DEEPSEEK_TIMEOUT_SECONDS,
                     kind="deepseek_stream",
