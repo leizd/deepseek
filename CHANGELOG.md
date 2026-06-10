@@ -2,7 +2,30 @@
 
 本项目使用类似 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的分组方式维护变更记录。未发布内容记录在 `[Unreleased]`，正式发版时迁移到具体版本。
 
-## [Unreleased]
+## [2.1.6]
+
+**主题：可信度与可验证性。** README 已经把「local-first agentic AI infrastructure platform」的叙事立起来了，本版不再加新概念，而是把已写出的 Infra 能力落到**可点击的代码路径、可一键复现的 Demo、可部署的资产、可复跑的基准与评测**上，防止「README 画饼」的观感。
+
+### 新增
+
+- **实现状态矩阵（最重要的一页）**：新增 `docs/IMPLEMENTATION_STATUS.md`，对 README 列出的 9 个核心模块逐一给出 Status / Code / Tests / Demo 四列状态，每格都链接到真实的代码目录、测试文件与 demo / eval 入口；明确标注成熟度，避免「全都做完了」的误读。README 模块表的代码位置改为可点击链接，全部指向仓库里真实存在的目录。
+- **2 分钟可复现 Demo**：新增 `examples/` 四个最小可运行脚本 + `docs/DEMO.md` 演示路径——
+  - `examples/openai_compatible_client.py`：任意 OpenAI SDK 把 `base_url` 指向本机 `/v1` 直接复用整套运行时（SDK 缺失时自动回退 stdlib HTTP，逻辑等价）；
+  - `examples/run_agent_dag_demo.py`：流式驱动多 Agent DAG（`agentMode`），实时打印 planner / worker / synthesizer 事件、每 Agent 耗时与 token；
+  - `examples/local_rag_demo.py`：**离线、无需 API Key**——把仓库自身 `docs/` 索引进临时本地 RAG 索引（hash embedding + BM25 hybrid），检索并展示 chunk lineage 引用回链；
+  - `examples/mcp_tool_demo.py`：用内置 `MCPClient` 对本机 `/mcp` 做 `initialize → tools/list → tools/call` 回环，演示 MCP Tool Hub 与 Bearer 鉴权。
+- **部署资产（让它像 Infra 服务，而不是只能手动跑的应用）**：新增 `Dockerfile`（python:3.12-slim、非 root 运行、`/healthz` HEALTHCHECK）、`docker-compose.yml`（`.env` 注入配置、运行时数据目录挂载成持久卷）、`.env.example`（核心环境变量带注释模板）、`.dockerignore` 与 `docs/DEPLOYMENT.md`（Docker / Compose / 裸机 / 反向代理与安全边界说明）。`.gitignore` 与发布脚本同步排除 `.env`（`.env.example` 保留入库）。
+- **基准测试（benchmarks/）**：新增 4 个可复跑基准脚本，全部输出人读摘要 + `--json` 机器可读结果——
+  - `bench_rag_retrieval.py`（离线）：临时索引下的检索延迟 avg / P50 / P95 与 Recall@K、MRR；
+  - `bench_semantic_cache.py`（离线）：语义缓存 store / lookup 延迟与改写命中率（隔离临时库，不动真实缓存）；
+  - `bench_chat_latency.py`（需本地服务 + Key）：流式 TTFT、总延迟、token 用量与语义缓存命中分布；
+  - `bench_agent_dag.py`（需本地服务 + Key）：多 Agent DAG 端到端延迟、每 Agent 耗时表与 token 成本。
+  - README 新增「Benchmarks」节，给出**离线两项的实测样例数字**（标注测量环境）与在线两项的运行方式，不放未实测的编造数字。
+- **工具调用 / 注入防御评测**：`evals/` 在 RAG / Agent 之外补第三条评测线——新增 `evals/golden/tool_policy_cases.jsonl`（SSRF、路径越界、密钥外泄、敏感记忆写入、能力越权、注入清洗与良性放行等标注用例）与 `evals/runners/run_tool_eval.py`（**离线**重放 Tool Policy 闸门与注入清洗，输出 Tool Policy Pass Rate 与 Prompt Injection Defense Pass Rate，错判用例逐条列出）；`evals/README.md` 同步。
+- **威胁模型**：新增 `docs/THREAT_MODEL.md`，把 6 类威胁（网页 prompt 注入、恶意上传文件、`fetch_url` SSRF、路径越界、密钥外泄到记忆 / 工具参数、被攻陷 Agent 滥用工具）逐条映射到已实现的缓解层（Tool Policy / Context Taint / 鉴权与本地边界）与对应测试文件；`docs/SECURITY.md` 交叉链接。
+- **CI 安全扫描**：`.github/workflows/ci.yml` 新增独立 `security` job——`pip-audit`（依赖漏洞）、`bandit`（静态安全分析）与 `detect-secrets`（凭证扫描，基线文件 `.secrets.baseline` 入库）；三项均先在本地实跑通过后入 CI。
+- **架构总览图**：新增 `docs/assets/architecture.svg`（矢量、GitHub 深浅色主题均可读），README 第一屏引用；ASCII 架构图保留在 `docs/ARCHITECTURE.md`。
+- **Roadmap**：README 新增 Roadmap 节（v2.2 / v2.3 / v2.4 各自的下一步），并链接实现状态矩阵，明确「已完成 vs 计划中」的边界。
 
 ### 修复
 
@@ -17,6 +40,8 @@
 
 ### 安全
 
+- **bandit 高危基线清零**：`context_engine.py`（稳定前缀指纹 sha1）、`documents.py` / `presentations.py`（标题→主题选择 md5）三处非安全用途哈希补 `usedforsecurity=False` 标注（B324，摘要值不变、行为不变）；CI `security` job 以 `--severity-level high` 做门禁，medium 级（表名常量拼接 SQL、经 SSRF 闸门的 urlopen 等）为已审阅类别。
+- **发布脚本与 `.gitignore` 排除 `.env`**：部署模板落地后，`.env`（含上游 Key）加入 `.gitignore`（`.env.*` 一并排除、`!.env.example` 白名单）与 `scripts/release.py` `EXCLUDED_FILE_PATTERNS`（`.env` / `.env.local`），`tests/test_release.py` 断言 `.env` 不进发布 zip 且 `.env.example` 保留。
 - **发布脚本补齐运行时隐私目录排除**：`scripts/release.py` 的 `EXCLUDED_DIRS` 此前缺少 `.local-rag`（用户文件向量索引）、`.traces`（请求追踪，含 prompt / 输出摘要）、`.semantic-cache`（语义缓存，含 prompt 与模型回答原文）、`.request-queue`（请求队列指纹）、`.generated`（生成的文档产物），`python scripts/release.py` 打出的发布 zip 会把这些本地隐私数据一并带入。现已补入排除清单（与 2.1.4 引入的 `.a2a` 并列，`--clean-workspace` 同步覆盖），README「本地数据与隐私」清单补 `.generated` / `.budget` / `.agent-runs` 并新增 `.generated` 数据位置说明，与 `.gitignore` 三处对齐；`tests/test_release.py` 排除清单回归同步覆盖全部运行时数据目录。
 
 ## [2.1.5]
