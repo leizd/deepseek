@@ -54,7 +54,7 @@ def model_supports_thinking(model: str) -> bool:
 MULTI_AGENT_TOTAL_SEARCH_LIMIT = 36
 MULTI_AGENT_PER_AGENT_SEARCH_LIMIT = 15
 MULTI_AGENT_TOOL_ROUNDS = 4
-# v2.1.3：worker 流式中断时，已累计的公开产出达到该长度就降级保留（带风险标注），
+# v2.1.6：worker 流式中断时，已累计的公开产出达到该长度就降级保留（带风险标注），
 # 不再整体作废重跑——跑了十几分钟的长流式因为最后一秒断流而全部丢弃太浪费。
 AGENT_PARTIAL_SALVAGE_MIN_CHARS = 200
 
@@ -1272,7 +1272,7 @@ def run_agent(
     for attempt in range(max_retries + 1):
         raise_if_cancelled(cancel_event)
         if attempt and emit_event is not None:
-            # v2.1.3：重试前先清空该 worker 卡片，否则第二次流式输出会直接拼在
+            # v2.1.6：重试前先清空该 worker 卡片，否则第二次流式输出会直接拼在
             # 上一次的半成品后面（用户会看到两段「## 摘要」连在一起）。事件链与
             # 单 Agent 重跑 / critic 修订一致：agent_reset → agent(running) → agent_delta…
             emit_event({"type": "agent_reset", "phase": agent_id, "reason": "stream_retry"})
@@ -1531,7 +1531,7 @@ def _run_agent_once(
         )
         if not salvageable:
             raise AgentStreamError(captured_error, code=captured_error_code)
-        # v2.1.3：流式在产出中途断开时保留已有内容降级返回，而不是丢弃十几分钟的
+        # v2.1.6：流式在产出中途断开时保留已有内容降级返回，而不是丢弃十几分钟的
         # 产出再整轮重跑。风险段显式标注"部分产出"，Critic / Synthesizer 据此降权。
         emit_event(
             {

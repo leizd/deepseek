@@ -24,7 +24,7 @@ from deepseek_infra.core.config import (
 from deepseek_infra.infra.gateway.chat_payload import count_payload_attachments, expanded_message_content
 from deepseek_infra.infra.rag.context_compressor import format_context_summary_context
 from deepseek_infra.infra.gateway.context_manager import manage_request_body, merge_context_manager_diagnostics, stable_json_dumps
-from deepseek_infra.infra.gateway import budget_manager, model_router, scheduler
+from deepseek_infra.infra.gateway import budget_manager, context_taint, model_router, scheduler
 from deepseek_infra.core.errors import AppError, ErrorCode
 from deepseek_infra.infra.gateway.edge_inference import (
     EdgeRouteDecision,
@@ -350,6 +350,12 @@ def build_deepseek_request(
 
     request_body, context_manager_diag = manage_request_body(request_body, allow_sliding_window=bool(context_summary))
     diagnostics = merge_context_manager_diagnostics(diagnostics, context_manager_diag)
+    # Context Taint Tracking: classify the final assembled prompt into trusted /
+    # untrusted segments and scan untrusted ones for directives (report only here;
+    # the per-turn ToolPolicy consumes the verdict for escalation).
+    taint_report = context_taint.build_taint_report(request_body)
+    if taint_report is not None:
+        diagnostics["contextTaint"] = taint_report
     return PreparedDeepSeekRequest(api_key=api_key, body=request_body, diagnostics=diagnostics)
 
 
@@ -627,7 +633,9 @@ def prepare_deepseek_call(
         rag_status = "ok" if results else "error" if (search_data or {}).get("status") == "error" else "skipped"
         rag_span.finish(status=rag_status, output_data={"resultCount": len(results)})
     if search_data and search_data.get("results"):
-        payload = {**payload, "searchContext": format_search_context(search_data)}
+        # Context Taint firewall: web content is untrusted — isolation-wrap and
+        # scrub the per-turn search context before it joins the prompt.
+        payload = {**payload, "searchContext": context_taint.harden_search_context(format_search_context(search_data))}
     elif search_data and search_data.get("status") == "error":
         payload = {**payload, "searchContext": format_search_failure_context(search_data)}
     prepared = build_deepseek_request(payload, stream=stream, memory_state=memory_state, validated=validated)
@@ -1125,13 +1133,17 @@ def diagnostics_with_tools(diagnostics: dict[str, Any], *, count: int, names: li
     return result
 
 
-def build_tool_policy(payload: dict[str, Any]) -> ToolPolicy | None:
+def build_tool_policy(payload: dict[str, Any], *, taint_report: dict[str, Any] | None = None) -> ToolPolicy | None:
     """Capability-scoped Tool Policy for this turn (None when globally disabled).
 
     Capability comes from the payload: a worker sets ``capability`` (its agent id)
     and/or ``allowedTools``; the main chat sets neither and gets the full profile.
     An explicit ``allowedTools`` list further narrows the grant. ``approvedTools``
     carries any tools the user pre-confirmed this turn.
+
+    The Context Taint firewall feeds in too: the runtime's credentials become the
+    secret-exfiltration blocklist, and a tainted context (injection directives in
+    untrusted segments) escalates dangerous tools to explicit confirmation.
     """
     if not settings.tool_policy.enabled:
         return None
@@ -1140,11 +1152,25 @@ def build_tool_policy(payload: dict[str, Any]) -> ToolPolicy | None:
     allowed_tools = [str(item) for item in allowed] if isinstance(allowed, list) else None
     approvals_raw = payload.get("approvedTools")
     approvals = {str(item) for item in approvals_raw} if isinstance(approvals_raw, list) else set()
+    secrets = tuple(
+        value
+        for value in (
+            str(payload.get("apiKey") or ""),
+            str(payload.get("tavilyApiKey") or ""),
+            settings.deepseek_api_key,
+            settings.tavily_api_key,
+            settings.auth.token,
+        )
+        if value
+    )
     return ToolPolicy(
         capability=capability,
         allowed_tools=allowed_tools,
         approvals=approvals,
         scope=budget_manager.budget_scope(payload),
+        secrets=secrets,
+        tainted=context_taint.report_is_tainted(taint_report),
+        taint_escalation=context_taint.escalation_enabled(),
     )
 
 
@@ -1460,7 +1486,7 @@ def call_deepseek(
     default_memory_scope = memory_scope_from_payload(payload)
     tool_call_count = 0
     seen_tool_names: list[str] = []
-    tool_policy = build_tool_policy(payload)
+    tool_policy = build_tool_policy(payload, taint_report=prepared.diagnostics.get("contextTaint"))
     memory_suggestions: list[dict[str, Any]] = []
     perform_web_search, current_search_data = web_search_callback_for_turn(
         payload,
@@ -1754,7 +1780,7 @@ def stream_deepseek(
         try:
             emit_event(event)
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
-            # v2.1.3：客户端 SSE 写失败（浏览器断开）按取消语义中止。只有把它在这里
+            # v2.1.6：客户端 SSE 写失败（浏览器断开）按取消语义中止。只有把它在这里
             # 转成 RequestCancelled，外层的连接异常分支才能确定地表示"上游读流中断"，
             # 不再把上游半截输出静默当成成功。
             if cancel_event is not None:
@@ -1868,7 +1894,7 @@ def stream_deepseek(
         default_memory_scope = memory_scope_from_payload(payload)
         tool_call_count = 0
         seen_tool_names: list[str] = []
-        tool_policy = build_tool_policy(payload)
+        tool_policy = build_tool_policy(payload, taint_report=prepared.diagnostics.get("contextTaint"))
         memory_suggestions: list[dict[str, Any]] = []
         local_final_content = ""
         perform_web_search, current_search_data = web_search_callback_for_turn(
@@ -2043,7 +2069,7 @@ def stream_deepseek(
             tool_call_count += 1
             seen_tool_names.append("create_pptx")
         if last_finish_reason == "length":
-            # v2.1.3：上游按 max_tokens 截断时不再静默——前端能看到提示，多 Agent 的
+            # v2.1.6：上游按 max_tokens 截断时不再静默——前端能看到提示，多 Agent 的
             # worker 也据此在 risks 里标注"部分产出"。
             emit_checked({"type": "system_note", "text": "回答已达到上游输出长度上限，内容可能被截断。\n\n"})
         result_for_cache = {
@@ -2112,7 +2138,7 @@ def stream_deepseek(
             finish_trace(trace_context.trace_id, status="cancelled")
         return
     except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError) as exc:
-        # v2.1.3：客户端断开已在 emit_checked 转成 RequestCancelled；走到这里的是
+        # v2.1.6：客户端断开已在 emit_checked 转成 RequestCancelled；走到这里的是
         # 上游读流的连接被重置/提前关闭。旧实现按"客户端断开"静默 return，半截
         # 输出会被当成完整结果（多 Agent 卡片"已完成但摘要戛然而止"的根因之一）。
         message = f"上游流式连接中断（{type(exc).__name__}）"
@@ -2150,7 +2176,7 @@ def stream_deepseek(
         emit_checked({"type": "error", "error": message, "code": ErrorCode.UPSTREAM_TIMEOUT.value})
     except Exception as exc:
         logger.exception("stream_error")
-        # v2.1.3：不再吞成笼统的 "Stream error"——带上异常类型/信息，读流阶段的
+        # v2.1.6：不再吞成笼统的 "Stream error"——带上异常类型/信息，读流阶段的
         # 网络类异常按上游失败归类，真正的内部 bug 才标 internal。
         detail = f"{type(exc).__name__}: {exc}".rstrip(": ").strip()
         message = f"流式响应中断（{detail}）"

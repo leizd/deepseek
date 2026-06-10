@@ -25,6 +25,7 @@ EXCLUDED_DIRS = {
     ".budget",
     ".tool-audit",
     ".scheduler",
+    ".a2a",
     ".local-rag",
     ".traces",
     ".semantic-cache",
