@@ -47,6 +47,9 @@ class ReleaseScriptTests(unittest.TestCase):
             (workspace / ".server.err.log").write_text("secret", encoding="utf-8")
             (workspace / ".coverage").write_text("secret", encoding="utf-8")
             (workspace / ".auth-token").write_text("secret", encoding="utf-8")
+            # Deployment secrets must never ship; the committed template must.
+            (workspace / ".env").write_text("DEEPSEEK_API_KEY=secret", encoding="utf-8")
+            (workspace / ".env.example").write_text("DEEPSEEK_API_KEY=", encoding="utf-8")
             # VCS / tooling metadata and the encrypted launcher credential store must never ship.
             (workspace / ".git").mkdir()
             (workspace / ".git" / "config").write_text("secret", encoding="utf-8")
@@ -75,6 +78,8 @@ class ReleaseScriptTests(unittest.TestCase):
             self.assertFalse(any(name.startswith(tuple(f"{directory}/" for directory in excluded_dirs)) for name in names))
             self.assertNotIn(".coverage", names)
             self.assertNotIn(".auth-token", names)
+            self.assertNotIn(".env", names)
+            self.assertIn(".env.example", names)
             self.assertFalse(any(name.startswith((".git/", ".claude/")) for name in names))
             self.assertNotIn(".launcher-config.json", names)
 

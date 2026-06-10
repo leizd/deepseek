@@ -305,7 +305,8 @@ def base_context_id(body: dict[str, Any]) -> str:
             if isinstance(function, dict) and function.get("name"):
                 tool_names.append(str(function["name"]))
     digest = hashlib.sha1(
-        " ".join([system_prefix, str(body.get("model") or ""), *tool_names]).encode("utf-8")
+        " ".join([system_prefix, str(body.get("model") or ""), *tool_names]).encode("utf-8"),
+        usedforsecurity=False,  # stable cache-prefix fingerprint, not a security hash
     ).hexdigest()
     return f"ce_{digest[:12]}"
 

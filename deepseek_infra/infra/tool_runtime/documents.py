@@ -135,7 +135,7 @@ def _normalize_sections(sections: Any) -> list[dict[str, Any]]:
 
 
 def _theme_for(title: str) -> dict[str, str]:
-    digest = hashlib.md5(str(title or "").encode("utf-8")).hexdigest()
+    digest = hashlib.md5(str(title or "").encode("utf-8"), usedforsecurity=False).hexdigest()
     return _DOC_THEMES[int(digest, 16) % len(_DOC_THEMES)]
 
 

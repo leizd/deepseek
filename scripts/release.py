@@ -54,6 +54,8 @@ EXCLUDED_DIR_PATTERNS = {
 EXCLUDED_FILE_PATTERNS = {
     ".coverage",
     ".auth-token",
+    ".env",
+    ".env.local",
     ".launcher-config.json",
     ".launcher-config.json.tmp",
     "*.spec",

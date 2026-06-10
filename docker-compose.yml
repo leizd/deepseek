@@ -1,0 +1,18 @@
+# DeepSeek Infra — docker compose up -d
+# 配置来自 .env（复制 .env.example 改名后填写），数据持久化在命名卷 deepseek-data。
+services:
+  deepseek-infra:
+    build: .
+    image: deepseek-infra:2.1.6
+    env_file:
+      - .env
+    ports:
+      # /metrics、/healthz、/readyz 不鉴权：默认只发布到本机回环。
+      # 需要局域网访问时改成 "8000:8000"，并配合反向代理 / 防火墙（见 docs/DEPLOYMENT.md）。
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - deepseek-data:/data
+    restart: unless-stopped
+
+volumes:
+  deepseek-data:

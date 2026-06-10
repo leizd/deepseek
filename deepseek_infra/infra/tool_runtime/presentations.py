@@ -271,7 +271,7 @@ def _hex(value: str) -> Any:
 def _deck_theme_for(title: str) -> dict[str, str]:
     import hashlib
 
-    digest = hashlib.md5(str(title or "").encode("utf-8")).hexdigest()
+    digest = hashlib.md5(str(title or "").encode("utf-8"), usedforsecurity=False).hexdigest()
     return _DECK_THEMES[int(digest, 16) % len(_DECK_THEMES)]
 
 

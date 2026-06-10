@@ -1,6 +1,11 @@
 .auth-token
 .launcher-config.json
 .launcher-config.json.tmp
+
+# 部署密钥（模板 .env.example 保留入库）
+.env
+.env.*
+!.env.example
 .file-cache/
 .generated/
 .agent-runs/

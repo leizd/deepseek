@@ -250,6 +250,8 @@ _METRIC_SPEC: tuple[tuple[str, str, str], ...] = (
     ("keywordCoverage", "Keyword Coverage", "ratio"),
     ("toolCallAccuracy", "Tool Call Accuracy", "ratio"),
     ("toolCallF1", "Tool Call F1", "ratio"),
+    ("toolPolicyPassRate", "Tool Policy Pass Rate", "ratio"),
+    ("injectionDefensePassRate", "Prompt Injection Defense Pass", "ratio"),
     ("agentSuccessRate", "Agent Success Rate", "ratio"),
     ("promptRegressionPassRate", "Prompt Regression Pass", "ratio"),
     ("avgLatencyMs", "Avg Latency", "latency"),
