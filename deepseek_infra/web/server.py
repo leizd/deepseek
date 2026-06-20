@@ -1647,8 +1647,6 @@ def _trace_waterfall_html(trace: dict[str, Any]) -> str:
         s_tokens = int(span_entry.get("totalTokens") or 0)
         s_cache = float(span_entry.get("cacheHitRate") or 0)
         s_error = _html_module.escape(str(span_entry.get("error") or ""))
-        s_span_id = _html_module.escape(str(span_entry.get("spanId") or ""))
-        s_parent = _html_module.escape(str(span_entry.get("parentSpanId") or ""))
         depth = _span_depth(span_entry, spans)
 
         input_data = span_entry.get("input")
@@ -1786,7 +1784,7 @@ def _render_span_detail(
 ) -> str:
     import html as _h
     sections: list[str] = []
-    sections.append(f"""<span class="span-toggle" style="cursor:pointer;margin-left:8px">▼</span>
+    sections.append("""<span class="span-toggle" style="cursor:pointer;margin-left:8px">▼</span>
     <div class="span-detail open">""")
 
     meta_parts = []
