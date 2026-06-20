@@ -349,7 +349,7 @@ curl http://127.0.0.1:8000/healthz
 python scripts/release.py --clean-workspace
 ```
 
-脚本会生成 `dist/deepseek-mobile-<version>.zip`，并排除本地缓存、日志、虚拟环境和 IDE 文件。
+脚本会生成 `dist/deepseek-infra-<version>.zip`（旧名 `deepseek-mobile-<version>.zip` 以副本保留兼容），并排除本地缓存、日志、虚拟环境和 IDE 文件。
 
 ## Roadmap
 
