@@ -55,3 +55,4 @@ audit-cleanup-*/
 .test-*/
 tests/tmp/
 /design-qa.md
+.codex-remote-attachments/

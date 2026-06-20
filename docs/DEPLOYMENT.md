@@ -2,7 +2,7 @@
 
 适用版本：v2.1.6。
 
-DeepSeek Infra 的服务形态是一个单进程 FastAPI / ASGI 运行时：`/v1` OpenAI 兼容网关、`/mcp`、`/a2a`、`/api/*` 业务端点，加 `/healthz`·`/readyz`·`/metrics` 运维三件套。所有可写状态（鉴权 token、文件缓存、向量索引、trace、语义缓存、记忆、任务快照）都集中在**一个数据目录**下，由 `DEEPSEEK_MOBILE_ROOT` 指定——这也是容器化只需要一个卷的原因。
+DeepSeek Infra 的服务形态是一个单进程 FastAPI / ASGI 运行时：`/v1` OpenAI 兼容网关、`/mcp`、`/a2a`、`/api/*` 业务端点，加 `/healthz`·`/readyz`·`/metrics` 运维三件套。所有可写状态（鉴权 token、文件缓存、向量索引、trace、语义缓存、记忆、任务快照）都集中在**一个数据目录**下，由 `DEEPSEEK_INFRA_ROOT`（优先）或 `DEEPSEEK_MOBILE_ROOT`（向后兼容）指定——这也是容器化只需要一个卷的原因。
 
 ## 1. Docker Compose（推荐）
 
@@ -64,7 +64,7 @@ After=network-online.target
 [Service]
 WorkingDirectory=/opt/deepseek-infra
 EnvironmentFile=/opt/deepseek-infra/.env
-Environment=DEEPSEEK_MOBILE_ROOT=/var/lib/deepseek-infra
+Environment=DEEPSEEK_INFRA_ROOT=/var/lib/deepseek-infra
 ExecStart=/usr/bin/python3 app.py
 Restart=on-failure
 User=deepseek
@@ -78,7 +78,7 @@ WantedBy=multi-user.target
 ## 4. 配置参考
 
 - 模板：[.env.example](../.env.example)（核心变量带注释）；完整清单见 README「环境变量」。
-- 数据目录：`DEEPSEEK_MOBILE_ROOT`（容器内默认 `/data`；裸机默认仓库根目录）。各子目录含义见 README「本地数据与隐私」。
+- 数据目录：`DEEPSEEK_INFRA_ROOT`（优先，`DEEPSEEK_MOBILE_ROOT` 向后兼容；容器内默认 `/data`；裸机默认仓库根目录）。各子目录含义见 README「本地数据与隐私」。
 - 升级：换新镜像 tag 重新 `up -d` 即可；数据目录内的 SQLite schema 由各模块幂等迁移，跨小版本升级无需手工步骤。备份 = 备份 `/data` 卷。
 
 ## 5. 暴露到局域网 / 公网前必读
@@ -98,3 +98,17 @@ WantedBy=multi-user.target
 - PWA 安装、剪贴板等浏览器能力需要 HTTPS；局域网 HTTP 适合开发与试用。
 - 不要把 `.env`、`/data`（含 `.auth-token`、向量索引、trace、记忆等隐私数据）打进镜像或提交进 git；`.dockerignore` / `.gitignore` / `scripts/release.py` 三处都已排除。
 - 安全边界与威胁模型见 [docs/SECURITY.md](SECURITY.md) 与 [docs/THREAT_MODEL.md](THREAT_MODEL.md)。
+
+## 6. Production Readiness
+
+DeepSeek Infra is designed for **local-first personal / lab / internal use**. Before exposing it to the public Internet, you should add:
+
+- **TLS termination** — reverse proxy (Caddy / nginx) with Let's Encrypt
+- **Reverse proxy authentication** — basic auth, OAuth2 proxy, or mTLS in front of `/api/*`, `/mcp`, `/a2a`
+- **Rate limiting** — IP-based or token-based rate limits on the reverse proxy layer
+- **Request body size limit** — enforce `UPLOAD_MAX_BYTES` and match the reverse proxy's `client_max_body_size`
+- **Audit log rotation** — `.tool-audit/audit.jsonl` grows unbounded; add logrotate or periodic pruning
+- **Backup policy** — the `/data` volume (or `DEEPSEEK_MOBILE_ROOT`) contains all user state; back it up regularly
+- **External secret manager** — prefer injecting `DEEPSEEK_API_KEY` from a vault/secret store rather than `.env` on disk
+
+These are not built into the runtime itself — they belong at the infrastructure layer around it. Being explicit about this boundary makes the project safer: it doesn't pretend to solve what it doesn't.

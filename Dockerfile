@@ -18,8 +18,10 @@ COPY deepseek_infra ./deepseek_infra
 COPY static ./static
 
 # 全部可写运行时数据（auth token / 缓存 / 向量索引 / trace / 记忆 / 任务快照）
-# 经 DEEPSEEK_MOBILE_ROOT 集中到 /data，一个卷即可持久化；静态资源固定在镜像内。
-ENV DEEPSEEK_MOBILE_ROOT=/data \
+# 经 DEEPSEEK_INFRA_ROOT（优先）或 DEEPSEEK_MOBILE_ROOT（兼容）集中到 /data，
+# 一个卷即可持久化；静态资源固定在镜像内。
+ENV DEEPSEEK_INFRA_ROOT=/data \
+    DEEPSEEK_MOBILE_ROOT=/data \
     DEEPSEEK_MOBILE_STATIC_DIR=/app/static \
     HOST=0.0.0.0 \
     PORT=8000 \
