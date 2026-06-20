@@ -19,8 +19,14 @@ def _runtime_root() -> Path:
     When packaged with PyInstaller we put it next to the executable so the data
     survives across runs; ``sys._MEIPASS`` is a per-invocation temp dir and is
     not safe to write to.
+
+    ``DEEPSEEK_INFRA_ROOT`` is preferred; ``DEEPSEEK_MOBILE_ROOT`` is kept for
+    backward compatibility (v2.1.6 → future).
     """
-    env_root = os.environ.get("DEEPSEEK_MOBILE_ROOT", "").strip()
+    env_root = (
+        os.environ.get("DEEPSEEK_INFRA_ROOT", "").strip()
+        or os.environ.get("DEEPSEEK_MOBILE_ROOT", "").strip()
+    )
     if env_root:
         return Path(env_root).expanduser().resolve()
     if getattr(sys, "frozen", False) and hasattr(sys, "executable"):
@@ -30,7 +36,10 @@ def _runtime_root() -> Path:
 
 def _bundled_static_dir() -> Path:
     """Directory where read-only static assets live (frozen bundle vs. repo)."""
-    env_static_dir = os.environ.get("DEEPSEEK_MOBILE_STATIC_DIR", "").strip()
+    env_static_dir = (
+        os.environ.get("DEEPSEEK_INFRA_STATIC_DIR", "").strip()
+        or os.environ.get("DEEPSEEK_MOBILE_STATIC_DIR", "").strip()
+    )
     if env_static_dir:
         return Path(env_static_dir).expanduser().resolve()
     meipass = getattr(sys, "_MEIPASS", None)
