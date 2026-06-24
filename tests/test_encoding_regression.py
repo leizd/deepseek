@@ -2633,7 +2633,7 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn("context_taint.py", architecture)
 
     def test_v220_visualization_and_verification_assets_are_present(self) -> None:
-        """v2.2.1：README 里的 Infra 叙事必须落到可点击 / 可复现 / 可部署 / 可评测的资产上。"""
+        """v2.2.0：README 里的 Infra 叙事必须落到可点击 / 可复现 / 可部署 / 可评测的资产上。"""
         readme = Path("README.md").read_text(encoding="utf-8")
         changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
         config = Path("deepseek_infra/core/config.py").read_text(encoding="utf-8")
@@ -2740,11 +2740,83 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn("/modules/trace_viewer.js", sw)
         self.assertIn("/modules/trace_waterfall.js", sw)
 
-        # 版本联动：后端 / Android / 文档 / 工具链 / 前端缓存同步到 v2.2.1
+        # 当前应用版本已经进入 v2.2.1；Visualization & Verification 留在 v2.2.0 记录里。
         self.assertIn('app_version: str = "2.2.1"', config)
         self.assertIn("version-2.2.1-blue", readme)
-        self.assertIn("## [2.2.1] - Visualization & Verification", changelog)
+        self.assertIn("## [2.2.0] - Visualization & Verification", changelog)
         self.assertIn("deepseek-infra-v187", sw)
+
+    def test_v221_external_mcp_bridge_is_present(self) -> None:
+        """v2.2.1：外部 MCP server 工具桥接必须和 v2.2.0 的 Trace/Eval/Docker 分开记录。"""
+        readme = Path("README.md").read_text(encoding="utf-8")
+        changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
+        api = Path("docs/API.md").read_text(encoding="utf-8")
+        architecture = Path("docs/ARCHITECTURE.md").read_text(encoding="utf-8")
+        status_doc = Path("docs/IMPLEMENTATION_STATUS.md").read_text(encoding="utf-8")
+        compatibility = Path("docs/COMPATIBILITY.md").read_text(encoding="utf-8")
+        security = Path("docs/SECURITY.md").read_text(encoding="utf-8")
+        threat_model = Path("docs/THREAT_MODEL.md").read_text(encoding="utf-8")
+        demo = Path("docs/DEMO.md").read_text(encoding="utf-8")
+        env_example = Path(".env.example").read_text(encoding="utf-8")
+        deployment = Path("docs/DEPLOYMENT.md").read_text(encoding="utf-8")
+        bridge = Path("deepseek_infra/infra/mcp/bridge.py").read_text(encoding="utf-8")
+        executor = Path("deepseek_infra/infra/mcp/executor.py").read_text(encoding="utf-8")
+        tools = Path("deepseek_infra/infra/tool_runtime/tools.py").read_text(encoding="utf-8")
+        registry = Path("deepseek_infra/infra/mcp/registry.py").read_text(encoding="utf-8")
+        server = Path("deepseek_infra/web/server.py").read_text(encoding="utf-8")
+        test_mcp = Path("tests/test_mcp.py").read_text(encoding="utf-8")
+
+        self.assertLess(
+            changelog.index("## [2.2.1] - External MCP Tool Bridge"),
+            changelog.index("## [2.2.0] - Visualization & Verification"),
+        )
+        self.assertIn("### v2.2.0: Visualization & Verification", readme)
+        self.assertIn("### v2.2.1: External MCP Tool Bridge", readme)
+        self.assertIn("### v2.3: 协议兼容与交付增强", readme)
+        self.assertIn("MCP 外部 server 工具目录合并进本地 Agent 工具面", readme)
+        self.assertIn("GET /api/mcp/external/tools", readme)
+
+        self.assertIn("GET /api/mcp/external/tools", api)
+        self.assertIn("mcp__<server>__<tool>", api)
+        self.assertIn("bridge.py", architecture)
+        self.assertIn("executor.py", architecture)
+        self.assertIn("External MCP Tool Bridge（v2.2.1）", architecture)
+        self.assertIn("GET /api/mcp/external/tools", status_doc)
+        self.assertIn("## MCP External Server Bridge", compatibility)
+        self.assertIn("mcp__<server>__<tool>", compatibility)
+        self.assertIn("外部 MCP server", security)
+        self.assertIn("### T7 · 外部 MCP server 恶意或失联（v2.2.1）", threat_model)
+        self.assertIn("外部 MCP server 工具桥接（v2.2.1）", demo)
+        self.assertIn("MCP_CLIENT_SERVERS", env_example)
+        self.assertIn("外接 MCP server（v2.2.1）", deployment)
+
+        for marker in (
+            "ExternalMCPToolProfile",
+            'BRIDGE_PREFIX = "mcp__"',
+            "external_mcp_registry",
+            "metadata_provider",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, bridge)
+        self.assertIn("call_external_mcp_tool", executor)
+        self.assertIn("write_external_audit_entry", executor)
+        self.assertIn("policy.sanitize_result", executor)
+        self.assertIn("agent_tool_definitions", tools)
+        self.assertIn('name.startswith("mcp__")', tools)
+        self.assertIn("external_mcp_registry.list_profiles()", registry)
+        self.assertIn('/api/mcp/external/tools', server)
+
+        for test_name in (
+            "test_external_mcp_tool_profile_is_generated_from_mock_server",
+            "test_external_mcp_call_goes_through_policy",
+            "test_external_mcp_denied_without_execution",
+            "test_external_mcp_result_is_sanitized",
+            "test_external_mcp_server_unavailable_does_not_break_local_tools",
+        ):
+            with self.subTest(test_name=test_name):
+                self.assertIn(test_name, test_mcp)
+        self.assertIn("tmp_tests/", Path(".gitignore").read_text(encoding="utf-8"))
+        self.assertIn("tmp_tests", Path(".dockerignore").read_text(encoding="utf-8"))
 
     def test_v203_slides_skill_quality_upgrade_is_present(self) -> None:
         slides_skill = Path("deepseek_infra/infra/tool_runtime/slides_skill.py").read_text(encoding="utf-8")

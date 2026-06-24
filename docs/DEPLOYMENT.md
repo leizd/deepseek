@@ -79,6 +79,7 @@ WantedBy=multi-user.target
 
 - 模板：[.env.example](../.env.example)（核心变量带注释）；完整清单见 README「环境变量」。
 - 数据目录：`DEEPSEEK_INFRA_ROOT`（优先，`DEEPSEEK_MOBILE_ROOT` 向后兼容；容器内默认 `/data`；裸机默认仓库根目录）。各子目录含义见 README「本地数据与隐私」。
+- 外接 MCP server（v2.2.1）：默认关闭。启用时设置 `MCP_CLIENT_ENABLED=1` 与 `MCP_CLIENT_SERVERS='[{"name":"docs","url":"http://127.0.0.1:9001/mcp"}]'`，只连接可信地址；上线前用 `GET /api/mcp/external/tools` 核对 bridged tools、风险等级和审批要求。
 - 升级：换新镜像 tag 重新 `up -d` 即可；数据目录内的 SQLite schema 由各模块幂等迁移，跨小版本升级无需手工步骤。备份 = 备份 `/data` 卷。
 
 ## 5. 暴露到局域网 / 公网前必读

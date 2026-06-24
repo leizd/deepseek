@@ -1,1 +1,0 @@
-Beta security notes. The beta SSRF guard blocks the 169.254.169.254 metadata address and localhost.

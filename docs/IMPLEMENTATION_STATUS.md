@@ -76,10 +76,10 @@ README 把 DeepSeek Infra 描述成一个 local-first agentic AI infrastructure 
 
 ### 7. MCP Tool Hub — Experimental
 
-- **代码**：[server.py](../deepseek_infra/infra/mcp/server.py)（JSON-RPC 2.0：initialize / tools / resources / prompts）、[registry.py](../deepseek_infra/infra/mcp/registry.py)（17 工具 → MCP tools + 风险注解）、[permissions.py](../deepseek_infra/infra/mcp/permissions.py) + [adapters.py](../deepseek_infra/infra/mcp/adapters.py)（每个 tools/call 走 Tool Policy 闸门）、[client.py](../deepseek_infra/infra/mcp/client.py)（出方向 MCP client）。
-- **测试**：[test_mcp.py](../tests/test_mcp.py)（11 项：握手 / 目录 / 能力切片 / 真实执行 / 错误码族 / 回环 client）。
-- **亲手验证**：[examples/mcp_tool_demo.py](../examples/mcp_tool_demo.py)。
-- **Experimental 的原因**：协议层与安全闸门完整，但尚未对 Claude Desktop / Cursor 等外部客户端逐一跑兼容性矩阵；外部 server 桥接（client 方向的目录合并进本地 Agent 工具面）在 Roadmap v2.3。
+- **代码**：[server.py](../deepseek_infra/infra/mcp/server.py)（JSON-RPC 2.0：initialize / tools / resources / prompts）、[registry.py](../deepseek_infra/infra/mcp/registry.py)（17 工具 + external bridged tools → MCP tools）、[permissions.py](../deepseek_infra/infra/mcp/permissions.py) + [adapters.py](../deepseek_infra/infra/mcp/adapters.py)（每个 tools/call 走 Tool Policy 闸门）、[client.py](../deepseek_infra/infra/mcp/client.py)（出方向 MCP client）、[bridge.py](../deepseek_infra/infra/mcp/bridge.py)（外部工具 profile / 命名空间 / 缓存）、[executor.py](../deepseek_infra/infra/mcp/executor.py)（policy-gated 外部 tools/call + 审计）。
+- **测试**：[test_mcp.py](../tests/test_mcp.py)（外部桥接、命名隔离、策略拒绝、审批、审计、结果清洗、不可用外部 server 不影响本地工具，以及握手 / 目录 / 能力切片 / 真实执行 / 错误码族 / 回环 client）。
+- **亲手验证**：[examples/mcp_tool_demo.py](../examples/mcp_tool_demo.py)；配置 `MCP_CLIENT_ENABLED=1` + `MCP_CLIENT_SERVERS` 后访问 `GET /api/mcp/external/tools` 查看 bridged tools。
+- **Experimental 的原因**：协议层、安全闸门与外部 server 桥接已实现，但尚未对 Claude Desktop / Cursor 等外部客户端逐一跑兼容性矩阵。
 
 ### 8. A2A Agent Mesh — Experimental
 

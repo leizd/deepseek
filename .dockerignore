@@ -42,6 +42,7 @@ evals
 benchmarks
 examples
 tests
+tmp_tests
 test-artifacts
 outputs
 scripts
