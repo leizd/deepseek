@@ -54,5 +54,6 @@ pytest-cache-files-*/
 audit-cleanup-*/
 .test-*/
 tests/tmp/
+tmp_tests/
 /design-qa.md
 .codex-remote-attachments/

@@ -60,6 +60,20 @@
   - 每条决策写入 append-only 审计日志 `.tool-audit/audit.jsonl`；token 预算与请求调度层限制失控循环的爆炸半径。
 - **测试**：[test_tool_policy.py](../tests/test_tool_policy.py) 能力切片用例、[test_mcp.py](../tests/test_mcp.py) 越权调用被拒、[test_a2a.py](../tests/test_a2a.py) capability 切片载荷、`run_tool_eval.py` capability / unknown-tool / 污染升级用例。
 
+### T7 · 外部 MCP server 恶意或失联（v2.2.1）
+
+- **路径**：用户显式配置 `MCP_CLIENT_ENABLED=1` + `MCP_CLIENT_SERVERS` 后，外部 MCP server 的工具目录进入本地 Agent 工具面；恶意 server 可能伪装 read-only、暴露高风险 schema、返回 prompt injection 文本，或在执行时超时 / 失联。
+- **缓解**：
+  - **显式配置边界**：默认不连接任何外部 server，只消费 `MCP_CLIENT_SERVERS` 中用户列出的地址；
+  - **命名隔离**：外部工具统一命名为 `mcp__<server>__<tool>`，不会覆盖 `web_search`、`python_eval` 等本地工具；
+  - **保守 profile**：桥接层不完全信任 server annotations，会结合 schema 字段（url/path/token/secret 等）和描述推断 risk / network / filesystem / requiresApproval；
+  - **同一 Tool Policy 闸门**：bridged tool 执行前仍走 capability、schema、SSRF、路径、敏感写入和人工确认策略；高风险外部工具会返回待确认而非直接执行；
+  - **不可信结果清洗**：外部 MCP 返回内容默认视为 `external_output`，进入 prompt injection 清洗和 context taint 路径；
+  - **失联降级**：外部 server refresh / call 失败不会破坏本地工具目录；执行错误被转成工具级错误，并记录 errorType；
+  - **审计**：外部 MCP 审计条目包含 server、tool、bridgedTool、argsHash、policyVerdict、risk、latencyMs、errorType、protocol 和 direction。
+- **测试**：[test_mcp.py](../tests/test_mcp.py) 外部桥接用例（profile、命名隔离、策略拒绝、审批、审计、结果清洗、不可用 server 降级）。
+- **残余风险**：外部 server 的真实副作用只能由该 server 自身保证；DeepSeek Infra 只能在调用前后做本地策略门控、审计和结果清洗。只应配置可信来源或本机可审计的 MCP server。
+
 ## 非目标（明确不在防护范围内）
 
 - 运行后端的本机已被攻陷（恶意进程可直接读本地数据目录）；
@@ -75,3 +89,4 @@
 | 全量单测（含上述安全测试文件） | `python -m pytest` |
 | 依赖 CVE / 静态安全 / 凭证扫描 | CI `security` job（`pip-audit` · `bandit` · `detect-secrets`） |
 | 运行中防火墙状态 | `GET /api/taint` · `GET /api/tool-policy` |
+| 外部 MCP 工具面核对 | `GET /api/mcp/external/tools` |

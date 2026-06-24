@@ -2,7 +2,27 @@
 
 本项目使用类似 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的分组方式维护变更记录。未发布内容记录在 `[Unreleased]`，正式发版时迁移到具体版本。
 
-## [2.2.1] - Visualization & Verification
+## [2.2.1] - External MCP Tool Bridge
+
+**主题：External MCP Tool Bridge——把外部 MCP server 的工具目录安全地桥接进本地 Agent 工具面。** 本版不再扩大 2.2.0 的 Trace / Eval / Docker 范围，而是聚焦 MCP 出方向能力：发现外部工具、命名隔离、接入 Tool Policy、清洗外部结果，并补齐 CI 修复与临时测试产物清理。
+
+### 新增
+- **外部 MCP 工具桥接**：新增 `deepseek_infra/infra/mcp/bridge.py`，把 `MCP_CLIENT_ENABLED=1` + `MCP_CLIENT_SERVERS` 配置的外部 server 目录刷新为本地可用的 `mcp__<server>__<tool>` 工具名，避免与本地工具冲突。
+- **策略门控执行器**：新增 `deepseek_infra/infra/mcp/executor.py`，外部工具调用先走 `ToolPolicy`，再执行 `MCPClient.tools/call`，最后统一清洗结果并写入外部 MCP 审计字段。
+- **本地 Agent 工具面合并**：`agent_tool_definitions()`、MCP `tools/list` 与 `tools/call` 均能暴露 / 调用外部 MCP bridged tools；`GET /api/mcp/external/tools` 返回 server 可用性、工具名、风险等级和审批要求。
+- **外部输出安全建模**：`ExternalMCPToolProfile` 根据 MCP annotations、schema 字段和描述做保守风险推断；外部结果默认标记为 untrusted，进入 Context Taint / Tool Policy 清洗路径。
+
+### 更改
+- README Roadmap 拆分为 v2.2.0 Visualization & Verification 与 v2.2.1 External MCP Tool Bridge，v2.3 只保留后续协议互测 / A2A artifact streaming。
+- API、架构和实现状态文档补充外部 MCP 工具桥接的配置、观测端点、模块边界和测试覆盖。
+
+### 修复
+- 修复 2.2.1 推送时 CI 在 `ruff check .` 暴露的 F401 / F821 / E401 与 MCP bridge 相关 mypy 类型问题；最新 main CI 已恢复绿色。
+
+### 清理
+- 移除误入版本库的 `tmp_tests/` 本地 pytest 临时产物，并把 `tmp_tests/` 加入 `.gitignore`。
+
+## [2.2.0] - Visualization & Verification
 
 **主题：Visualization & Verification——让 Agent Trace、Eval、Docker 部署从「已有能力」变成「可展示、可验证、可交付」。** 本版补齐独立 Trace Viewer、脱敏导出、截图资产、Eval CI、Docker build gate 与镜像基础瘦身，并把 README / API / Demo / 部署 / 安全文档全部对齐到可验收状态。
 
