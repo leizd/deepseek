@@ -1,1 +1,0 @@
-Alpha guide. To package the alpha bundle run gradle assembleAlpha and ship alpha-debug.zip.
