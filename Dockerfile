@@ -16,6 +16,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app.py ./
 COPY deepseek_infra ./deepseek_infra
 COPY static ./static
+RUN find /app -type d -name __pycache__ -prune -exec rm -rf {} +
 
 # 全部可写运行时数据（auth token / 缓存 / 向量索引 / trace / 记忆 / 任务快照）
 # 经 DEEPSEEK_INFRA_ROOT（优先）或 DEEPSEEK_MOBILE_ROOT（兼容）集中到 /data，
@@ -25,6 +26,7 @@ ENV DEEPSEEK_INFRA_ROOT=/data \
     DEEPSEEK_MOBILE_STATIC_DIR=/app/static \
     HOST=0.0.0.0 \
     PORT=8000 \
+    PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
 RUN mkdir -p /data && chown -R appuser:appuser /data

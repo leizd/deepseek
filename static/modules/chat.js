@@ -3694,7 +3694,9 @@ function renderTracePanel(trace, message) {
   diagnosticsPanelList.replaceChildren();
   const spans = Array.isArray(trace.spans) ? trace.spans : [];
   const summary = trace.summary && typeof trace.summary === "object" ? trace.summary : {};
-  appendTraceRow("Trace ID", trace.traceId || traceIdForMessage(message));
+  const traceId = trace.traceId || traceIdForMessage(message);
+  appendTraceRow("Trace ID", traceId);
+  appendTraceActions(traceId);
   appendTraceRow("Status", trace.status || "unknown");
   appendTraceRow("Duration", formatTraceDuration(trace.durationMs));
   appendTraceRow("Spans", summary.spanCount ?? spans.length);
@@ -3772,6 +3774,25 @@ function appendTraceRow(label, value) {
   val.textContent = String(value);
   row.append(key, val);
   diagnosticsPanelList?.append(row);
+}
+
+function appendTraceActions(traceId) {
+  if (!diagnosticsPanelList || !traceId) return;
+  const row = document.createElement("div");
+  row.className = "trace-actions";
+  for (const [label, href] of [
+    ["Open page", `/trace/${encodeURIComponent(traceId)}`],
+    ["Export JSON", `/api/traces/${encodeURIComponent(traceId)}/export.json`],
+  ]) {
+    const link = document.createElement("a");
+    link.href = href;
+    link.textContent = label;
+    link.target = label === "Open page" ? "_blank" : "";
+    link.rel = label === "Open page" ? "noopener noreferrer" : "";
+    if (label === "Export JSON") link.download = `trace-${traceId.slice(0, 32)}.json`;
+    row.append(link);
+  }
+  diagnosticsPanelList.append(row);
 }
 
 function traceIdForMessage(message) {

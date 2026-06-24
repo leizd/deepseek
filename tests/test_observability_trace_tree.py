@@ -7,6 +7,7 @@ from unittest.mock import patch
 import deepseek_infra.infra.agent_runtime.multi_agent as multi_agent
 import deepseek_infra.infra.gateway.deepseek_client as deepseek_client
 import deepseek_infra.infra.observability.observability as observability
+from deepseek_infra.infra.observability.export import export_trace, redact_trace_for_response
 
 
 class FakeResponse:
@@ -109,3 +110,60 @@ def test_plain_chat_keeps_top_level_spans(tmp_settings) -> None:
     assert trace is not None
     deepseek_span = next(span for span in trace["spans"] if span["kind"] == "deepseek_api")
     assert deepseek_span["parentSpanId"] == ""
+
+
+def test_trace_export_redacts_secrets_and_clips_private_content(tmp_settings) -> None:
+    private_content = "private-file-line " * 400
+    trace_id = observability.start_trace(
+        kind="agent",
+        title="export redaction",
+        metadata={"auth_token": "secret-auth-token", "callback": "https://example.test/cb?token=secret-token"},
+    )
+    span = observability.start_span(
+        trace_id,
+        name="tool.read_file",
+        kind="tool",
+        input_data={
+            "authorization": "Bearer secret-bearer-token",
+            "fileText": private_content,
+            "totalTokens": 123,
+            "url": "https://example.test/read?api_key=secret-api-key",
+        },
+    )
+    span.finish(
+        status="ok",
+        output_data={"content": private_content, "apiKey": "sk-secret000000000"},
+        usage={"total_tokens": 123, "prompt_cache_hit_tokens": 10},
+        diagnostics={"cacheHit": True, "access_token": "secret-access-token"},
+    )
+    observability.finish_trace(trace_id, status="completed")
+
+    exported = export_trace(trace_id)
+
+    assert exported is not None
+    raw = json.dumps(exported, ensure_ascii=False)
+    assert "secret-auth-token" not in raw
+    assert "secret-bearer-token" not in raw
+    assert "secret-api-key" not in raw
+    assert "sk-secret" not in raw
+    assert private_content not in raw
+    assert "[truncated" in raw
+    assert '"totalTokens": 123' in raw
+    assert '"prompt_cache_hit_tokens": 10' in raw
+    assert exported["_export"]["redaction"]["applied"] is True
+
+
+def test_trace_redaction_preserves_token_usage_counters() -> None:
+    redacted = redact_trace_for_response(
+        {
+            "traceId": "t",
+            "apiKey": "sk-secret000000000",
+            "totalTokens": 42,
+            "usage": {"prompt_cache_hit_tokens": 7, "prompt_cache_miss_tokens": 3},
+        }
+    )
+
+    assert redacted["apiKey"] == "[redacted]"
+    assert redacted["totalTokens"] == 42
+    assert redacted["usage"]["prompt_cache_hit_tokens"] == 7
+    assert redacted["usage"]["prompt_cache_miss_tokens"] == 3

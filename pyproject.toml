@@ -32,4 +32,4 @@ python_version = "3.10"
 ignore_missing_imports = true
 warn_unused_ignores = true
 warn_redundant_casts = true
-exclude = '(^|[\\/])(audit-cleanup-[^\\/]*|\.test-[^\\/]*|pytest-cache-files-[^\\/]*)($|[\\/])'
+exclude = '(^|[\\/])(audit-cleanup-[^\\/]*|\.test-[^\\/]*|pytest-cache-files-[^\\/]*|android[\\/]app[\\/]build)($|[\\/])'

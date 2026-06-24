@@ -100,6 +100,19 @@ v2.0.6 起 span 形成端到端调用树（run 为根）。典型一次多 Agent
 
 Trace 数据只写在本机 `.traces/traces.sqlite3`，不会上传到第三方观测平台。
 
+## GET `/api/traces/{traceId}/export.json`
+
+下载单条 trace 的机器可读 JSON，响应带 `Content-Disposition: attachment`。导出会在返回前再次脱敏：
+
+- API Key、Authorization、auth token、cookie、password、secret 等字段替换为 `[redacted]`。
+- URL query 中的 `token` / `api_key` / `access_token` 等敏感参数替换为 `[redacted]`。
+- 大段 `content` / `text` / `prompt` / `fileText` / `rawContent` 等私有内容会截断，避免导出完整隐私文件内容。
+- token 用量、cache hit、span 层级和错误摘要会保留，方便离线排障。
+
+## GET `/trace/{traceId}`
+
+打开独立只读 Trace Viewer 页面（本地 token 鉴权）。页面从 `/api/traces/{traceId}` 加载数据，展示 trace 基本信息、span 树、瀑布图、Agent / Tool / RAG / LLM 耗时分组、token 用量、cache hit、错误信息，并提供一键导出 JSON。
+
 ## GET `/api/semantic-cache/status`
 
 返回本地语义缓存状态，不会触发重建或清理。字段与 `/api/config.semanticCache` 一致。

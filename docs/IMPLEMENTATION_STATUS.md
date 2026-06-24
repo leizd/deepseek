@@ -30,7 +30,7 @@ README 把 DeepSeek Infra 描述成一个 local-first agentic AI infrastructure 
 | 一键 Demo | [examples/](../examples/) · [docs/DEMO.md](DEMO.md) | ✅ |
 | 部署资产（Docker / Compose / .env） | [Dockerfile](../Dockerfile) · [docker-compose.yml](../docker-compose.yml) · [docs/DEPLOYMENT.md](DEPLOYMENT.md) | ✅ |
 | 安全工程（威胁模型 / CI 扫描） | [docs/THREAT_MODEL.md](THREAT_MODEL.md) · [ci.yml security job](../.github/workflows/ci.yml) | ✅ |
-| UI 截图 / Trace 瀑布图 | docs/assets/ | ✅ 截图入库；独立 `/trace/{id}` 只读页面已上线 |
+| UI 截图 / Trace 瀑布图 | docs/assets/ | ✅ `trace-waterfall.png` / `agent-dag-run.png` / `rag-citation.png` / `mcp-tool-call.png` 入库；独立 `/trace/{id}` 只读页面已上线 |
 
 ---
 
@@ -63,9 +63,9 @@ README 把 DeepSeek Infra 描述成一个 local-first agentic AI infrastructure 
 
 ### 5. Observability & Trace — Working（Demo 🟡）
 
-- **代码**：[observability.py](../deepseek_infra/infra/observability/observability.py)（trace run / span 树、SQLite 持久化）、[metrics.py](../deepseek_infra/infra/observability/metrics.py)（Prometheus 文本）、[health.py](../deepseek_infra/infra/observability/health.py)（`/healthz` `/readyz`）。
-- **测试**：[test_observability_trace_tree.py](../tests/test_observability_trace_tree.py) · [test_observability_metrics.py](../tests/test_observability_metrics.py)。
-- **亲手验证**：`curl http://127.0.0.1:8000/metrics`；前端每条助手消息的 Trace 按钮打开瀑布图（span 树按 parent 缩进）；`GET /trace/{trace_id}` 独立只读页面（不鉴权）；`GET /api/traces/{trace_id}/export.json` 导出。
+- **代码**：[observability.py](../deepseek_infra/infra/observability/observability.py)（trace run / span 树、SQLite 持久化）、[trace_api.py](../deepseek_infra/infra/observability/trace_api.py)（`/api/traces` / `/trace/{id}` 路由）、[export.py](../deepseek_infra/infra/observability/export.py)（导出脱敏）、[metrics.py](../deepseek_infra/infra/observability/metrics.py)（Prometheus 文本）、[health.py](../deepseek_infra/infra/observability/health.py)（`/healthz` `/readyz`）、[trace_viewer.html](../static/trace_viewer.html) / [trace_viewer.js](../static/modules/trace_viewer.js) / [trace_waterfall.js](../static/modules/trace_waterfall.js)（独立只读页面）。
+- **测试**：[test_observability_trace_tree.py](../tests/test_observability_trace_tree.py) · [test_observability_metrics.py](../tests/test_observability_metrics.py) · [test_server_integration.py](../tests/test_server_integration.py)。
+- **亲手验证**：`curl http://127.0.0.1:8000/metrics`；前端每条助手消息的 Trace 按钮打开瀑布图（span 树按 parent 缩进）；`GET /trace/{trace_id}` 独立只读页面（本地 token 鉴权）；`GET /api/traces/{trace_id}/export.json` 导出脱敏 JSON。
 - **缺口（🟡 的原因）**：trace 截图已入库，Demo GIF 尚未录制。
 
 ### 6. Edge-Cloud Model Router — Experimental

@@ -534,15 +534,19 @@ class ServerIntegrationTests(unittest.TestCase):
 
     def test_trace_semantic_cache_and_gateway_routes(self) -> None:
         trace_payload = {"traceId": "trace-1", "status": "completed", "spans": [], "summary": {"spanCount": 0}}
+        export_payload = {**trace_payload, "_export": {"redaction": {"applied": True}}}
         gateway_payload = {"contextManager": {"enabled": True}, "requestQueue": {"enabled": True, "counts": {}}}
         with (
             patch.object(server_module, "list_traces", return_value=[trace_payload]),
             patch.object(server_module, "get_trace", return_value=trace_payload),
+            patch.object(server_module, "export_trace", return_value=export_payload),
             patch.object(server_module, "semantic_cache_status", return_value={"enabled": True, "items": 0}),
             patch.object(server_module, "gateway_status", return_value=gateway_payload),
         ):
             traces_status, traces_payload = self.request_json("GET", "/api/traces")
             detail_status, detail_payload = self.request_json("GET", "/api/traces/trace-1")
+            export_status, export_data, export_response = self.request("GET", "/api/traces/trace-1/export.json")
+            viewer_status, viewer_data, viewer_response = self.request("GET", "/trace/trace-1")
             cache_status, cache_payload = self.request_json("GET", "/api/semantic-cache/status")
             gateway_status_code, gateway_response = self.request_json("GET", "/api/gateway/status")
 
@@ -550,6 +554,12 @@ class ServerIntegrationTests(unittest.TestCase):
         self.assertEqual(cast(list[dict[str, Any]], traces_payload["traces"])[0]["traceId"], "trace-1")
         self.assertEqual(detail_status, 200)
         self.assertEqual(cast(dict[str, Any], detail_payload["trace"])["traceId"], "trace-1")
+        self.assertEqual(export_status, 200)
+        self.assertEqual(json.loads(export_data.decode("utf-8"))["_export"]["redaction"]["applied"], True)
+        self.assertIn('attachment; filename="trace-trace-1.json"', export_response.getheader("Content-Disposition") or "")
+        self.assertEqual(viewer_status, 200)
+        self.assertIn(b"Trace Viewer", viewer_data)
+        self.assertIn("text/html", viewer_response.getheader("Content-Type") or "")
         self.assertEqual(cache_status, 200)
         self.assertEqual(cast(dict[str, Any], cache_payload["semanticCache"])["items"], 0)
         self.assertEqual(gateway_status_code, 200)
