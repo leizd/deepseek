@@ -17,11 +17,11 @@ import re
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 from deepseek_infra.core.config import settings
 from deepseek_infra.infra.mcp.client import MCPClient, configured_clients
-from deepseek_infra.infra.tool_runtime.tool_policy import TOOL_METADATA, ToolMetadata, tool_metadata
+from deepseek_infra.infra.tool_runtime.tool_policy import ToolMetadata, tool_metadata
 
 logger = logging.getLogger("deepseek_infra.mcp.bridge")
 

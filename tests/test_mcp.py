@@ -295,12 +295,11 @@ def test_external_mcp_tool_profile_is_generated_from_mock_server(monkeypatch) ->
     """External tools are profiled before entering the local tool surface."""
     from deepseek_infra.infra.mcp.bridge import (
         ExternalMCPToolProfile,
-        external_mcp_registry,
         infer_profile,
-        bridged_name,
     )
+    external_tools: list[dict[str, Any]] = _EXTERNAL_TOOLS_PAYLOAD["result"]["tools"]  # type: ignore[index]
     # Profile the search_repositories tool.
-    profile = infer_profile("github", _EXTERNAL_TOOLS_PAYLOAD["result"]["tools"][0])
+    profile = infer_profile("github", external_tools[0])
     assert isinstance(profile, ExternalMCPToolProfile)
     assert profile.server == "github"
     assert profile.tool == "search_repositories"
@@ -312,7 +311,7 @@ def test_external_mcp_tool_profile_is_generated_from_mock_server(monkeypatch) ->
     assert profile.external_output is True
 
     # Profile the delete_repo tool (destructive + sensitive key).
-    profile2 = infer_profile("github", _EXTERNAL_TOOLS_PAYLOAD["result"]["tools"][1])
+    profile2 = infer_profile("github", external_tools[1])
     assert profile2.risk in ("high", "critical")
     assert profile2.requires_approval is True
     assert profile2.env is True  # has "token" in schema
@@ -430,7 +429,8 @@ def test_external_mcp_audit_records_server_tool_args_hash_latency() -> None:
         _normalized_args_hash,
         write_external_audit_entry,
     )
-    import tempfile, os
+    import os
+    import tempfile
 
     # Write one entry to a temp log.
     tmp_dir = tempfile.mkdtemp(prefix="audit_test_")
