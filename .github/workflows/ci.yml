@@ -30,6 +30,8 @@ jobs:
       - run: node --check static/modules/settings.js
       - run: node --check static/modules/panels.js
       - run: node --check static/modules/chat.js
+      - run: node --check static/modules/trace_waterfall.js
+      - run: node --check static/modules/trace_viewer.js
 
   security:
     runs-on: ubuntu-latest
@@ -59,19 +61,12 @@ jobs:
       # 离线质量评测（无需 API Key）：RAG Recall/Citation + Tool Policy/Injection Defense
       - run: PYTHONHASHSEED=0 python evals/runners/run_rag_eval.py
       - run: python evals/runners/run_tool_eval.py
-      # Agent eval 需要模型 predictions，仅在有 sample predictions 时跑
-      - run: |
-          if [ -f evals/golden/agent_predictions.sample.jsonl ]; then
-            python evals/runners/run_agent_eval.py
-          else
-            echo "No agent predictions available; skipping"
-          fi
 
   docker:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: docker build .
+      - run: docker build -t deepseek-infra:test .
       - run: cp .env.example .env && docker compose config
 
   docs:

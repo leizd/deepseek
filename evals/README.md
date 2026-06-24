@@ -63,12 +63,12 @@ python evals/runners/run_tool_eval.py
 === Eval Report · rag ===
 Cases: 6
 RAG Recall@5: 1.000
-RAG MRR: 0.917
-Citation Accuracy: 0.833
+RAG MRR: 1.000
+Citation Accuracy: 1.000
 Keyword Coverage: 1.000
 Prompt Regression Pass: 1.000
-Avg Latency: 20.4ms
-P95 Latency: 21.3ms
+Avg Latency: 39.4ms
+P95 Latency: 49.5ms
 ```
 
 ```
