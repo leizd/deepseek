@@ -1,6 +1,6 @@
 # 部署指南（Docker / Compose / 裸机）
 
-适用版本：v2.2.1。
+适用版本：v2.2.2。
 
 DeepSeek Infra 的服务形态是一个单进程 FastAPI / ASGI 运行时：`/v1` OpenAI 兼容网关、`/mcp`、`/a2a`、`/api/*` 业务端点，加 `/healthz`·`/readyz`·`/metrics` 运维三件套。所有可写状态（鉴权 token、文件缓存、向量索引、trace、语义缓存、记忆、任务快照）都集中在**一个数据目录**下，由 `DEEPSEEK_INFRA_ROOT`（优先）或 `DEEPSEEK_MOBILE_ROOT`（向后兼容）指定——这也是容器化只需要一个卷的原因。
 
@@ -16,7 +16,7 @@ docker compose logs -f deepseek-infra
 
 ```bash
 curl http://127.0.0.1:8000/healthz
-# {"status":"ok","version":"2.2.1",...}
+# {"status":"ok","version":"2.2.2",...}
 curl http://127.0.0.1:8000/readyz
 curl http://127.0.0.1:8000/metrics | head
 ```
@@ -35,12 +35,12 @@ curl http://127.0.0.1:8000/metrics | head
 ## 2. 纯 Docker
 
 ```bash
-docker build -t deepseek-infra:2.2.1 .
+docker build -t deepseek-infra:2.2.2 .
 docker run -d --name deepseek-infra \
   -p 127.0.0.1:8000:8000 \
   --env-file .env \
   -v deepseek-data:/data \
-  deepseek-infra:2.2.1
+  deepseek-infra:2.2.2
 ```
 
 镜像要点（见 [Dockerfile](../Dockerfile)）：`python:3.12-slim`、`pip --no-cache-dir`、非 root 用户运行、`HEALTHCHECK` 打 `/healthz`、数据卷 `/data`、静态资源固定在镜像内（`DEEPSEEK_INFRA_STATIC_DIR`，旧变量 `DEEPSEEK_MOBILE_STATIC_DIR` 继续兼容），并在构建后清理 `__pycache__`。CI 的 docker job 会同时跑 `docker build -t deepseek-infra:test .` 和 `docker compose config`，确保镜像可构建、Compose 语法有效。
@@ -79,7 +79,7 @@ WantedBy=multi-user.target
 
 - 模板：[.env.example](../.env.example)（核心变量带注释）；完整清单见 README「环境变量」。
 - 数据目录：`DEEPSEEK_INFRA_ROOT`（优先，`DEEPSEEK_MOBILE_ROOT` 向后兼容；容器内默认 `/data`；裸机默认仓库根目录）。各子目录含义见 README「本地数据与隐私」。
-- 外接 MCP server（v2.2.1）：默认关闭。启用时设置 `MCP_CLIENT_ENABLED=1` 与 `MCP_CLIENT_SERVERS='[{"name":"docs","url":"http://127.0.0.1:9001/mcp"}]'`，只连接可信地址；上线前用 `GET /api/mcp/external/tools` 核对 bridged tools、风险等级和审批要求。
+- 外接 MCP server（v2.2.1）：默认关闭。启用时设置 `MCP_CLIENT_ENABLED=1` 与 `MCP_CLIENT_SERVERS='[{"name":"docs","url":"http://127.0.0.1:9001/mcp"}]'`，只连接可信地址；上线前用 `GET /api/mcp/external/tools` 核对 bridged tools、风险等级和审批要求。v2.2.2 起，Agent 和 `/mcp tools/call` 两条入口都会在外部 MCP executor 内部再次执行 ToolPolicy。
 - 升级：换新镜像 tag 重新 `up -d` 即可；数据目录内的 SQLite schema 由各模块幂等迁移，跨小版本升级无需手工步骤。备份 = 备份 `/data` 卷。
 
 ## 5. 暴露到局域网 / 公网前必读

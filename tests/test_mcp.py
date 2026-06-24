@@ -291,6 +291,17 @@ def _external_mcp_urlopen(request: Any, timeout: float = 0) -> _FakeResponse:
     return _FakeResponse(json.dumps({"jsonrpc": "2.0", "id": message.get("id"), "error": {"code": -32601, "message": "Not found"}}).encode("utf-8"))
 
 
+class _FakeExternalMCPClient:
+    def __init__(self, result: dict[str, Any] | None = None) -> None:
+        self.name = "fake"
+        self.calls = 0
+        self.result = result or {"content": [{"type": "text", "text": "ok"}], "isError": False}
+
+    def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        self.calls += 1
+        return self.result
+
+
 def test_external_mcp_tool_profile_is_generated_from_mock_server(monkeypatch) -> None:
     """External tools are profiled before entering the local tool surface."""
     from deepseek_infra.infra.mcp.bridge import (
@@ -405,6 +416,86 @@ def test_external_mcp_denied_without_execution() -> None:
     assert decision.needs_confirmation is True
 
     external_mcp_registry._profiles.pop("mcp__danger__nuke", None)
+
+
+def test_external_mcp_executor_requires_policy() -> None:
+    """External MCP execution has a defensive policy requirement."""
+    from deepseek_infra.infra.mcp.bridge import ExternalMCPToolProfile, external_mcp_registry
+    from deepseek_infra.infra.mcp.executor import call_external_mcp_tool
+
+    fake = _FakeExternalMCPClient()
+    profile = ExternalMCPToolProfile(
+        server="danger",
+        tool="echo",
+        bridged_name="mcp__danger__echo",
+        input_schema={"type": "object"},
+        risk="low",
+    )
+    external_mcp_registry._profiles["mcp__danger__echo"] = profile
+    external_mcp_registry._by_client["mcp__danger__echo"] = (fake, "echo")  # type: ignore[assignment]
+    try:
+        out = call_external_mcp_tool("mcp__danger__echo", {}, policy=None)
+        assert out["ok"] is False
+        assert out["code"] == "forbidden"
+        assert fake.calls == 0
+    finally:
+        external_mcp_registry._profiles.pop("mcp__danger__echo", None)
+        external_mcp_registry._by_client.pop("mcp__danger__echo", None)
+
+
+def test_external_mcp_hub_call_denies_without_approval(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The /mcp tools/call external branch must not bypass ToolPolicy."""
+    import deepseek_infra.infra.tool_runtime.tool_policy as tp_mod
+    from deepseek_infra.infra.mcp.bridge import ExternalMCPToolProfile, external_mcp_registry
+
+    monkeypatch.setattr(tp_mod, "TOOL_POLICY_REQUIRE_CONFIRM", True)
+    fake = _FakeExternalMCPClient()
+    profile = ExternalMCPToolProfile(
+        server="danger",
+        tool="nuke",
+        bridged_name="mcp__danger__nuke",
+        input_schema={"type": "object"},
+        risk="critical",
+        requires_approval=True,
+    )
+    external_mcp_registry._profiles["mcp__danger__nuke"] = profile
+    external_mcp_registry._by_client["mcp__danger__nuke"] = (fake, "nuke")  # type: ignore[assignment]
+    try:
+        call = result_of(handle_mcp_message(rpc("tools/call", {"name": "mcp__danger__nuke", "arguments": {}})))
+        assert call["isError"] is True
+        assert fake.calls == 0
+        assert "requires_confirmation" in json.dumps(call["structuredContent"])
+    finally:
+        external_mcp_registry._profiles.pop("mcp__danger__nuke", None)
+        external_mcp_registry._by_client.pop("mcp__danger__nuke", None)
+
+
+def test_external_mcp_tool_error_is_not_wrapped_as_success() -> None:
+    """MCP tools/call isError=true is a local tool failure, not ok=true."""
+    from deepseek_infra.infra.mcp.bridge import ExternalMCPToolProfile, external_mcp_registry
+    from deepseek_infra.infra.mcp.executor import call_external_mcp_tool
+    from deepseek_infra.infra.tool_runtime.tool_policy import ToolPolicy
+
+    fake = _FakeExternalMCPClient({"content": [{"type": "text", "text": "remote failed"}], "isError": True})
+    profile = ExternalMCPToolProfile(
+        server="remote",
+        tool="fail",
+        bridged_name="mcp__remote__fail",
+        input_schema={"type": "object"},
+        risk="low",
+    )
+    external_mcp_registry._profiles["mcp__remote__fail"] = profile
+    external_mcp_registry._by_client["mcp__remote__fail"] = (fake, "fail")  # type: ignore[assignment]
+    try:
+        policy = ToolPolicy(capability="full", metadata_provider=external_mcp_registry.metadata_provider)
+        out = call_external_mcp_tool("mcp__remote__fail", {}, policy=policy)
+        assert out["ok"] is False
+        assert out["code"] == "upstream_tool_error"
+        assert out["error"] == "External MCP tool returned isError=true"
+        assert fake.calls == 1
+    finally:
+        external_mcp_registry._profiles.pop("mcp__remote__fail", None)
+        external_mcp_registry._by_client.pop("mcp__remote__fail", None)
 
 
 def test_external_mcp_requires_approval() -> None:
@@ -545,3 +636,73 @@ def test_external_mcp_name_collision_is_handled(monkeypatch) -> None:
     assert profile.bridged_name != "web_search"
     # Local tool name is unchanged.
     assert bridged_name("external_search", "web_search").startswith("mcp__")
+
+
+def test_external_mcp_sanitized_name_collision_gets_hash_suffix() -> None:
+    from deepseek_infra.infra.mcp.bridge import _collision_safe_profile, infer_profile
+
+    tool_def = {"name": "search", "inputSchema": {"type": "object", "properties": {}}}
+    existing: dict[str, Any] = {}
+    first = _collision_safe_profile(infer_profile("my/server", tool_def), existing)
+    existing[first.bridged_name] = first
+    second = _collision_safe_profile(infer_profile("my_server", tool_def), existing)
+
+    assert first.bridged_name == "mcp__my_server__search"
+    assert second.bridged_name.startswith("mcp__my_server__search__")
+    assert second.bridged_name != first.bridged_name
+
+
+def test_external_mcp_schema_lookup_is_dynamic_after_local_cache_is_built() -> None:
+    from deepseek_infra.infra.mcp.bridge import ExternalMCPToolProfile, external_mcp_registry
+    from deepseek_infra.infra.tool_runtime import tools
+
+    tools.tool_parameter_schemas()
+    profile = ExternalMCPToolProfile(
+        server="late",
+        tool="echo",
+        bridged_name="mcp__late__echo",
+        input_schema={
+            "type": "object",
+            "properties": {"message": {"type": "string"}},
+            "required": ["message"],
+        },
+        risk="low",
+    )
+    external_mcp_registry._profiles["mcp__late__echo"] = profile
+    try:
+        schema = tools.schema_for_tool("mcp__late__echo")
+        assert schema is not None
+        assert schema["required"] == ["message"]
+    finally:
+        external_mcp_registry._profiles.pop("mcp__late__echo", None)
+
+
+def test_agent_tool_definitions_refreshes_external_registry(monkeypatch: pytest.MonkeyPatch) -> None:
+    from deepseek_infra.infra.mcp.bridge import ExternalMCPToolProfile, external_mcp_registry
+    from deepseek_infra.infra.tool_runtime import tools
+
+    refreshed = {"value": False}
+
+    def fake_refresh() -> None:
+        refreshed["value"] = True
+
+    profile = ExternalMCPToolProfile(
+        server="docs",
+        tool="lookup",
+        bridged_name="mcp__docs__lookup",
+        input_schema={"type": "object", "properties": {"query": {"type": "string"}}},
+        risk="low",
+    )
+    monkeypatch.setattr(external_mcp_registry, "refresh", fake_refresh)
+    external_mcp_registry._profiles["mcp__docs__lookup"] = profile
+    try:
+        definitions = tools.agent_tool_definitions()
+        names = {
+            definition["function"]["name"]
+            for definition in definitions
+            if isinstance(definition.get("function"), dict)
+        }
+        assert refreshed["value"] is True
+        assert "mcp__docs__lookup" in names
+    finally:
+        external_mcp_registry._profiles.pop("mcp__docs__lookup", None)

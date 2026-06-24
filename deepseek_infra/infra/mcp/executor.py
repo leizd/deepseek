@@ -28,12 +28,13 @@ def call_external_mcp_tool(
     """Execute one bridged external MCP tool call through the policy gate.
 
     1. Parse the bridged name → (server, original_tool)
-    2. Resolve via registry → (MCPClient, original_tool_name)
-    3. Call the external server (timed)
-    4. Wrap in ``{ok, tool, result}``
-    5. Sanitize via policy
-    6. Write extended audit entry
-    7. Return shaped output for the LLM
+    2. Require and run ``ToolPolicy.evaluate()``
+    3. Resolve via registry → (MCPClient, original_tool_name)
+    4. Call the external server (timed)
+    5. Wrap in ``{ok, tool, result}``
+    6. Sanitize via policy
+    7. Write extended audit entry
+    8. Return shaped output for the LLM
     """
     parsed = parse_bridged_name(bridged_name)
     if parsed is None:
@@ -44,7 +45,21 @@ def call_external_mcp_tool(
             "code": "invalid_payload",
         }
 
-    server, original_tool = parsed
+    server, _original_tool = parsed
+    if policy is None:
+        return {
+            "ok": False,
+            "tool": bridged_name,
+            "error": "External MCP tools require ToolPolicy",
+            "code": "forbidden",
+        }
+
+    profile = external_mcp_registry.get_profile(bridged_name)
+    schema = profile.input_schema if profile is not None else None
+    decision = policy.evaluate(bridged_name, arguments, schema=schema)
+    if not decision.allowed:
+        return ToolPolicy.denial_output(decision)
+
     resolved = external_mcp_registry.resolve(bridged_name)
     if resolved is None:
         return {
@@ -55,7 +70,6 @@ def call_external_mcp_tool(
         }
 
     client, tool_name = resolved
-    profile = external_mcp_registry.get_profile(bridged_name)
     risk = profile.risk if profile is not None else "unknown"
 
     start = time.perf_counter()
@@ -71,7 +85,7 @@ def call_external_mcp_tool(
             tool=tool_name,
             bridged_tool=bridged_name,
             arguments=arguments,
-            policy_verdict="allowed",  # policy already said yes — this is a transport failure
+            policy_verdict=decision.policy_verdict,  # policy already said yes — this is a transport failure
             risk=risk,
             latency_ms=int((time.perf_counter() - start) * 1000),
             error_type=error_type,
@@ -85,7 +99,7 @@ def call_external_mcp_tool(
             tool=tool_name,
             bridged_tool=bridged_name,
             arguments=arguments,
-            policy_verdict="allowed",
+            policy_verdict=decision.policy_verdict,
             risk=risk,
             latency_ms=int((time.perf_counter() - start) * 1000),
             error_type=error_type,
@@ -94,20 +108,24 @@ def call_external_mcp_tool(
 
     latency_ms = int((time.perf_counter() - start) * 1000)
 
-    output = {"ok": True, "tool": bridged_name, "result": result}
+    is_error = bool(result.get("isError")) if isinstance(result, dict) else False
+    output = {"ok": not is_error, "tool": bridged_name, "result": result}
+    if is_error:
+        error_type = "tool_error"
+        output["code"] = "upstream_tool_error"
+        output["error"] = "External MCP tool returned isError=true"
 
-    if policy is not None:
-        output = policy.sanitize_result(bridged_name, output)
+    output = policy.sanitize_result(bridged_name, output)
 
     _write_audit_for_call(
         server=server,
         tool=tool_name,
         bridged_tool=bridged_name,
         arguments=arguments,
-        policy_verdict="allowed",
+        policy_verdict=decision.policy_verdict,
         risk=risk,
         latency_ms=latency_ms,
-        error_type=None,
+        error_type=error_type,
     )
 
     return output

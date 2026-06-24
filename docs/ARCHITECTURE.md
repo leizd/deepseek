@@ -1,6 +1,6 @@
 # 架构说明
 
-适用版本：v2.2.1。
+适用版本：v2.2.2。
 
 DeepSeek Infra 是一个本地优先的 **Agentic AI Infra 平台**：桌面端可通过内嵌 WebView 的本地应用窗口运行，手机端可通过 APK WebView 运行；本机 FastAPI 后端把 LLM 网关（含 OpenAI 兼容 `/v1`）、多 Agent DAG 运行时、本地向量 RAG、工具调用运行时、链路可观测性（`/metrics`、`/healthz`）和端云模型路由组装成一个可私有化、多端运行、可观测、可扩展的 Agentic AI 系统，并以标准协议互操作：本地工具面经 **MCP**（`POST /mcp`）暴露给任意 MCP 客户端，本地 Agent 经 **A2A** 风格的 Agent Card 与任务生命周期（`/.well-known/agent-card.json`、`/a2a`）与外部 Agent 互通。
 
@@ -77,7 +77,7 @@ Local Data & Observability   Vector RAG · Memory · Trace · Semantic Cache · 
 | `deepseek_infra/infra/mcp/permissions.py` | MCP 连接的能力域：`MCP_CAPABILITY` → Tool Policy capability profile（未知回落 `full`）、按连接的工具白名单、`params._meta.approvedTools` 预批解析。 |
 | `deepseek_infra/infra/mcp/client.py` | 出方向 MCP client（Streamable HTTP，JSON 响应模式）：`initialize`（含 `notifications/initialized`）/ `tools/list` / `tools/call`、`Mcp-Session-Id` 会话头管理、超时与错误翻译。默认关闭，只连 `MCP_CLIENT_SERVERS` 显式配置的外部 server。 |
 | `deepseek_infra/infra/mcp/bridge.py` | External MCP Tool Bridge（v2.2.1）：把外部 server 的工具目录缓存成 `mcp__<server>__<tool>`，并根据 annotations、schema 字段和描述推断 risk / network / filesystem / requiresApproval，作为 Tool Policy 可消费的 `ToolMetadata`。 |
-| `deepseek_infra/infra/mcp/executor.py` | 外部 MCP 工具执行器（v2.2.1）：解析 bridged name，执行前走 Tool Policy，调用外部 MCP `tools/call`，清洗 untrusted 结果并写入 server/tool/argsHash/latencyMs/errorType 审计字段。 |
+| `deepseek_infra/infra/mcp/executor.py` | 外部 MCP 工具执行器（v2.2.1，v2.2.2 加固）：解析 bridged name，内部强制要求并执行 Tool Policy，调用外部 MCP `tools/call`，把远端 `isError=true` 映射为本地工具失败，清洗 untrusted 结果并写入 server/tool/argsHash/latencyMs/errorType 审计字段。 |
 | `deepseek_infra/infra/agent_runtime/a2a.py` | A2A Agent Mesh（v2.1.4）：每个本地 Agent 角色（orchestrator / researcher / coder / reasoner / critic）的 Agent Card（`/.well-known/agent-card.json` 发现 + `GET /a2a/agents` 列表）、JSON-RPC 任务生命周期（`message/send`、`message/stream` SSE 状态/产物推送、`tasks/get`、`tasks/cancel`、`tasks/list`）、任务状态机（submitted→working→completed/failed/canceled）、`.a2a/` 任务快照持久化与重启对账（磁盘上残留的非终态任务标记 failed）、外部委派 `A2AClient`（`A2A_PEERS`）。任务在角色 capability 切片内经 `call_deepseek` 执行，绝不超出该角色的工具面。 |
 | `deepseek_infra/infra/gateway/context_taint.py` | Context Taint Tracking + Prompt Injection Firewall（v2.1.5）：把组装后的请求按来源分段打信任标签（trusted_system / trusted_user / trusted_memory / trusted_tool 可信；untrusted_web / untrusted_file / untrusted_tool_result 不可信），对不可信段扫描注入、密钥外泄与工具调用指令三类 pattern，产出 `diagnostics.contextTaint` 报告；`harden_search_context`（隔离声明 + 注入红action）与 `file_context_guard_line`（文件上下文确定性 guard 行）做主动加固，字节确定性保证 prompt cache 前缀跨轮稳定。污染判定回流 `ToolPolicy`（taint 升级确认 + 凭证外泄硬拒绝），形成检测→隔离→拦截的闭环。 |
 | `deepseek_infra/infra/rag/files.py` | 文件文本抽取、分块、缓存和附件上下文检索；并为豆包式文档阅读工作台提供原文件原样返回、PDF 逐页 PNG 渲染（PyMuPDF，回退 pdf2image）、按页文字坐标层、分页文本和跨页关键字搜索。 |

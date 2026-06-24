@@ -1,6 +1,6 @@
 # Implementation Status（实现状态矩阵）
 
-适用版本：v2.2.1。
+适用版本：v2.2.2。
 
 README 把 DeepSeek Infra 描述成一个 local-first agentic AI infrastructure platform。这一页回答一个更重要的问题：**每个模块到底落地到什么程度**——代码在哪、测试在哪、怎么亲手验证。所有链接都指向仓库内真实存在的文件；如果某格是 🟡 或 ❌，说明那部分还没做完，我们直接写出来，而不是让 README 替它画饼。
 
@@ -76,8 +76,8 @@ README 把 DeepSeek Infra 描述成一个 local-first agentic AI infrastructure 
 
 ### 7. MCP Tool Hub — Experimental
 
-- **代码**：[server.py](../deepseek_infra/infra/mcp/server.py)（JSON-RPC 2.0：initialize / tools / resources / prompts）、[registry.py](../deepseek_infra/infra/mcp/registry.py)（17 工具 + external bridged tools → MCP tools）、[permissions.py](../deepseek_infra/infra/mcp/permissions.py) + [adapters.py](../deepseek_infra/infra/mcp/adapters.py)（每个 tools/call 走 Tool Policy 闸门）、[client.py](../deepseek_infra/infra/mcp/client.py)（出方向 MCP client）、[bridge.py](../deepseek_infra/infra/mcp/bridge.py)（外部工具 profile / 命名空间 / 缓存）、[executor.py](../deepseek_infra/infra/mcp/executor.py)（policy-gated 外部 tools/call + 审计）。
-- **测试**：[test_mcp.py](../tests/test_mcp.py)（外部桥接、命名隔离、策略拒绝、审批、审计、结果清洗、不可用外部 server 不影响本地工具，以及握手 / 目录 / 能力切片 / 真实执行 / 错误码族 / 回环 client）。
+- **代码**：[server.py](../deepseek_infra/infra/mcp/server.py)（JSON-RPC 2.0：initialize / tools / resources / prompts）、[registry.py](../deepseek_infra/infra/mcp/registry.py)（17 工具 + external bridged tools → MCP tools）、[permissions.py](../deepseek_infra/infra/mcp/permissions.py) + [adapters.py](../deepseek_infra/infra/mcp/adapters.py)（每个 tools/call 走 Tool Policy 闸门）、[client.py](../deepseek_infra/infra/mcp/client.py)（出方向 MCP client）、[bridge.py](../deepseek_infra/infra/mcp/bridge.py)（外部工具 profile / 命名空间 / 缓存 / 碰撞后缀）、[executor.py](../deepseek_infra/infra/mcp/executor.py)（executor 内部防御式 ToolPolicy、远端 `isError` 映射、policy-gated 外部 tools/call + 审计）。
+- **测试**：[test_mcp.py](../tests/test_mcp.py)（外部桥接、命名隔离、策略拒绝、审批、审计、结果清洗、不可用外部 server 不影响本地工具、`/mcp tools/call` 不绕过外部 ToolPolicy、远端 `isError=true` 不包成成功、schema 动态读取、Agent 工具面 refresh、碰撞 hash 后缀，以及握手 / 目录 / 能力切片 / 真实执行 / 错误码族 / 回环 client）。
 - **亲手验证**：[examples/mcp_tool_demo.py](../examples/mcp_tool_demo.py)；配置 `MCP_CLIENT_ENABLED=1` + `MCP_CLIENT_SERVERS` 后访问 `GET /api/mcp/external/tools` 查看 bridged tools。
 - **Experimental 的原因**：协议层、安全闸门与外部 server 桥接已实现，但尚未对 Claude Desktop / Cursor 等外部客户端逐一跑兼容性矩阵。
 

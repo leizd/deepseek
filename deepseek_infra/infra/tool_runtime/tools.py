@@ -645,6 +645,7 @@ def agent_tool_definitions() -> list[dict[str, Any]]:
     tools = list(available_tool_definitions())
     try:
         from deepseek_infra.infra.mcp.bridge import external_mcp_registry
+        external_mcp_registry.refresh()
         for profile in external_mcp_registry.list_profiles():
             # Build a params schema that is valid JSON Schema even when the
             # external server sends a free-form inputSchema.
@@ -670,7 +671,7 @@ _TOOL_PARAMETER_SCHEMAS: dict[str, dict[str, Any]] | None = None
 
 
 def tool_parameter_schemas() -> dict[str, dict[str, Any]]:
-    """Map tool name -> declared JSON ``parameters`` schema (cached).
+    """Map local tool name -> declared JSON ``parameters`` schema (cached).
 
     Fed to the Tool Policy Engine for schema validation so the policy stays
     decoupled from this module (it never imports ``tools``).
@@ -678,7 +679,7 @@ def tool_parameter_schemas() -> dict[str, dict[str, Any]]:
     global _TOOL_PARAMETER_SCHEMAS
     if _TOOL_PARAMETER_SCHEMAS is None:
         index: dict[str, dict[str, Any]] = {}
-        for definition in agent_tool_definitions():
+        for definition in available_tool_definitions():
             function = definition.get("function")
             if isinstance(function, dict):
                 name = str(function.get("name") or "")
@@ -687,6 +688,19 @@ def tool_parameter_schemas() -> dict[str, dict[str, Any]]:
                     index[name] = parameters
         _TOOL_PARAMETER_SCHEMAS = index
     return _TOOL_PARAMETER_SCHEMAS
+
+
+def schema_for_tool(name: str) -> dict[str, Any] | None:
+    """Return a local cached schema or a live external MCP profile schema."""
+    tool_name = str(name or "").strip()
+    if tool_name.startswith("mcp__"):
+        try:
+            from deepseek_infra.infra.mcp.bridge import external_mcp_registry
+            profile = external_mcp_registry.get_profile(tool_name)
+            return profile.input_schema if profile is not None and isinstance(profile.input_schema, dict) else None
+        except Exception:
+            return None
+    return tool_parameter_schemas().get(tool_name)
 
 
 def execute_tool_call(
@@ -701,14 +715,15 @@ def execute_tool_call(
     function: dict[str, Any] = raw_function if isinstance(raw_function, dict) else {}
     name = str(function.get("name") or tool_call.get("name") or "").strip()
     arguments = parse_tool_arguments(function.get("arguments"))
-    if policy is not None:
-        decision = policy.evaluate(name, arguments, schema=tool_parameter_schemas().get(name))
-        if not decision.allowed:
-            return ToolPolicy.denial_output(decision)
-    # External MCP bridged tools — dispatch via the policy-gated executor.
+    # External MCP bridged tools are policy-gated inside the executor so both
+    # Agent calls and MCP Hub calls share the same final enforcement point.
     if name.startswith("mcp__"):
         from deepseek_infra.infra.mcp.executor import call_external_mcp_tool
         return call_external_mcp_tool(name, arguments, policy)
+    if policy is not None:
+        decision = policy.evaluate(name, arguments, schema=schema_for_tool(name))
+        if not decision.allowed:
+            return ToolPolicy.denial_output(decision)
     try:
         if name == "python_eval":
             result = python_eval(str(arguments.get("expression") or ""))
