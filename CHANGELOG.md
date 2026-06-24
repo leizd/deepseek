@@ -2,6 +2,21 @@
 
 本项目使用类似 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的分组方式维护变更记录。未发布内容记录在 `[Unreleased]`，正式发版时迁移到具体版本。
 
+## [2.2.2] - MCP Policy Hardening
+
+**主题：MCP Policy Hardening——把外部 MCP bridged tools 的策略闸门从“主 Agent 路径可用”补强到“任何入口都不可绕过”。** 本版聚焦外部 MCP 工具的安全一致性：`/mcp tools/call`、Agent tool calls、远端工具错误、SSRF/path guard、schema 刷新和命名碰撞都进入明确的回归覆盖。
+
+### 修复
+- **`/mcp tools/call` 不再绕过 ToolPolicy**：`connection_policy()` 注入 `external_mcp_registry.metadata_provider`，`call_external_mcp_tool()` 内部也防御式要求 policy 并执行 `policy.evaluate()`；未批准 / 被拒绝的外部工具不会触达远端 MCP server。
+- **远端 MCP 工具错误正确透传**：外部 MCP `tools/call` 返回 `isError: true` 时，本地输出改为 `ok: false`、`code: upstream_tool_error`，审计 `errorType` 记为 `tool_error`。
+- **外部工具 SSRF / path guard 泛化**：`meta.network=True` 的工具会递归扫描 `url` / `uri` / `endpoint` / `base_url` / `host` / `domain` 参数并做 SSRF 预检查；`meta.filesystem=True` 的工具会扫描 `path` / `file` / `filename` / `directory` 等字段，拒绝绝对路径、`..`、`~` 和 Windows 盘符。
+- **外部工具 schema 不再被一次性缓存卡住**：本地工具 schema 继续缓存，外部 MCP schema 通过 registry profile 动态读取；`agent_tool_definitions()` 会轻量触发 registry refresh，TTL 内直接返回。
+- **桥接命名碰撞不再覆盖**：当 sanitized server/tool 名碰撞时，后来的 bridged name 自动追加短 hash 后缀，避免 registry 覆盖。
+
+### 测试
+- `tests/test_mcp.py` 新增外部 MCP policy、`isError`、schema refresh、自动 refresh、命名碰撞回归。
+- `tests/test_tool_policy.py` 新增外部 network/filesystem 工具的泛化 SSRF/path guard 回归。
+
 ## [2.2.1] - External MCP Tool Bridge
 
 **主题：External MCP Tool Bridge——把外部 MCP server 的工具目录安全地桥接进本地 Agent 工具面。** 本版不再扩大 2.2.0 的 Trace / Eval / Docker 范围，而是聚焦 MCP 出方向能力：发现外部工具、命名隔离、接入 Tool Policy、清洗外部结果，并补齐 CI 修复与临时测试产物清理。

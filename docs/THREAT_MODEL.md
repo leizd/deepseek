@@ -1,6 +1,6 @@
 # 威胁模型（Threat Model）
 
-适用版本：v2.2.1。
+适用版本：v2.2.2。
 
 定位与信任假设见 [docs/SECURITY.md](SECURITY.md)：个人、本地优先的运行时，运行后端的机器可信，默认只监听 `127.0.0.1`。这一页回答更尖锐的问题：**当模型上下文里混入攻击者可控的内容（网页、文件、工具结果），或本机服务被局域网内他人触达时，每一类威胁由哪段代码挡住、由哪个测试钉住、还剩什么残余风险。**
 
@@ -60,18 +60,20 @@
   - 每条决策写入 append-only 审计日志 `.tool-audit/audit.jsonl`；token 预算与请求调度层限制失控循环的爆炸半径。
 - **测试**：[test_tool_policy.py](../tests/test_tool_policy.py) 能力切片用例、[test_mcp.py](../tests/test_mcp.py) 越权调用被拒、[test_a2a.py](../tests/test_a2a.py) capability 切片载荷、`run_tool_eval.py` capability / unknown-tool / 污染升级用例。
 
-### T7 · 外部 MCP server 恶意或失联（v2.2.1）
+### T7 · 外部 MCP server 恶意或失联（v2.2.1，v2.2.2 加固）
 
 - **路径**：用户显式配置 `MCP_CLIENT_ENABLED=1` + `MCP_CLIENT_SERVERS` 后，外部 MCP server 的工具目录进入本地 Agent 工具面；恶意 server 可能伪装 read-only、暴露高风险 schema、返回 prompt injection 文本，或在执行时超时 / 失联。
 - **缓解**：
   - **显式配置边界**：默认不连接任何外部 server，只消费 `MCP_CLIENT_SERVERS` 中用户列出的地址；
   - **命名隔离**：外部工具统一命名为 `mcp__<server>__<tool>`，不会覆盖 `web_search`、`python_eval` 等本地工具；
   - **保守 profile**：桥接层不完全信任 server annotations，会结合 schema 字段（url/path/token/secret 等）和描述推断 risk / network / filesystem / requiresApproval；
-  - **同一 Tool Policy 闸门**：bridged tool 执行前仍走 capability、schema、SSRF、路径、敏感写入和人工确认策略；高风险外部工具会返回待确认而非直接执行；
+  - **同一 Tool Policy 闸门**：bridged tool 在 executor 内部防御式执行 policy evaluate，因此 Agent 调用链和 `/mcp tools/call` Hub 调用链都不能绕过 capability、schema、SSRF、路径、敏感写入和人工确认策略；高风险外部工具会返回待确认而非直接执行；
+  - **通用参数扫描（v2.2.2）**：`network=True` 外部工具会扫描 `url` / `uri` / `endpoint` / `base_url` / `host` / `domain` 参数做 SSRF 预检查；`filesystem=True` 外部工具会扫描 path/file/filename/directory 等字段，拒绝绝对路径、`..`、`~` 和 Windows 盘符；
+  - **远端工具错误不伪装成功（v2.2.2）**：外部 MCP server 返回 `isError=true` 时，本地输出为 `ok=false` / `upstream_tool_error`，审计 `errorType=tool_error`；
   - **不可信结果清洗**：外部 MCP 返回内容默认视为 `external_output`，进入 prompt injection 清洗和 context taint 路径；
   - **失联降级**：外部 server refresh / call 失败不会破坏本地工具目录；执行错误被转成工具级错误，并记录 errorType；
   - **审计**：外部 MCP 审计条目包含 server、tool、bridgedTool、argsHash、policyVerdict、risk、latencyMs、errorType、protocol 和 direction。
-- **测试**：[test_mcp.py](../tests/test_mcp.py) 外部桥接用例（profile、命名隔离、策略拒绝、审批、审计、结果清洗、不可用 server 降级）。
+- **测试**：[test_mcp.py](../tests/test_mcp.py) 外部桥接用例（profile、命名隔离、策略拒绝、审批、审计、结果清洗、不可用 server 降级、Hub 路径不绕过 policy、远端 `isError=true`、schema refresh、命名碰撞），[test_tool_policy.py](../tests/test_tool_policy.py) 外部 network/filesystem 参数扫描。
 - **残余风险**：外部 server 的真实副作用只能由该 server 自身保证；DeepSeek Infra 只能在调用前后做本地策略门控、审计和结果清洗。只应配置可信来源或本机可审计的 MCP server。
 
 ## 非目标（明确不在防护范围内）

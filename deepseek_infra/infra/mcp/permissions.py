@@ -30,6 +30,7 @@ def allowed_tool_names() -> list[str]:
         # Include external MCP bridged tools when capability is full.
         try:
             from deepseek_infra.infra.mcp.bridge import external_mcp_registry
+            external_mcp_registry.refresh()
             names.extend(p.bridged_name for p in external_mcp_registry.list_profiles())
         except Exception:
             pass
@@ -39,10 +40,13 @@ def allowed_tool_names() -> list[str]:
 
 def connection_policy(approvals: set[str] | None = None) -> ToolPolicy:
     """One policy per ``tools/call``: capability slice + per-call pre-approvals."""
+    from deepseek_infra.infra.mcp.bridge import external_mcp_registry
+
     return ToolPolicy(
         capability=hub_capability(),
         approvals=approvals or set(),
         scope="mcp",
+        metadata_provider=external_mcp_registry.metadata_provider,
     )
 
 

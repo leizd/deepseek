@@ -16,7 +16,8 @@ import logging
 import re
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from hashlib import sha256
 from typing import Any
 
 from deepseek_infra.core.config import settings
@@ -50,6 +51,23 @@ def parse_bridged_name(name: str) -> tuple[str, str] | None:
     if len(parts) != 2 or not parts[0] or not parts[1]:
         return None
     return parts[0], parts[1]
+
+
+def _collision_safe_profile(
+    profile: "ExternalMCPToolProfile",
+    existing: dict[str, "ExternalMCPToolProfile"],
+) -> "ExternalMCPToolProfile":
+    """Add a short stable suffix when sanitized server/tool names collide."""
+    if profile.bridged_name not in existing:
+        return profile
+    suffix_seed = f"{profile.server}\0{profile.tool}".encode("utf-8", errors="ignore")
+    suffix = sha256(suffix_seed).hexdigest()[:6]
+    candidate = f"{profile.bridged_name}__{suffix}"
+    counter = 2
+    while candidate in existing:
+        candidate = f"{profile.bridged_name}__{suffix}{counter}"
+        counter += 1
+    return replace(profile, bridged_name=candidate)
 
 
 # --- External tool profile -------------------------------------------------------
@@ -240,6 +258,7 @@ class ExternalMCPToolRegistry:
                 if not isinstance(tool_def, dict):
                     continue
                 profile = infer_profile(server_name, tool_def, timeout=settings.mcp.client_timeout_seconds)
+                profile = _collision_safe_profile(profile, new_profiles)
                 new_profiles[profile.bridged_name] = profile
                 new_by_client[profile.bridged_name] = (client, profile.tool)
 

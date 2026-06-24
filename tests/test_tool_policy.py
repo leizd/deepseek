@@ -8,6 +8,7 @@ import pytest
 import deepseek_infra.infra.tool_runtime.tool_policy as tool_policy
 import deepseek_infra.infra.tool_runtime.tools as tools
 from deepseek_infra.infra.tool_runtime.tool_policy import (
+    ToolMetadata,
     ToolPolicy,
     capability_tools,
     evaluate_path_safety,
@@ -94,6 +95,44 @@ def test_path_safety_blocks_traversal_and_bad_identifiers() -> None:
     assert evaluate_path_safety({"fileId": "../../etc/passwd"})[0] is False
     assert evaluate_path_safety({"projectId": "../secret"})[0] is False
     assert evaluate_path_safety({"projectId": "a/b"})[0] is False
+    assert evaluate_path_safety({"path": "/etc/passwd"})[0] is False
+    assert evaluate_path_safety({"filename": r"C:\Users\me\.ssh\id_rsa"})[0] is False
+    assert evaluate_path_safety({"directory": "~/secrets"})[0] is False
+    assert evaluate_path_safety({"path": "docs/readme.md"})[0] is True
+
+
+def test_external_network_tools_scan_url_like_arguments_for_ssrf() -> None:
+    meta = ToolMetadata(
+        name="mcp__browser__open_url",
+        risk="medium",
+        network=True,
+        external_output=True,
+        capability="external",
+    )
+    policy = ToolPolicy(
+        capability="full",
+        metadata_provider=lambda name: meta if name == "mcp__browser__open_url" else tool_policy.tool_metadata(name),
+    )
+    decision = policy.evaluate("mcp__browser__open_url", {"endpoint": "http://127.0.0.1:8000/admin"})
+    assert decision.action == tool_policy.DENY
+    assert decision.reasons[0].startswith("ssrf_blocked")
+
+
+def test_external_filesystem_tools_scan_path_like_arguments() -> None:
+    meta = ToolMetadata(
+        name="mcp__files__read_file",
+        risk="medium",
+        filesystem=True,
+        external_output=True,
+        capability="external",
+    )
+    policy = ToolPolicy(
+        capability="full",
+        metadata_provider=lambda name: meta if name == "mcp__files__read_file" else tool_policy.tool_metadata(name),
+    )
+    decision = policy.evaluate("mcp__files__read_file", {"path": "../secret.txt"})
+    assert decision.action == tool_policy.DENY
+    assert decision.reasons[0].startswith("path_blocked")
 
 
 def test_sensitive_content_blocks_memory_write() -> None:

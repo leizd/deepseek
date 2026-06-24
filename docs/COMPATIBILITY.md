@@ -1,6 +1,6 @@
 # Compatibility Matrix（兼容性矩阵）
 
-适用版本：v2.2.1。
+适用版本：v2.2.2。
 
 DeepSeek Infra 对外暴露标准协议端点（OpenAI `/v1`、MCP JSON-RPC 2.0、A2A Agent Card + 任务生命周期），也能在 v2.2.1 起作为 MCP client 桥接外部 MCP server 的工具目录。理论上它与遵循这些协议的客户端 / server 互操作；但诚实地讲，我们尚未对所有外部实现逐一跑兼容性矩阵。这个页面就是 **"测了什么、没测什么"的唯一真实记录**。
 
@@ -28,11 +28,11 @@ MCP 客户端经 `MCP_CAPABILITY` 配置获得不同工具面：
 
 ## MCP External Server Bridge
 
-v2.2.1 的外接方向使用 `MCP_CLIENT_ENABLED=1` + `MCP_CLIENT_SERVERS` 明确配置外部 server。外部工具会被命名为 `mcp__<server>__<tool>`，进入本地 Agent 工具面前先生成保守风险 profile，并在执行时继续经过 Tool Policy、审批、结果清洗和审计。
+v2.2.1 的外接方向使用 `MCP_CLIENT_ENABLED=1` + `MCP_CLIENT_SERVERS` 明确配置外部 server。外部工具会被命名为 `mcp__<server>__<tool>`，进入本地 Agent 工具面前先生成保守风险 profile，并在执行时继续经过 Tool Policy、审批、结果清洗和审计。v2.2.2 起，Agent 和 `/mcp tools/call` 两条入口都由外部 MCP executor 内部再次执行 ToolPolicy，远端 `isError=true` 不再被包装成成功。
 
 | External Server | Status | Notes |
 | --- | --- | --- |
-| Mock MCP server (`tests/test_mcp.py`) | ✅ Tested | 覆盖工具发现、命名隔离、风险推断、策略拒绝、审批、审计、结果清洗和不可用 server 降级 |
+| Mock MCP server (`tests/test_mcp.py`) | ✅ Tested | 覆盖工具发现、命名隔离、风险推断、策略拒绝、审批、审计、结果清洗、不可用 server 降级、Hub 路径防绕过、远端工具错误和 schema refresh |
 | `GET /api/mcp/external/tools` | ✅ Tested by code path | 运行时查看 server 可用性、bridged name、risk、network/filesystem 与 requiresApproval |
 | Third-party MCP servers | 🔲 Not tested | Roadmap v2.3：按 Claude Desktop / Cursor / Continue.dev 常用 MCP server 补互测记录 |
 

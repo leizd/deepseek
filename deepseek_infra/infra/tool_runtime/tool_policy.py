@@ -290,10 +290,13 @@ def evaluate_url_safety(url: str) -> tuple[bool, str]:
 
 _SAFE_FILE_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 _SAFE_PROJECT_ID = re.compile(r"^[A-Za-z0-9_.:-]{0,80}$")
+_WINDOWS_ABSOLUTE_PATH = re.compile(r"^[A-Za-z]:[\\/]")
+_URL_ARGUMENT_KEYS = frozenset({"url", "uri", "endpoint", "base_url", "host", "domain"})
+_PATH_ARGUMENT_KEYS = frozenset({"path", "file", "filename", "filepath", "directory", "folder", "dir"})
 
 
 def evaluate_path_safety(arguments: dict[str, Any]) -> tuple[bool, str]:
-    """Reject file/project identifiers that try to escape the cache sandbox."""
+    """Reject file/project identifiers and external path args that escape sandboxes."""
     file_id = str(arguments.get("fileId") or "").strip()
     if file_id and not _SAFE_FILE_ID.fullmatch(file_id):
         return False, "fileId contains illegal characters"
@@ -303,6 +306,67 @@ def evaluate_path_safety(arguments: dict[str, Any]) -> tuple[bool, str]:
             return False, "projectId path traversal"
         if not _SAFE_PROJECT_ID.fullmatch(project_id):
             return False, "projectId contains illegal characters"
+    for key, value in _iter_named_string_values(arguments, _PATH_ARGUMENT_KEYS):
+        safe, why = _evaluate_generic_path_safety(value)
+        if not safe:
+            return False, f"{key}: {why}"
+    return True, ""
+
+
+def evaluate_network_argument_safety(arguments: dict[str, Any]) -> tuple[bool, str]:
+    """Recursively check URL-like fields for private/local network targets."""
+    for key, value in _iter_named_string_values(arguments, _URL_ARGUMENT_KEYS):
+        candidate = _url_candidate_for_guard(key, value)
+        if candidate is None:
+            continue
+        safe, why = evaluate_url_safety(candidate)
+        if not safe:
+            return False, f"{key}: {why}"
+    return True, ""
+
+
+def _iter_named_string_values(node: Any, key_names: frozenset[str]) -> list[tuple[str, str]]:
+    values: list[tuple[str, str]] = []
+
+    def walk(current: Any) -> None:
+        if isinstance(current, dict):
+            for key, value in current.items():
+                key_text = str(key or "")
+                if key_text.lower() in key_names and isinstance(value, str):
+                    values.append((key_text, value))
+                walk(value)
+        elif isinstance(current, list):
+            for item in current:
+                walk(item)
+
+    walk(node)
+    return values
+
+
+def _url_candidate_for_guard(key: str, value: str) -> str | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    if key.lower() in {"host", "domain"} and "://" not in raw:
+        return f"http://{raw}"
+    return raw
+
+
+def _evaluate_generic_path_safety(value: str) -> tuple[bool, str]:
+    raw = str(value or "").strip()
+    if not raw:
+        return True, ""
+    normalized = raw.replace("\\", "/")
+    if raw.startswith("~"):
+        return False, "home-relative paths are not allowed"
+    if raw.startswith(("/", "\\")):
+        return False, "absolute paths are not allowed"
+    if _WINDOWS_ABSOLUTE_PATH.match(raw):
+        return False, "windows drive paths are not allowed"
+    if normalized == ".." or normalized.startswith("../") or "/../" in normalized or normalized.endswith("/.."):
+        return False, "path traversal"
+    if normalized.lower().startswith("file:"):
+        return False, "file uri paths are not allowed"
     return True, ""
 
 
@@ -563,8 +627,11 @@ class ToolPolicy:
 
         # 3. Risk classification + dynamic security guards.
         risk = meta.risk
-        if meta.network and tool == "fetch_url":
-            safe, why = evaluate_url_safety(str(args.get("url") or ""))
+        if meta.network:
+            if tool == "fetch_url":
+                safe, why = evaluate_url_safety(str(args.get("url") or ""))
+            else:
+                safe, why = evaluate_network_argument_safety(args)
             if not safe:
                 reasons.append(f"ssrf_blocked:{why}")
                 return self._record(PolicyDecision(tool, DENY, "critical", tuple(reasons), tuple(violations), self.capability))
