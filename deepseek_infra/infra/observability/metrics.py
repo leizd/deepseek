@@ -35,6 +35,17 @@ def render_prometheus() -> str:
         int(snapshot.get("external_mcp_errors_total") or 0),
         "Outbound external MCP tool calls that ended in error.",
     )
+    lines += _line("ai_a2a_tasks_total", int(snapshot.get("a2a_tasks_total") or 0), "A2A tasks recorded in traces.")
+    lines += _line(
+        "ai_a2a_task_errors_total",
+        int(snapshot.get("a2a_task_errors_total") or 0),
+        "A2A tasks that ended in cancellation or error.",
+    )
+    lines += _line(
+        "ai_a2a_peer_calls_total",
+        int(snapshot.get("a2a_peer_calls_total") or 0),
+        "Outbound A2A peer calls recorded in traces.",
+    )
     lines += _line("ai_error_runs_total", int(snapshot.get("error_runs_total") or 0), "Runs that ended in error.")
     lines += _line("ai_tokens_total", int(snapshot.get("tokens_total") or 0), "Total tokens across recorded spans.")
     lines += _line(
@@ -48,6 +59,18 @@ def render_prometheus() -> str:
         float(snapshot.get("external_mcp_latency_ms_avg") or 0.0),
         "Average outbound external MCP tool-call latency in milliseconds.",
         "gauge",
+    )
+    lines += _line(
+        "ai_a2a_task_latency_ms_avg",
+        float(snapshot.get("a2a_task_latency_ms_avg") or 0.0),
+        "Average A2A task latency in milliseconds.",
+        "gauge",
+    )
+    lines += _line("ai_a2a_active_tasks", int(snapshot.get("a2a_active_tasks") or 0), "Currently active A2A tasks.", "gauge")
+    lines += _line(
+        "ai_a2a_stream_disconnects_total",
+        int(snapshot.get("a2a_stream_disconnects_total") or 0),
+        "A2A SSE streams closed before task terminal delivery.",
     )
     lines += _line("ai_trace_enabled", 1 if snapshot.get("enabled") else 0, "Whether local tracing is enabled.", "gauge")
     return "\n".join(lines) + "\n"

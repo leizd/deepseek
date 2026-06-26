@@ -12,6 +12,7 @@ import deepseek_infra.infra.agent_runtime.a2a as a2a
 from deepseek_infra.core.errors import AppError
 from deepseek_infra.infra.agent_runtime.a2a import (
     A2A_PROTOCOL_VERSION,
+    CANCELING,
     CANCELED,
     COMPLETED,
     FAILED,
@@ -27,6 +28,8 @@ from deepseek_infra.infra.agent_runtime.a2a import (
     handle_a2a_message,
     stream_message_events,
 )
+from deepseek_infra.infra.observability.metrics import render_prometheus
+from deepseek_infra.infra.observability.observability import metrics_snapshot
 
 
 @pytest.fixture(autouse=True)
@@ -35,11 +38,13 @@ def clean_task_store() -> Iterator[None]:
         a2a._TASKS.clear()
         a2a._TASK_CONDITIONS.clear()
         a2a._TASK_CANCEL_EVENTS.clear()
+        a2a._STREAM_DISCONNECTS_TOTAL = 0
     yield
     with a2a._TASK_LOCK:
         a2a._TASKS.clear()
         a2a._TASK_CONDITIONS.clear()
         a2a._TASK_CANCEL_EVENTS.clear()
+        a2a._STREAM_DISCONNECTS_TOTAL = 0
 
 
 def rpc(method: str, params: dict[str, Any] | None = None, message_id: Any = 1) -> dict[str, Any]:
@@ -141,10 +146,13 @@ def test_tasks_cancel_running_task_then_not_cancelable(tmp_settings, monkeypatch
     assert started.wait(5)
     cancelled = handle_a2a_message(rpc("tasks/cancel", {"id": task["id"]}))
     assert cancelled is not None
-    assert task_state(cancelled["result"]) == CANCELED
+    assert task_state(cancelled["result"]) == CANCELING
+    assert cancelled["result"]["cancelRequestedAt"]
     release.set()
-    time.sleep(0.1)  # the worker thread sees the cancel flag and must not overwrite
-    assert task_state(get_task(str(task["id"]))) == CANCELED
+    final = wait_for_state(str(task["id"]), {CANCELED})
+    assert final["cancelRequestedAt"] == cancelled["result"]["cancelRequestedAt"]
+    assert final["artifacts"] == []
+    assert [chunk["artifact"]["name"] for chunk in final["artifactChunks"]] == ["progress"]
     again = handle_a2a_message(rpc("tasks/cancel", {"id": task["id"]}))
     assert again is not None and again["error"]["code"] == TASK_NOT_CANCELABLE
 
@@ -192,7 +200,33 @@ def test_message_stream_emits_task_then_final_status(tmp_settings, monkeypatch: 
     final_updates = [event["result"] for event in events if event["result"].get("final") is True]
     assert final_updates and final_updates[-1]["status"]["state"] == COMPLETED
     artifact_updates = [event["result"] for event in events if event["result"].get("kind") == "artifact-update"]
-    assert artifact_updates and artifact_updates[0]["artifact"]["parts"][0]["text"] == "answer"
+    assert len(artifact_updates) >= 2
+    assert [update["chunkIndex"] for update in artifact_updates] == sorted(update["chunkIndex"] for update in artifact_updates)
+    assert artifact_updates[0]["append"] is True
+    assert artifact_updates[-1]["artifact"]["parts"][0]["text"] == "answer"
+    assert artifact_updates[-1]["final"] is True
+
+
+def test_tasks_resubscribe_replays_artifact_chunks_after_cursor(tmp_settings, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(a2a.deepseek_client, "call_deepseek", lambda payload: {"content": "answer", "usage": {}})
+    task = handle_a2a_message(rpc("message/send", send_params("hi")), agent_id="reasoner")["result"]  # type: ignore[index]
+    done = wait_for_state(str(task["id"]), {COMPLETED})
+    assert [chunk["chunkIndex"] for chunk in done["artifactChunks"]] == [0, 1]
+
+    events = []
+    for chunk in stream_message_events(
+        rpc("tasks/resubscribe", {"id": task["id"], "afterChunkIndex": 0}),
+        agent_id="reasoner",
+    ):
+        events.append(json.loads(chunk.decode("utf-8").strip()[len("data: ") :]))
+        if events[-1]["result"].get("final") is True:
+            break
+
+    artifact_updates = [event["result"] for event in events if event["result"].get("kind") == "artifact-update"]
+    assert len(artifact_updates) == 1
+    assert artifact_updates[0]["chunkIndex"] == 1
+    assert artifact_updates[0]["artifactId"] == done["artifacts"][0]["artifactId"]
+    assert artifact_updates[0]["artifact"]["parts"][0]["text"] == "answer"
 
 
 def test_a2a_client_roundtrip_against_local_mesh(tmp_settings, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -231,6 +265,35 @@ def test_a2a_client_roundtrip_against_local_mesh(tmp_settings, monkeypatch: pyte
             client.cancel_task(str(task["id"]))  # already terminal -> JSON-RPC error -> AppError
 
 
+def test_a2a_client_stream_roundtrip_against_local_mesh(tmp_settings, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(a2a.deepseek_client, "call_deepseek", lambda payload: {"content": "streamed", "usage": {}})
+
+    class _FakeStreamResponse:
+        def __init__(self, payload: bytes) -> None:
+            self._lines = payload.splitlines(keepends=True)
+
+        def __iter__(self) -> Iterator[bytes]:
+            return iter(self._lines)
+
+        def __enter__(self) -> "_FakeStreamResponse":
+            return self
+
+        def __exit__(self, *args: Any) -> None:
+            return None
+
+    def loopback(request: Any, timeout: float = 0) -> _FakeStreamResponse:
+        message = json.loads(request.data.decode("utf-8"))
+        payload = b"".join(stream_message_events(message, agent_id="reasoner"))
+        return _FakeStreamResponse(payload)
+
+    client = A2AClient("http://127.0.0.1:9/a2a/agents/reasoner")
+    with patch("urllib.request.urlopen", side_effect=loopback):
+        events = list(client.message_stream("please stream"))
+    artifact_updates = [event["result"] for event in events if event["result"].get("kind") == "artifact-update"]
+    assert artifact_updates[-1]["artifact"]["parts"][0]["text"] == "streamed"
+    assert artifact_updates[-1]["chunkIndex"] == 1
+
+
 def test_a2a_status_shape(tmp_settings, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(a2a.deepseek_client, "call_deepseek", lambda payload: {"content": "x", "usage": {}})
     task = handle_a2a_message(rpc("message/send", send_params("hi")), agent_id="critic")["result"]  # type: ignore[index]
@@ -240,4 +303,22 @@ def test_a2a_status_shape(tmp_settings, monkeypatch: pytest.MonkeyPatch) -> None
     assert status["protocolVersion"] == A2A_PROTOCOL_VERSION
     assert set(status["agents"]) == {"orchestrator", "researcher", "coder", "reasoner", "critic"}
     assert status["tasksByState"].get(COMPLETED) == 1
+    assert status["activeTasks"] == 0
+    assert status["streamDisconnectsTotal"] == 0
     assert status["agentCardPath"] == "/.well-known/agent-card.json"
+
+
+def test_a2a_trace_and_prometheus_metrics(tmp_settings, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(a2a.deepseek_client, "call_deepseek", lambda payload: {"content": "metric", "usage": {"total_tokens": 3}})
+    task = handle_a2a_message(rpc("message/send", send_params("hi")), agent_id="critic")["result"]  # type: ignore[index]
+    wait_for_state(str(task["id"]), {COMPLETED})
+    deadline = time.time() + 5
+    snapshot = metrics_snapshot()
+    while snapshot["a2a_tasks_total"] < 1 and time.time() < deadline:
+        time.sleep(0.02)
+        snapshot = metrics_snapshot()
+    assert snapshot["a2a_tasks_total"] >= 1
+    assert snapshot["a2a_task_latency_ms_avg"] >= 0
+    prometheus = render_prometheus()
+    assert "ai_a2a_tasks_total" in prometheus
+    assert "ai_a2a_active_tasks" in prometheus

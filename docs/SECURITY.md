@@ -1,6 +1,6 @@
 # 安全说明
 
-适用版本：v2.2.3。
+适用版本：v2.2.4。
 
 ## 威胁模型
 
@@ -117,6 +117,7 @@ v2.1.0 起，上面这些零散的工具安全约束被收敛进一个统一的 
 - **人工确认**：高风险工具（如 `forget_memory`，`requires_confirm=True`）在 `TOOL_POLICY_REQUIRE_CONFIRM=1` 时返回 `needs_confirmation` 而非执行，除非请求 `approvedTools` 已预批。
 - **工具结果 prompt injection 清洗**：搜索 / 抓取等 `external_output` 工具的外部文本字段会红action 掉常见注入指令（「忽略上述指令 / ignore previous instructions / 输出 system prompt」等），URL、id、score 等非文本字段保持不变；不可信网页文本的注入风险无法完全消除，仍应优先权威来源。
 - **外部 MCP server 边界**：`MCP_CLIENT_ENABLED=1` 只连接 `MCP_CLIENT_SERVERS` 显式列出的 Streamable HTTP server；桥接工具统一命名为 `mcp__<server>__<tool>`，进入本地 Agent 工具面前会生成保守风险 profile，每次调用仍先过 Tool Policy，结果按外部不可信输出清洗。v2.2.2 加固让 `/mcp tools/call` 和 Agent 调用共享同一 executor 内部闸门，远端 `isError=true` 不再伪装成成功。v2.2.3 起外部 server 还有 timeout / retry / circuit breaker 与 health API，外部 server 挂掉不会影响本地工具目录。
+- **A2A peer 边界**：A2A 任务只在目标 agent 的 capability 切片内执行；`message/stream` 的 artifact chunks 和 `tasks/resubscribe` 只暴露任务产物与状态，不扩大工具权限。取消请求进入 `canceling` 后停止交付最终结果；如果云端请求已在途，结果会被丢弃并在 trace diagnostics 中记录 `discardedResult`。
 - **审计日志**：每条决策（放行 / 拒绝 / 待确认）追加写入本地 `.tool-audit/audit.jsonl`（append-only，best-effort，不阻断工具调用），可经 `TOOL_POLICY_AUDIT_ENABLED` 关闭；发布脚本与 `.gitignore` 排除该目录。
 
 默认配置（`TOOL_POLICY_ENABLED=1`，`enforce_schema` / `require_confirm` 关闭，结果清洗与审计开启）下，主聊天用 full 画像、不强制确认，行为与 v2.0.x 一致；能力收窄、强制 schema 与强制确认是按需开启的更严格档位。被策略拦截的工具调用返回 `{"ok": false, "code": "forbidden"|"requires_confirmation", "policy": {...}}`，不会真正执行。

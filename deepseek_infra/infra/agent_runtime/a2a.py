@@ -13,7 +13,7 @@ A2A task lifecycle over JSON-RPC 2.0::
 
 Tasks run through the existing gateway (``call_deepseek``) with the role's
 capability slice and system profile, so A2A peers get the same policy-gated
-tool surface as internal workers — never more. Outbound delegation to external
+tool surface as internal workers - never more. Outbound delegation to external
 A2A agents goes through :class:`A2AClient` against ``A2A_PEERS``.
 
 Task records persist as JSON under ``.a2a/`` (credentials are never stored);
@@ -45,6 +45,7 @@ from deepseek_infra.core.config import (
 from deepseek_infra.core.errors import AppError, ErrorCode
 from deepseek_infra.infra.agent_runtime.multi_agent import AGENT_PROFILES, agent_model_for, model_supports_thinking
 from deepseek_infra.infra.gateway import deepseek_client
+from deepseek_infra.infra.observability.observability import finish_trace, start_span, start_trace
 from deepseek_infra.infra.tool_runtime.tool_policy import capability_tools
 
 logger = logging.getLogger("deepseek_infra.a2a")
@@ -56,6 +57,7 @@ SUBMITTED = "submitted"
 WORKING = "working"
 COMPLETED = "completed"
 FAILED = "failed"
+CANCELING = "canceling"
 CANCELED = "canceled"
 TERMINAL_STATES = {COMPLETED, FAILED, CANCELED}
 
@@ -71,7 +73,7 @@ TASK_NOT_CANCELABLE = -32002
 ORCHESTRATOR_ID = "orchestrator"
 ORCHESTRATOR_PROFILE = {
     "name": "DeepSeek Infra Orchestrator",
-    "system": "你是 DeepSeek Infra 的通用助手 Agent，拥有完整的本地工具面，负责独立完成外部 Agent 委派的任务。",
+    "system": "You are DeepSeek Infra's general-purpose assistant Agent with the full local tool surface.",
 }
 
 _STREAM_POLL_SECONDS = 15.0
@@ -141,6 +143,7 @@ _TASK_LOCK = threading.RLock()
 _TASKS: dict[str, dict[str, Any]] = {}
 _TASK_CONDITIONS: dict[str, threading.Condition] = {}
 _TASK_CANCEL_EVENTS: dict[str, threading.Event] = {}
+_STREAM_DISCONNECTS_TOTAL = 0
 
 
 def _utc_timestamp() -> str:
@@ -194,7 +197,7 @@ def _load_task_from_disk(task_id: str) -> dict[str, Any] | None:
     # A non-terminal task on disk means the process died mid-flight.
     state = str(((data.get("status") or {}) if isinstance(data.get("status"), dict) else {}).get("state") or "")
     if state not in TERMINAL_STATES:
-        data["status"] = _status(FAILED, message="服务重启，任务未能完成，请重新提交。")
+        data["status"] = _status(FAILED, message="Service restarted before this task finished; please submit it again.")
     return data
 
 
@@ -265,6 +268,68 @@ def public_task(task: dict[str, Any], *, history_length: int | None = None) -> d
     return result
 
 
+def _append_artifact_chunk(
+    task_id: str,
+    *,
+    artifact_id: str,
+    name: str,
+    text: str,
+    final: bool = False,
+    append: bool = True,
+    skip_if_canceling: bool = False,
+) -> dict[str, Any]:
+    """Append one resumable artifact chunk and notify SSE subscribers."""
+    appended = False
+
+    def mutate(task: dict[str, Any]) -> None:
+        nonlocal appended
+        if skip_if_canceling and str((task.get("status") or {}).get("state") or "") == CANCELING:
+            return
+        chunks = task.setdefault("artifactChunks", [])
+        if not isinstance(chunks, list):
+            chunks = []
+            task["artifactChunks"] = chunks
+        chunk_index = len(chunks)
+        artifact = {
+            "artifactId": artifact_id,
+            "name": name,
+            "parts": [{"kind": "text", "text": str(text or "")}],
+        }
+        chunks.append(
+            {
+                "taskId": task_id,
+                "contextId": task.get("contextId"),
+                "artifactId": artifact_id,
+                "chunkIndex": chunk_index,
+                "append": bool(append),
+                "final": bool(final),
+                "createdAt": _utc_timestamp(),
+                "artifact": artifact,
+            }
+        )
+        appended = True
+
+    snapshot = _update_task(task_id, mutate)
+    if not appended:
+        return {}
+    chunks = snapshot.get("artifactChunks") if isinstance(snapshot.get("artifactChunks"), list) else []
+    return chunks[-1] if chunks else {}
+
+
+def _artifact_update_from_chunk(task: dict[str, Any], chunk: dict[str, Any]) -> dict[str, Any]:
+    artifact = chunk.get("artifact") if isinstance(chunk.get("artifact"), dict) else {}
+    return {
+        "taskId": str(task.get("id") or chunk.get("taskId") or ""),
+        "contextId": task.get("contextId") or chunk.get("contextId"),
+        "artifact": artifact,
+        "artifactId": str(chunk.get("artifactId") or artifact.get("artifactId") or ""),
+        "chunkIndex": int(chunk.get("chunkIndex") or 0),
+        "append": bool(chunk.get("append", True)),
+        "final": bool(chunk.get("final")),
+        "kind": "artifact-update",
+    }
+
+
 def list_tasks(limit: int = 20) -> list[dict[str, Any]]:
     capped = max(1, min(int(limit or 20), 200))
     with _TASK_LOCK:
@@ -314,27 +379,70 @@ def _execution_payload(agent_id: str, text: str) -> dict[str, Any]:
 
 def _execute_task(task_id: str, agent_id: str, text: str) -> None:
     cancel_event = _TASK_CANCEL_EVENTS.get(task_id)
+    trace_id = start_trace(
+        kind="a2a",
+        title=text[:120],
+        metadata={"taskId": task_id, "agentId": agent_id, "protocol": "a2a"},
+    )
+    task_span = start_span(
+        trace_id,
+        name="A2A task",
+        kind="a2a_task",
+        input_data={"taskId": task_id, "agentId": agent_id, "textChars": len(text)},
+    )
+    answer_artifact_id = "artifact_" + secrets.token_hex(8)
+    progress_artifact_id = "artifact_" + secrets.token_hex(8)
+    discarded_result = False
 
     def set_working(task: dict[str, Any]) -> None:
-        task["status"] = _status(WORKING)
+        task["_traceId"] = trace_id
+        task["_answerArtifactId"] = answer_artifact_id
+        task["_progressArtifactId"] = progress_artifact_id
+        if str((task.get("status") or {}).get("state") or "") != CANCELING:
+            task["status"] = _status(WORKING)
 
     try:
         _update_task(task_id, set_working)
         if cancel_event is not None and cancel_event.is_set():
             raise deepseek_client.RequestCancelled()
+        _append_artifact_chunk(
+            task_id,
+            artifact_id=progress_artifact_id,
+            name="progress",
+            text="A2A worker accepted the task.",
+            final=False,
+        )
         # Cancellation is best-effort: checked before and after the upstream call.
         # A cancel that lands mid-call lets the call finish and discards the result.
-        result = deepseek_client.call_deepseek(_execution_payload(agent_id, text))
+        payload = _execution_payload(agent_id, text)
+        if trace_id:
+            payload["traceId"] = trace_id
+        try:
+            result = deepseek_client.call_deepseek(payload, parent_span_id=task_span.span_id)
+        except TypeError:
+            result = deepseek_client.call_deepseek(payload)
         if cancel_event is not None and cancel_event.is_set():
+            discarded_result = True
             raise deepseek_client.RequestCancelled()
-        content = str(result.get("content") or "").strip() or "(空回答)"
+        content = str(result.get("content") or "").strip() or "(empty response)"
+        final_chunk = _append_artifact_chunk(
+            task_id,
+            artifact_id=answer_artifact_id,
+            name="answer",
+            text=content,
+            final=True,
+            skip_if_canceling=True,
+        )
+        if not final_chunk or (cancel_event is not None and cancel_event.is_set()):
+            discarded_result = True
+            raise deepseek_client.RequestCancelled()
 
         def complete(task: dict[str, Any]) -> None:
-            if str((task.get("status") or {}).get("state") or "") == CANCELED:
+            if str((task.get("status") or {}).get("state") or "") in TERMINAL_STATES:
                 return
             task["artifacts"] = [
                 {
-                    "artifactId": "artifact_" + secrets.token_hex(8),
+                    "artifactId": answer_artifact_id,
                     "name": "answer",
                     "parts": [{"kind": "text", "text": content}],
                 }
@@ -345,18 +453,43 @@ def _execute_task(task_id: str, agent_id: str, text: str) -> None:
             task["_usage"] = result.get("usage") or {}
             task["status"] = _status(COMPLETED)
 
-        _update_task(task_id, complete)
+        completed = _update_task(task_id, complete)
+        task_span.finish(
+            status="ok",
+            output_data={"state": COMPLETED},
+            usage=result.get("usage") if isinstance(result.get("usage"), dict) else {},
+            diagnostics={"artifactChunks": len(completed.get("artifactChunks") or []), "discardedResult": False},
+        )
+        finish_trace(trace_id, status="completed", metadata={"taskId": task_id, "agentId": agent_id})
     except deepseek_client.RequestCancelled:
         def cancel(task: dict[str, Any]) -> None:
             if str((task.get("status") or {}).get("state") or "") not in TERMINAL_STATES:
                 task["status"] = _status(CANCELED)
 
-        _update_task(task_id, cancel)
+        cancelled = _update_task(task_id, cancel)
+        task_span.finish(
+            status="canceled",
+            output_data={"state": CANCELED},
+            diagnostics={
+                "artifactChunks": len(cancelled.get("artifactChunks") or []),
+                "discardedResult": discarded_result,
+                "cancelRequestedAt": cancelled.get("cancelRequestedAt") or "",
+            },
+        )
+        finish_trace(
+            trace_id,
+            status="canceled",
+            metadata={"taskId": task_id, "agentId": agent_id, "discardedResult": discarded_result},
+        )
     except AppError as exc:
         _fail_task(task_id, str(exc))
+        task_span.finish(status="error", error=str(exc), diagnostics={"discardedResult": discarded_result})
+        finish_trace(trace_id, status="error", metadata={"taskId": task_id, "agentId": agent_id}, error=str(exc))
     except Exception as exc:  # pragma: no cover - defensive boundary
         logger.exception("a2a_task_failed", extra={"taskId": task_id})
-        _fail_task(task_id, f"任务执行失败：{exc}")
+        _fail_task(task_id, f"Task execution failed: {exc}")
+        task_span.finish(status="error", error=str(exc), diagnostics={"discardedResult": discarded_result})
+        finish_trace(trace_id, status="error", metadata={"taskId": task_id, "agentId": agent_id}, error=str(exc))
 
 
 def _fail_task(task_id: str, message: str) -> None:
@@ -392,6 +525,7 @@ def submit_message(params: dict[str, Any], *, agent_id: str) -> dict[str, Any]:
         "status": _status(SUBMITTED),
         "history": [incoming],
         "artifacts": [],
+        "artifactChunks": [],
     }
     with _TASK_LOCK:
         _TASKS[task_id] = task
@@ -414,7 +548,8 @@ def cancel_task(task_id: str) -> dict[str, Any]:
 
     def cancel(record: dict[str, Any]) -> None:
         if str((record.get("status") or {}).get("state") or "") not in TERMINAL_STATES:
-            record["status"] = _status(CANCELED)
+            record["cancelRequestedAt"] = record.get("cancelRequestedAt") or _utc_timestamp()
+            record["status"] = _status(CANCELING, message="Cancellation requested; pending upstream boundary.")
 
     return _update_task(str(task.get("id")), cancel)
 
@@ -478,57 +613,113 @@ def handle_a2a_message(message: Any, *, agent_id: str = "", base_url: str = "") 
 
 
 def is_stream_request(message: Any) -> bool:
-    return isinstance(message, dict) and str(message.get("method") or "") == "message/stream"
+    return isinstance(message, dict) and str(message.get("method") or "") in {"message/stream", "tasks/resubscribe"}
 
 
-def stream_message_events(message: dict[str, Any], *, agent_id: str = "") -> Generator[bytes, None, None]:
-    """``message/stream``: submit, then emit SSE status updates until terminal."""
+def _sse(data: dict[str, Any]) -> bytes:
+    return f"data: {json.dumps(data, ensure_ascii=False)}\n\n".encode("utf-8")
+
+
+def _record_stream_disconnect() -> None:
+    global _STREAM_DISCONNECTS_TOTAL
+    with _TASK_LOCK:
+        _STREAM_DISCONNECTS_TOTAL += 1
+
+
+def _chunk_index(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return -1
+
+
+def _task_chunks_after(task: dict[str, Any], after_chunk_index: int) -> list[dict[str, Any]]:
+    chunks = task.get("artifactChunks") if isinstance(task.get("artifactChunks"), list) else []
+    result = []
+    for chunk in chunks:
+        if isinstance(chunk, dict) and _chunk_index(chunk.get("chunkIndex")) > after_chunk_index:
+            result.append(chunk)
+    return result
+
+
+def _stream_task_events(
+    message_id: Any,
+    task_id: str,
+    *,
+    after_chunk_index: int = -1,
+    include_initial: bool = True,
+) -> Generator[bytes, None, None]:
+    try:
+        task = get_task(task_id)
+        if include_initial:
+            yield _sse(_result(message_id, public_task(task)))
+        last_state = str((task.get("status") or {}).get("state") or "")
+        last_chunk_index = after_chunk_index
+        while True:
+            current = get_task(task_id)
+            for chunk in _task_chunks_after(current, last_chunk_index):
+                last_chunk_index = _chunk_index(chunk.get("chunkIndex"))
+                yield _sse(_result(message_id, _artifact_update_from_chunk(current, chunk)))
+            state = str((current.get("status") or {}).get("state") or "")
+            if state != last_state or state in TERMINAL_STATES:
+                last_state = state
+                final = state in TERMINAL_STATES
+                yield _sse(
+                    _result(
+                        message_id,
+                        {
+                            "taskId": task_id,
+                            "contextId": current.get("contextId"),
+                            "status": current.get("status"),
+                            "kind": "status-update",
+                            "final": final,
+                        },
+                    )
+                )
+                if final:
+                    return
+            condition = _condition_for(task_id)
+            with condition:
+                condition.wait(timeout=_STREAM_POLL_SECONDS)
+    except GeneratorExit:
+        _record_stream_disconnect()
+        raise
+
+
+def _stream_resubscribe_events(message: dict[str, Any]) -> Generator[bytes, None, None]:
     message_id = message.get("id")
     raw_params = message.get("params")
     params: dict[str, Any] = raw_params if isinstance(raw_params, dict) else {}
+    task_id = str(params.get("id") or "").strip()
+    if not task_id:
+        yield _sse(_error(message_id, INVALID_PARAMS, "id is required"))
+        return
+    after_chunk_index = _chunk_index(params.get("afterChunkIndex"))
+    try:
+        yield from _stream_task_events(message_id, task_id, after_chunk_index=after_chunk_index, include_initial=True)
+    except AppError as exc:
+        if exc.code is ErrorCode.NOT_FOUND:
+            yield _sse(_error(message_id, TASK_NOT_FOUND, str(exc)))
+        else:
+            yield _sse(_error(message_id, INVALID_PARAMS, str(exc)))
 
-    def sse(data: dict[str, Any]) -> bytes:
-        return f"data: {json.dumps(data, ensure_ascii=False)}\n\n".encode("utf-8")
 
+def stream_message_events(message: dict[str, Any], *, agent_id: str = "") -> Generator[bytes, None, None]:
+    """Stream ``message/stream`` or ``tasks/resubscribe`` JSON-RPC responses as SSE."""
+    message_id = message.get("id")
+    method = str(message.get("method") or "")
+    if method == "tasks/resubscribe":
+        yield from _stream_resubscribe_events(message)
+        return
+    raw_params = message.get("params")
+    params: dict[str, Any] = raw_params if isinstance(raw_params, dict) else {}
     try:
         task = submit_message(params, agent_id=agent_id)
     except AppError as exc:
-        yield sse(_error(message_id, INVALID_PARAMS, str(exc)))
+        yield _sse(_error(message_id, INVALID_PARAMS, str(exc)))
         return
     task_id = str(task.get("id") or "")
-    yield sse(_result(message_id, public_task(task)))
-    last_state = str((task.get("status") or {}).get("state") or "")
-    while True:
-        current = get_task(task_id)
-        state = str((current.get("status") or {}).get("state") or "")
-        if state != last_state:
-            last_state = state
-            final = state in TERMINAL_STATES
-            artifacts = (current.get("artifacts") or []) if final else []
-            for artifact in artifacts:
-                yield sse(
-                    _result(
-                        message_id,
-                        {"taskId": task_id, "contextId": current.get("contextId"), "artifact": artifact, "kind": "artifact-update"},
-                    )
-                )
-            yield sse(
-                _result(
-                    message_id,
-                    {
-                        "taskId": task_id,
-                        "contextId": current.get("contextId"),
-                        "status": current.get("status"),
-                        "kind": "status-update",
-                        "final": final,
-                    },
-                )
-            )
-            if final:
-                return
-        condition = _condition_for(task_id)
-        with condition:
-            condition.wait(timeout=_STREAM_POLL_SECONDS)
+    yield from _stream_task_events(message_id, task_id, after_chunk_index=-1, include_initial=True)
 
 
 # --- Outbound delegation (A2A client) ---------------------------------------------------
@@ -536,30 +727,102 @@ def stream_message_events(message: dict[str, Any], *, agent_id: str = "") -> Gen
 class A2AClient:
     """Minimal JSON-RPC client for delegating a task to an external A2A agent."""
 
-    def __init__(self, base_url: str, *, timeout_seconds: int = 60) -> None:
+    def __init__(self, base_url: str, *, timeout_seconds: int = 60, auth_token: str = "") -> None:
         self.base_url = str(base_url or "").rstrip("/")
         self.timeout_seconds = timeout_seconds
+        self.auth_token = str(auth_token or "")
         self._next_id = 0
+
+    def _headers(self, accept: str) -> dict[str, str]:
+        headers = {"Content-Type": "application/json", "Accept": accept}
+        if self.auth_token:
+            headers["Authorization"] = f"Bearer {self.auth_token}"
+        return headers
 
     def _rpc(self, method: str, params: dict[str, Any]) -> Any:
         self._next_id += 1
+        trace_id = start_trace(
+            kind="a2a_peer",
+            title=method,
+            metadata={"method": method, "baseUrl": self.base_url, "protocol": "a2a"},
+        )
+        span = start_span(
+            trace_id,
+            name="A2A peer call",
+            kind="a2a_peer_call",
+            input_data={"method": method, "baseUrl": self.base_url},
+        )
         request = urllib.request.Request(
             self.base_url,
             data=json.dumps({"jsonrpc": "2.0", "id": self._next_id, "method": method, "params": params}, ensure_ascii=False).encode("utf-8"),
-            headers={"Content-Type": "application/json", "Accept": "application/json"},
+            headers=self._headers("application/json"),
             method="POST",
         )
         try:
             with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
                 parsed = json.loads(response.read().decode("utf-8"))
         except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+            span.finish(status="error", error=str(exc), diagnostics={"method": method})
+            finish_trace(trace_id, status="error", metadata={"method": method, "baseUrl": self.base_url}, error=str(exc))
             raise AppError(f"A2A peer is unreachable: {exc}", code=ErrorCode.UPSTREAM_FAILURE, status=502) from exc
         if not isinstance(parsed, dict):
+            span.finish(status="error", error="invalid response", diagnostics={"method": method})
+            finish_trace(trace_id, status="error", metadata={"method": method, "baseUrl": self.base_url}, error="invalid response")
             raise AppError("A2A peer returned an invalid response", code=ErrorCode.UPSTREAM_FAILURE, status=502)
         error = parsed.get("error")
         if isinstance(error, dict):
+            message = f"A2A peer error {error.get('code')}: {error.get('message')}"
+            span.finish(status="error", error=message, diagnostics={"method": method, "errorCode": error.get("code")})
+            finish_trace(trace_id, status="error", metadata={"method": method, "baseUrl": self.base_url}, error=message)
             raise AppError(f"A2A peer error {error.get('code')}: {error.get('message')}", code=ErrorCode.UPSTREAM_FAILURE, status=502)
+        span.finish(status="ok", output_data={"method": method})
+        finish_trace(trace_id, status="completed", metadata={"method": method, "baseUrl": self.base_url})
         return parsed.get("result")
+
+    def _stream_rpc(self, method: str, params: dict[str, Any]) -> Generator[dict[str, Any], None, None]:
+        self._next_id += 1
+        trace_id = start_trace(
+            kind="a2a_peer",
+            title=method,
+            metadata={"method": method, "baseUrl": self.base_url, "protocol": "a2a", "stream": True},
+        )
+        span = start_span(
+            trace_id,
+            name="A2A peer stream",
+            kind="a2a_peer_call",
+            input_data={"method": method, "baseUrl": self.base_url, "stream": True},
+        )
+        request = urllib.request.Request(
+            self.base_url,
+            data=json.dumps({"jsonrpc": "2.0", "id": self._next_id, "method": method, "params": params}, ensure_ascii=False).encode("utf-8"),
+            headers=self._headers("text/event-stream"),
+            method="POST",
+        )
+        event_count = 0
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
+                for raw_line in response:
+                    line = raw_line.decode("utf-8").strip()
+                    if not line.startswith("data: "):
+                        continue
+                    parsed = json.loads(line[len("data: ") :])
+                    if not isinstance(parsed, dict):
+                        raise AppError("A2A peer returned an invalid stream event", code=ErrorCode.UPSTREAM_FAILURE, status=502)
+                    error = parsed.get("error")
+                    if isinstance(error, dict):
+                        raise AppError(
+                            f"A2A peer error {error.get('code')}: {error.get('message')}",
+                            code=ErrorCode.UPSTREAM_FAILURE,
+                            status=502,
+                        )
+                    event_count += 1
+                    yield parsed
+        except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError, UnicodeDecodeError, AppError) as exc:
+            span.finish(status="error", error=str(exc), diagnostics={"method": method, "events": event_count})
+            finish_trace(trace_id, status="error", metadata={"method": method, "baseUrl": self.base_url, "events": event_count}, error=str(exc))
+            raise
+        span.finish(status="ok", output_data={"method": method, "events": event_count})
+        finish_trace(trace_id, status="completed", metadata={"method": method, "baseUrl": self.base_url, "events": event_count})
 
     def send_message(self, text: str, *, context_id: str = "") -> dict[str, Any]:
         params: dict[str, Any] = {
@@ -583,6 +846,25 @@ class A2AClient:
         result = self._rpc("tasks/cancel", {"id": str(task_id or "")})
         return result if isinstance(result, dict) else {}
 
+    def message_stream(self, text: str, *, context_id: str = "") -> Generator[dict[str, Any], None, None]:
+        params: dict[str, Any] = {
+            "message": {
+                "role": "user",
+                "parts": [{"kind": "text", "text": str(text or "")}],
+                "messageId": "msg_" + secrets.token_hex(8),
+                "kind": "message",
+            }
+        }
+        if context_id:
+            params["contextId"] = context_id
+        yield from self._stream_rpc("message/stream", params)
+
+    def resubscribe(self, task_id: str, *, after_chunk_index: int = -1) -> Generator[dict[str, Any], None, None]:
+        yield from self._stream_rpc(
+            "tasks/resubscribe",
+            {"id": str(task_id or ""), "afterChunkIndex": int(after_chunk_index)},
+        )
+
 
 def peer_clients() -> list[A2AClient]:
     return [A2AClient(url) for url in A2A_PEERS]
@@ -596,6 +878,8 @@ def a2a_status() -> dict[str, Any]:
         for task in _TASKS.values():
             state = str((task.get("status") or {}).get("state") or "unknown")
             states[state] = states.get(state, 0) + 1
+        active_tasks = sum(count for state, count in states.items() if state not in TERMINAL_STATES)
+        stream_disconnects = _STREAM_DISCONNECTS_TOTAL
     return {
         "enabled": A2A_ENABLED,
         "protocolVersion": A2A_PROTOCOL_VERSION,
@@ -604,5 +888,7 @@ def a2a_status() -> dict[str, Any]:
         "endpoint": "/a2a",
         "agentCardPath": "/.well-known/agent-card.json",
         "tasksByState": states,
+        "activeTasks": active_tasks,
+        "streamDisconnectsTotal": stream_disconnects,
         "peers": len(A2A_PEERS),
     }

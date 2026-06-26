@@ -61,7 +61,7 @@ jobs:
       # 离线质量评测（无需 API Key）：RAG Recall/Citation + Tool Policy/Injection Defense
       - run: PYTHONHASHSEED=0 python evals/runners/run_rag_eval.py
       - run: python evals/runners/run_tool_eval.py
-      # 对抗性 prompt injection 小型语料库：v2.2.3 先 report-only，不设硬门槛
+      # 对抗性 prompt injection 小型语料库：v2.2.4 先 report-only，不设硬门槛
       - run: python evals/runners/run_injection_adversarial.py --no-report
 
   docker:

@@ -1,6 +1,6 @@
 # 2 分钟 Demo 路径
 
-适用版本：v2.2.3。
+适用版本：v2.2.4。
 
 这一页的目标：**不读任何源码，2 分钟内亲眼看到 README 里的核心能力在跑**。四个脚本都在 [examples/](../examples/)，按「零门槛 → 需要服务 → 需要 Key」排序：
 
@@ -57,7 +57,7 @@ python examples/mcp_tool_demo.py
 用仓库内置的 `MCPClient` 对本机 `POST /mcp` 做 `initialize → tools/list → tools/call` 回环：
 
 ```
-[initialize] protocol=2025-06-18 server=deepseek-infra v2.2.3
+[initialize] protocol=2025-06-18 server=deepseek-infra v2.2.4
 
 [tools/list] 17 tools:
    - web_search  [read-only, open-world]
@@ -147,6 +147,13 @@ A2A 任务委派（`message/send` 提交即返回 Task，后台执行）：
 curl -X POST http://127.0.0.1:8000/a2a/agents/reasoner \
   -H "Authorization: Bearer <本地 token>" -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"message/send","params":{"message":{"role":"user","parts":[{"kind":"text","text":"42 的质因数分解"}]}}}'
+```
+
+
+A2A artifact streaming / resubscribe loopback（本机另起一个 8001 peer 后执行）：
+
+```bash
+python examples/a2a_peer_demo.py --peer http://127.0.0.1:8001/a2a/agents/reasoner --token <local-token> --message "Stream an answer as artifact chunks"
 ```
 
 更多端点字段见 [docs/API.md](API.md)；各模块落地程度见 [docs/IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md)。

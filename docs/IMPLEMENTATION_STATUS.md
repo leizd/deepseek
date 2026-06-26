@@ -1,6 +1,6 @@
 # Implementation Status（实现状态矩阵）
 
-适用版本：v2.2.3。
+适用版本：v2.2.4。
 
 README 把 DeepSeek Infra 描述成一个 local-first agentic AI infrastructure platform。这一页回答一个更重要的问题：**每个模块到底落地到什么程度**——代码在哪、测试在哪、怎么亲手验证。所有链接都指向仓库内真实存在的文件；如果某格是 🟡 或 ❌，说明那部分还没做完，我们直接写出来，而不是让 README 替它画饼。
 
@@ -18,7 +18,7 @@ README 把 DeepSeek Infra 描述成一个 local-first agentic AI infrastructure 
 | 5 | Observability & Trace | Working | ✅ [infra/observability/](../deepseek_infra/infra/observability/) | ✅ | ✅ |
 | 6 | Edge-Cloud Model Router | Experimental | ✅ [infra/gateway/edge_inference.py](../deepseek_infra/infra/gateway/edge_inference.py) | 🟡 | 🟡 |
 | 7 | MCP Tool Hub | MVP | ✅ [infra/mcp/](../deepseek_infra/infra/mcp/) | ✅ | ✅ |
-| 8 | A2A Agent Mesh | Experimental | ✅ [infra/agent_runtime/a2a.py](../deepseek_infra/infra/agent_runtime/a2a.py) | ✅ | 🟡 |
+| 8 | A2A Agent Mesh | MVP | ✅ [infra/agent_runtime/a2a.py](../deepseek_infra/infra/agent_runtime/a2a.py) | ✅ | ✅ |
 | 9 | Context Taint Firewall | Experimental | ✅ [infra/gateway/context_taint.py](../deepseek_infra/infra/gateway/context_taint.py) | ✅ | ✅ |
 
 横切资产（不算独立模块，但支撑「可验证性」）：
@@ -81,12 +81,12 @@ README 把 DeepSeek Infra 描述成一个 local-first agentic AI infrastructure 
 - **亲手验证**：[examples/mcp_tool_demo.py](../examples/mcp_tool_demo.py)；`GET /api/mcp/external/tools` 查看外部 server health；[COMPATIBILITY.md](COMPATIBILITY.md) 和 [integrations/](integrations/) 提供 Claude Desktop / Cursor 配置。
 - **MVP 边界**：本地 MCP server、mock external server、失败场景、危险参数拦截和观测链路已可验证；Claude Desktop / Cursor GUI 实机与一个真实第三方 Streamable HTTP MCP server 仍待补进兼容矩阵。
 
-### 8. A2A Agent Mesh — Experimental
+### 8. A2A Agent Mesh — MVP
 
-- **代码**：[a2a.py](../deepseek_infra/infra/agent_runtime/a2a.py)（Agent Card 发现、JSON-RPC 任务生命周期 `message/send|stream`·`tasks/get|cancel|list`、capability 隔离执行、`.a2a/` 持久化与重启对账、`A2AClient` 跨 Agent 委派）。
-- **测试**：[test_a2a.py](../tests/test_a2a.py)（11 项）。
-- **亲手验证**：`curl http://127.0.0.1:8000/.well-known/agent-card.json`（见 [docs/DEMO.md](DEMO.md) A2A 一节）。
-- **Experimental 的原因**：任务执行是「提交即后台跑」+ SSE 快照推送；产物级流式增量（artifact streaming chunks）在 Roadmap v2.3，也尚未与第三方 A2A 实现互测。
+- **代码**：[a2a.py](../deepseek_infra/infra/agent_runtime/a2a.py)（Agent Card 发现、JSON-RPC 任务生命周期 `message/send|stream`·`tasks/resubscribe`·`tasks/get|cancel|list`、artifact chunks、capability 隔离执行、`.a2a/` 持久化与重启对账、`A2AClient` 跨 Agent 委派）。
+- **测试**：[test_a2a.py](../tests/test_a2a.py)（14 项，覆盖 artifact chunks、`tasks/resubscribe`、取消状态、A2AClient loopback、trace/metrics）。
+- **亲手验证**：`curl http://127.0.0.1:8000/.well-known/agent-card.json`；`python examples/a2a_peer_demo.py --peer http://127.0.0.1:8001/a2a/agents/reasoner --token <token>` 跑本地 external peer loopback。
+- **MVP 边界**：本地任务生命周期、artifact streaming chunks、断线重订阅、本地 external peer loopback 与观测链路已可验证；真实第三方 A2A 实现仍待补进兼容矩阵。
 
 ### 9. Context Taint Firewall — Experimental
 

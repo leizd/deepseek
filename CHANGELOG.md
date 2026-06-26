@@ -2,6 +2,27 @@
 
 本项目使用类似 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的分组方式维护变更记录。未发布内容记录在 `[Unreleased]`，正式发版时迁移到具体版本。
 
+## [2.2.4] - A2A Artifact Streaming & Agent Interop
+
+**主题：A2A 任务产物流式增量与 Agent 互操作补强。** 本版把 A2A Agent Mesh 从 Experimental 推到 MVP，重点补“长任务能边跑边交付、断线能恢复、peer loopback 能复现、观测能落库”的可信路径。
+
+### 新增
+
+- **A2A artifact streaming chunks**：`message/stream` 现在会推送 `artifact-update` chunk，包含 `artifactId`、`chunkIndex`、`append`、`final` 与 `artifact.parts[]`；终态仍保留完整 `artifacts[]`，兼容旧客户端。
+- **`tasks/resubscribe`**：客户端可用已有 `taskId` 重新接入 SSE，并通过 `afterChunkIndex` 只补发游标之后的 artifact chunks。
+- **本地 external peer loopback demo**：新增 `examples/a2a_peer_demo.py`，通过 `A2AClient.message_stream()` / `resubscribe()` 连到另一个本机 DeepSeek Infra A2A endpoint。
+- **A2A trace / metrics**：新增 `a2a_task` 与 `a2a_peer_call` span；Prometheus 增加 `ai_a2a_tasks_total`、`ai_a2a_task_errors_total`、`ai_a2a_task_latency_ms_avg`、`ai_a2a_active_tasks`、`ai_a2a_stream_disconnects_total`。
+
+### 更改
+
+- **A2A 状态**：Implementation Status 中 A2A Agent Mesh 从 `Experimental` 推到 `MVP`；Compatibility Matrix 记录 local external peer loopback 已测，第三方 A2A 实现仍诚实标为 pending。
+- **取消语义**：`tasks/cancel` 从立即终态改为 `canceling -> canceled`，任务记录 `cancelRequestedAt`；如果云端请求已在途，结果会被丢弃并在 trace diagnostics 中记录 `discardedResult`。
+- **A2AClient**：支持 Bearer token、SSE streaming 和 resubscribe，方便默认本地鉴权开启时做双实例互测。
+
+### 测试
+
+- `tests/test_a2a.py` 从 11 项扩到 14 项，覆盖 artifact chunk 顺序、`tasks/resubscribe` 游标恢复、A2AClient streaming loopback、取消中间态和 A2A Prometheus 指标。
+
 ## [2.2.3] - MCP Interop & Trust Hardening
 
 **主题：互操作验证 + 真实场景可信度补强。** 本版不继续堆新概念，重点把 MCP 外接路径、安全闸门、失败可观测性、评测与 benchmark 的可复跑证据打实。

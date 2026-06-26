@@ -1,8 +1,8 @@
 # Compatibility Matrix（兼容性矩阵）
 
-适用版本：v2.2.3。
+适用版本：v2.2.4。
 
-这页只记录已经可复现的互操作结果，不把“协议上应该兼容”写成“实机已验证”。v2.2.3 的重点是把 MCP Tool Hub 从 demo 感推进到 MVP：本地 MCP server、出方向外部 MCP client、失败场景、health API、trace/metrics 都有可跑证据；Claude Desktop 和 Cursor 的配置片段已补齐，但本机未安装这两个客户端，因此 GUI 实机项仍标为待跑。
+这页只记录已经可复现的互操作结果，不把“协议上应该兼容”写成“实机已验证”。v2.2.4 的重点是把 A2A Agent Mesh 从 Experimental 推到 MVP：artifact chunks、`tasks/resubscribe`、本地 external peer loopback、trace/metrics 和取消生命周期都有可跑证据；真实第三方 A2A 实现仍待补进矩阵。MCP Tool Hub 已在 v2.2.3 推到 MVP，Claude Desktop 和 Cursor 的配置片段已补齐，但本机未安装这两个客户端，因此 GUI 实机项仍标为待跑。
 
 ## MCP Client Compatibility
 
@@ -33,7 +33,7 @@ v2.2.1 起，外部 MCP server 的工具会以 `mcp__<server>__<tool>` 桥接进
 
 ## Current MCP MVP Acceptance
 
-| Acceptance item | v2.2.3 result |
+| Acceptance item | v2.2.4 result |
 | --- | --- |
 | 本地 MCP server | ✅ `POST /mcp` + examples + CI |
 | 本地 mock external MCP server | ✅ CI |
@@ -65,6 +65,17 @@ v2.2.1 起，外部 MCP server 的工具会以 `mcp__<server>__<tool>` 桥接进
 
 | Peer | Status | Evidence |
 | --- | --- | --- |
-| Local A2A test suite (`tests/test_a2a.py`) | ✅ Tested | CI |
+| Local A2A test suite (`tests/test_a2a.py`) | ✅ Tested | 14 cases: artifact chunks, `tasks/resubscribe`, canceling, loopback client, metrics |
 | Local Agent Card discovery | ✅ Tested | `GET /.well-known/agent-card.json` |
-| External A2A peer | 🔲 Not tested | Third-party interop still pending. |
+| Local external A2A peer loopback | ✅ Tested | `examples/a2a_peer_demo.py` against `http://127.0.0.1:8001/a2a/agents/reasoner` |
+| Third-party A2A implementation | 🔲 Not tested | Ecosystem interop still pending; not claimed as passed. |
+
+## A2A MVP Acceptance
+
+| Acceptance item | v2.2.4 result |
+| --- | --- |
+| Artifact streaming chunks | ✅ `artifactId` / `chunkIndex` / `append` / `final` in `artifact-update` SSE events |
+| `tasks/resubscribe` | ✅ Reconnect by `taskId` and `afterChunkIndex` |
+| Local external peer loopback | ✅ `A2AClient.message_stream()` + `examples/a2a_peer_demo.py` |
+| A2A trace / metrics | ✅ `a2a_task` / `a2a_peer_call` spans + `ai_a2a_*` Prometheus metrics |
+| Cancellation lifecycle | ✅ `cancelRequestedAt`, `canceling -> canceled`, `discardedResult` trace diagnostics |

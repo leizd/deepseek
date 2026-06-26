@@ -291,9 +291,23 @@ def metrics_snapshot() -> dict[str, Any]:
         "external_mcp_calls_total": 0,
         "external_mcp_errors_total": 0,
         "external_mcp_latency_ms_avg": 0.0,
+        "a2a_tasks_total": 0,
+        "a2a_task_errors_total": 0,
+        "a2a_task_latency_ms_avg": 0.0,
+        "a2a_peer_calls_total": 0,
+        "a2a_active_tasks": 0,
+        "a2a_stream_disconnects_total": 0,
         "tokens_total": 0,
         "run_latency_ms_avg": 0.0,
     }
+    try:
+        from deepseek_infra.infra.agent_runtime.a2a import a2a_status
+
+        runtime = a2a_status()
+        snapshot["a2a_active_tasks"] = int(runtime.get("activeTasks") or 0)
+        snapshot["a2a_stream_disconnects_total"] = int(runtime.get("streamDisconnectsTotal") or 0)
+    except Exception:
+        pass
     if not TRACE_ENABLED:
         return snapshot
     try:
@@ -335,6 +349,21 @@ def metrics_snapshot() -> dict[str, Any]:
                 f"SELECT AVG(duration_ms) FROM {TRACE_SPANS_TABLE} WHERE kind = 'mcp_external'"
             ).fetchone()[0]
             snapshot["external_mcp_latency_ms_avg"] = round(float(mcp_avg_latency), 2) if mcp_avg_latency is not None else 0.0
+            snapshot["a2a_tasks_total"] = int(
+                conn.execute(f"SELECT COUNT(*) FROM {TRACE_SPANS_TABLE} WHERE kind = 'a2a_task'").fetchone()[0]
+            )
+            snapshot["a2a_task_errors_total"] = int(
+                conn.execute(
+                    f"SELECT COUNT(*) FROM {TRACE_SPANS_TABLE} WHERE kind = 'a2a_task' AND status != 'ok'"
+                ).fetchone()[0]
+            )
+            a2a_avg_latency = conn.execute(
+                f"SELECT AVG(duration_ms) FROM {TRACE_SPANS_TABLE} WHERE kind = 'a2a_task'"
+            ).fetchone()[0]
+            snapshot["a2a_task_latency_ms_avg"] = round(float(a2a_avg_latency), 2) if a2a_avg_latency is not None else 0.0
+            snapshot["a2a_peer_calls_total"] = int(
+                conn.execute(f"SELECT COUNT(*) FROM {TRACE_SPANS_TABLE} WHERE kind = 'a2a_peer_call'").fetchone()[0]
+            )
             total_tokens = conn.execute(f"SELECT SUM(total_tokens) FROM {TRACE_SPANS_TABLE}").fetchone()[0]
             snapshot["tokens_total"] = int(total_tokens) if total_tokens is not None else 0
     except Exception as exc:

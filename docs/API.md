@@ -1,6 +1,6 @@
 # HTTP API
 
-适用版本：v2.2.3。
+适用版本：v2.2.4。
 
 默认情况下，所有 `/api/*` 路由都需要本地 token 鉴权。客户端可以发送 `Authorization: Bearer <token>`，也可以使用打开 `/?token=<token>` 后写入的 `auth_token` Cookie。未设置 `AUTH_TOKEN` 时，服务端会把自动生成的 token 保存到本地 `.auth-token`，重启后继续复用。
 
@@ -252,15 +252,16 @@ v2.2.1 起，外接方向不只做 client 回环：`MCP_CLIENT_ENABLED=1` + `MCP
 
 `status` 可为 `unknown`、`ok`、`unavailable`、`circuit_open` 或 `disabled`。外部工具调用会写入 `mcp_external` trace span，diagnostics 包含 `latencyMs`、`transportLatencyMs`、`attempts`、`retryCount`、`timeout`、`errorType`。
 
-## A2A Agent Mesh（v2.1.4）
+## A2A Agent Mesh（v2.2.4）
 
-- `GET /.well-known/agent-card.json`：A2A 发现端点（不鉴权，仅元数据）——orchestrator 的 Agent Card：`protocolVersion`（0.3.0）、`name`、`url`、`capabilities`（支持 streaming）、`skills`。
-- `GET /a2a/agents`：全部本地 Agent 的 Card（orchestrator / researcher / coder / reasoner / critic），每个 Card 的 `url` 指向其专属端点。
+- `GET /.well-known/agent-card.json`：A2A 发现端点（不鉴权，仅元数据），返回 orchestrator 的 Agent Card。
+- `GET /a2a/agents`：全部本地 Agent 的 Card（orchestrator / researcher / coder / reasoner / critic）。
 - `POST /a2a` 与 `POST /a2a/agents/{agentId}`：A2A JSON-RPC 端点。方法：
-  - `message/send`：`params.message.parts[{kind:"text",text}]` 提交任务，立即返回 Task（`{id, contextId, status:{state}, history, artifacts, kind:"task"}`），后台经网关执行（使用该角色的能力切片与系统画像；researcher 可联网、reasoner 纯推理）。需要服务端 `DEEPSEEK_API_KEY`，缺失时任务以 `failed` 终态返回。
-  - `message/stream`：同上，但以 SSE 推送 JSON-RPC 响应流——先发 Task 快照，再发 `status-update` / `artifact-update` 事件，终态事件带 `final: true`。
-  - `tasks/get`（可带 `historyLength`）/ `tasks/cancel` / `tasks/list`：任务查询、取消（尽力而为：在途上游调用完成后结果被丢弃）与最近任务列表。
-- 任务状态机：`submitted → working → completed | failed | canceled`；快照持久化在 `.a2a/`，重启后磁盘上残留的非终态任务读取时标记 `failed`。错误码：`-32001` 任务不存在、`-32002` 任务不可取消，其余同 JSON-RPC 标准。
+  - `message/send`：提交任务并立即返回 Task（`id`、`contextId`、`status`、`history`、`artifacts`、`artifactChunks`、`kind`），后台经该角色 capability 切片执行。
+  - `message/stream`：以 SSE 推送 JSON-RPC 响应流，先发 Task 快照，再发 `artifact-update` / `status-update`。artifact chunk 包含 `artifactId`、`chunkIndex`、`append`、`final` 与 `artifact.parts[]`。
+  - `tasks/resubscribe`：用已有 `id` 重新接入 SSE；可带 `afterChunkIndex`，只补发该游标之后的 artifact chunks，并继续推送状态直到终态。
+  - `tasks/get`（可带 `historyLength`）/ `tasks/cancel` / `tasks/list`：任务查询、取消（云端请求可能无法硬中断，但结果会被丢弃并记录 `discardedResult`）与最近任务列表。
+- 任务状态机：`submitted -> working -> completed | failed | canceling -> canceled`；快照持久化在 `.a2a/`，重启后磁盘上残留的非终态任务读取时标记 `failed`。错误码：`-32001` 任务不存在、`-32002` 任务不可取消，其余同 JSON-RPC 标准。
 
 ## GET `/api/taint`（Context Taint 防火墙，v2.1.5）
 
