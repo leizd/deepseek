@@ -288,6 +288,9 @@ def metrics_snapshot() -> dict[str, Any]:
         "model_calls_total": 0,
         "semantic_cache_checks_total": 0,
         "semantic_cache_hits_total": 0,
+        "external_mcp_calls_total": 0,
+        "external_mcp_errors_total": 0,
+        "external_mcp_latency_ms_avg": 0.0,
         "tokens_total": 0,
         "run_latency_ms_avg": 0.0,
     }
@@ -320,6 +323,18 @@ def metrics_snapshot() -> dict[str, Any]:
                     f"SELECT COUNT(*) FROM {TRACE_SPANS_TABLE} WHERE kind = 'semantic_cache' AND status = 'hit'"
                 ).fetchone()[0]
             )
+            snapshot["external_mcp_calls_total"] = int(
+                conn.execute(f"SELECT COUNT(*) FROM {TRACE_SPANS_TABLE} WHERE kind = 'mcp_external'").fetchone()[0]
+            )
+            snapshot["external_mcp_errors_total"] = int(
+                conn.execute(
+                    f"SELECT COUNT(*) FROM {TRACE_SPANS_TABLE} WHERE kind = 'mcp_external' AND status != 'ok'"
+                ).fetchone()[0]
+            )
+            mcp_avg_latency = conn.execute(
+                f"SELECT AVG(duration_ms) FROM {TRACE_SPANS_TABLE} WHERE kind = 'mcp_external'"
+            ).fetchone()[0]
+            snapshot["external_mcp_latency_ms_avg"] = round(float(mcp_avg_latency), 2) if mcp_avg_latency is not None else 0.0
             total_tokens = conn.execute(f"SELECT SUM(total_tokens) FROM {TRACE_SPANS_TABLE}").fetchone()[0]
             snapshot["tokens_total"] = int(total_tokens) if total_tokens is not None else 0
     except Exception as exc:

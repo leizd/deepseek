@@ -1,8 +1,8 @@
 # AI Runtime Evaluation Harness
 
-适用版本：v2.2.0。
+适用版本：v2.2.3。
 
-这套 harness 对 DeepSeek Infra 的三条核心能力线做**自动化回归评测**（全部可离线执行，无需 API Key）。v2.2.0 CI 必过项只包含稳定、无需录制输入的 `run_rag_eval.py` 与 `run_tool_eval.py`；`run_agent_eval.py` 继续提供离线样例打分，等录制数据完全稳定后再加入必过门禁。
+这套 harness 对 DeepSeek Infra 的核心能力线做**自动化回归评测**（全部可离线执行，无需 API Key）。v2.2.3 CI 必过项包含稳定、无需录制输入的 `run_rag_eval.py` 与 `run_tool_eval.py`；`run_injection_adversarial.py` 先 report-only 输出对抗注入指标；`run_agent_eval.py` 继续提供离线样例打分，等录制数据完全稳定后再加入必过门禁。
 
 | 指标族 | 含义 | 由谁产出 |
 | --- | --- | --- |
@@ -14,6 +14,7 @@
 | **Agent Success Rate** | 任务最终答案是否满足成功标准且未失败 | `run_agent_eval.py` |
 | **Tool Policy Pass Rate** | 安全闸门对 SSRF / 路径越界 / 密钥外泄 / 越权等判定是否符合预期 | `run_tool_eval.py`（离线重放真实闸门）|
 | **Injection Defense Pass Rate** | 注入指令被检出 / 清洗、良性内容不误伤的比例 | `run_tool_eval.py` |
+| **Block / Bypass / False Positive Rate** | 小型对抗注入语料库的拦截率、绕过率、误伤率 | `run_injection_adversarial.py`（report-only） |
 | **Latency Benchmark** | 平均 / P50 / P95 延迟 | 全部 runner |
 | **Cost Benchmark** | 平均 token 与 USD 成本（按模型定价）| `run_agent_eval.py` |
 
@@ -26,10 +27,12 @@ evals/
     agent_tasks.jsonl               # {id, task, expected_tools, expected_keywords}
     agent_predictions.sample.jsonl  # 录制的 agent 输出，离线打分用
     tool_policy_cases.jsonl         # 安全闸门 / 注入防御标注用例（policy | sanitize | taint）
+    injection_adversarial.jsonl     # 对抗注入小语料（中文 / 英文 / Base64 / Markdown hidden / 多轮）
   runners/
     run_rag_eval.py
     run_agent_eval.py
     run_tool_eval.py
+    run_injection_adversarial.py
   reports/                          # 生成的 JSON 报告（.gitignore）
 ```
 
@@ -49,6 +52,10 @@ python evals/runners/run_agent_eval.py
 # 安全闸门 / 注入防御：把标注用例喂给真实的 ToolPolicy.evaluate、
 # sanitize_tool_result 与 context_taint.scan_text，离线断言判定结果。
 python evals/runners/run_tool_eval.py
+
+# 对抗注入小语料：输出 block_rate / false_positive_rate / bypass_rate。
+# v2.2.3 先 report-only，不因绕过或误伤让 CI 失败。
+python evals/runners/run_injection_adversarial.py
 ```
 
 常用参数：`--golden`、`--k`（RAG）、`--predictions`（agent）、`--json`（机器可读）、
@@ -58,7 +65,8 @@ CI 口径：
 
 - PR 必跑 `python evals/runners/run_rag_eval.py`，失败时 CI 红。
 - PR 必跑 `python evals/runners/run_tool_eval.py`，覆盖 Tool Policy Pass Rate 与 Prompt Injection Defense Pass Rate，失败时 CI 红。
-- `python evals/runners/run_agent_eval.py` 目前作为离线样例回归，不属于 v2.2.0 必过项。
+- PR 跑 `python evals/runners/run_injection_adversarial.py --no-report`，但 v2.2.3 只 report-only，不设硬门槛。
+- `python evals/runners/run_agent_eval.py` 目前作为离线样例回归，不属于 v2.2.3 必过项。
 
 ## 输出示例
 
@@ -99,8 +107,21 @@ Avg Latency: 0.0ms
 P95 Latency: 0.1ms
 ```
 
+```
+=== Eval Report · injection-adversarial ===
+Cases: 30
+Injection Block Rate: 1.000
+False Positive Rate: 0.200
+Bypass Rate: 0.000
+Avg Latency: 0.0ms
+P95 Latency: 0.1ms
+```
+
 `run_tool_eval.py` 在判定不符时退出码为 1 并逐条列出错判用例，可直接当回归门禁；
 新增攻击样本只需往 `tool_policy_cases.jsonl` 追加一行。
+
+`run_injection_adversarial.py` 固定返回 0，用于观察对抗样本覆盖面；若要把它升级为门禁，先给
+`block_rate`、`false_positive_rate` 和 `bypass_rate` 设定版本化阈值。
 
 ## 录制真实 predictions
 

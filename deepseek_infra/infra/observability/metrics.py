@@ -25,12 +25,28 @@ def render_prometheus() -> str:
         "Semantic cache lookups performed before model calls.",
     )
     lines += _line("ai_semantic_cache_hits_total", int(snapshot.get("semantic_cache_hits_total") or 0), "Semantic cache hits.")
+    lines += _line(
+        "ai_external_mcp_calls_total",
+        int(snapshot.get("external_mcp_calls_total") or 0),
+        "Outbound external MCP tool calls recorded in traces.",
+    )
+    lines += _line(
+        "ai_external_mcp_errors_total",
+        int(snapshot.get("external_mcp_errors_total") or 0),
+        "Outbound external MCP tool calls that ended in error.",
+    )
     lines += _line("ai_error_runs_total", int(snapshot.get("error_runs_total") or 0), "Runs that ended in error.")
     lines += _line("ai_tokens_total", int(snapshot.get("tokens_total") or 0), "Total tokens across recorded spans.")
     lines += _line(
         "ai_run_latency_ms_avg",
         float(snapshot.get("run_latency_ms_avg") or 0.0),
         "Average run latency in milliseconds.",
+        "gauge",
+    )
+    lines += _line(
+        "ai_external_mcp_latency_ms_avg",
+        float(snapshot.get("external_mcp_latency_ms_avg") or 0.0),
+        "Average outbound external MCP tool-call latency in milliseconds.",
         "gauge",
     )
     lines += _line("ai_trace_enabled", 1 if snapshot.get("enabled") else 0, "Whether local tracing is enabled.", "gauge")

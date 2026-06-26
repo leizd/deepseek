@@ -351,7 +351,12 @@ class MCPSettings:
     expose_prompts: bool = True
     client_enabled: bool = False
     client_servers: tuple[tuple[str, str], ...] = ()  # (name, base_url)
+    client_server_timeouts: Mapping[str, int] = field(default_factory=lambda: MappingProxyType({}))
     client_timeout_seconds: int = 30
+    client_max_retries: int = 1
+    client_retry_backoff_seconds: float = 0.25
+    client_circuit_breaker_failures: int = 3
+    client_circuit_breaker_reset_seconds: int = 60
 
 
 @dataclass(frozen=True, slots=True)
@@ -396,7 +401,7 @@ class ContextTaintSettings:
 @dataclass(frozen=True, slots=True)
 class Settings:
     root: Path = ROOT
-    app_version: str = "2.2.2"
+    app_version: str = "2.2.3"
     deepseek_url: str = "https://api.deepseek.com/chat/completions"
     tavily_url: str = "https://api.tavily.com/search"
     deepseek_timeout_seconds: int = 180
@@ -723,7 +728,12 @@ class Settings:
                 expose_prompts=_env_bool("MCP_EXPOSE_PROMPTS", True),
                 client_enabled=_env_bool("MCP_CLIENT_ENABLED", False),
                 client_servers=_mcp_client_servers_from_env(),
+                client_server_timeouts=_mcp_client_server_timeouts_from_env(),
                 client_timeout_seconds=_env_int_clamped("MCP_CLIENT_TIMEOUT_SECONDS", 30, 1, 600),
+                client_max_retries=_env_int_clamped("MCP_CLIENT_MAX_RETRIES", 1, 0, 5),
+                client_retry_backoff_seconds=_env_float_clamped("MCP_CLIENT_RETRY_BACKOFF_SECONDS", 0.25, 0.0, 10.0),
+                client_circuit_breaker_failures=_env_int_clamped("MCP_CLIENT_CIRCUIT_BREAKER_FAILURES", 3, 1, 20),
+                client_circuit_breaker_reset_seconds=_env_int_clamped("MCP_CLIENT_CIRCUIT_BREAKER_RESET_SECONDS", 60, 1, 3600),
             ),
             a2a=A2ASettings(
                 enabled=_env_bool("A2A_ENABLED", True),
@@ -898,6 +908,39 @@ def _mcp_client_servers_from_env() -> tuple[tuple[str, str], ...]:
     return tuple(servers)
 
 
+def _mcp_client_server_timeouts_from_env() -> Mapping[str, int]:
+    """Parse per-server MCP timeout overrides from MCP_CLIENT_SERVERS.
+
+    Example item: ``{"name":"docs","url":"http://127.0.0.1:3000/mcp","timeoutSeconds":10}``.
+    Invalid or missing values fall back to ``MCP_CLIENT_TIMEOUT_SECONDS``.
+    """
+    raw = os.environ.get("MCP_CLIENT_SERVERS", "").strip()
+    if not raw:
+        return MappingProxyType({})
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return MappingProxyType({})
+    timeouts: dict[str, int] = {}
+    if isinstance(parsed, list):
+        for item in parsed:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or "").strip()
+            url = str(item.get("url") or "").strip()
+            if not name or not url.startswith(("http://", "https://")):
+                continue
+            raw_timeout = item.get("timeoutSeconds", item.get("timeout_seconds"))
+            if raw_timeout is None:
+                continue
+            try:
+                timeout = int(str(raw_timeout))
+            except (TypeError, ValueError):
+                continue
+            timeouts[name] = min(600, max(1, timeout))
+    return MappingProxyType(timeouts)
+
+
 settings = Settings.from_env()
 
 STATIC_DIR = settings.static_dir
@@ -1056,7 +1099,12 @@ MCP_EXPOSE_RESOURCES = settings.mcp.expose_resources
 MCP_EXPOSE_PROMPTS = settings.mcp.expose_prompts
 MCP_CLIENT_ENABLED = settings.mcp.client_enabled
 MCP_CLIENT_SERVERS = settings.mcp.client_servers
+MCP_CLIENT_SERVER_TIMEOUTS = settings.mcp.client_server_timeouts
 MCP_CLIENT_TIMEOUT_SECONDS = settings.mcp.client_timeout_seconds
+MCP_CLIENT_MAX_RETRIES = settings.mcp.client_max_retries
+MCP_CLIENT_RETRY_BACKOFF_SECONDS = settings.mcp.client_retry_backoff_seconds
+MCP_CLIENT_CIRCUIT_BREAKER_FAILURES = settings.mcp.client_circuit_breaker_failures
+MCP_CLIENT_CIRCUIT_BREAKER_RESET_SECONDS = settings.mcp.client_circuit_breaker_reset_seconds
 A2A_ENABLED = settings.a2a.enabled
 A2A_DEFAULT_AGENT = settings.a2a.default_agent
 A2A_MAX_TASKS = settings.a2a.max_tasks

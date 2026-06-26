@@ -34,7 +34,7 @@ from deepseek_infra.core.config import (
 
 class ConfigTests(unittest.TestCase):
     def test_nested_settings_back_compat_constants_match(self) -> None:
-        self.assertEqual(settings.app_version, "2.2.2")
+        self.assertEqual(settings.app_version, "2.2.3")
         self.assertEqual(settings.default_host, "127.0.0.1")
         self.assertEqual(DEFAULT_HOST, settings.default_host)
         self.assertEqual(MULTI_AGENT_TIMEOUT_SECONDS, settings.multi_agent_timeout_seconds)
@@ -117,6 +117,16 @@ class ConfigTests(unittest.TestCase):
                 "GATEWAY_REQUEST_QUEUE_MAX_ATTEMPTS": "9",
                 "GATEWAY_REQUEST_QUEUE_INITIAL_BACKOFF_SECONDS": "0.5",
                 "GATEWAY_REQUEST_QUEUE_MAX_BACKOFF_SECONDS": "33",
+                "MCP_CLIENT_ENABLED": "1",
+                "MCP_CLIENT_SERVERS": (
+                    '[{"name":"github","url":"http://127.0.0.1:9001/mcp","timeoutSeconds":7},'
+                    '{"name":"docs","url":"http://127.0.0.1:9002/mcp"}]'
+                ),
+                "MCP_CLIENT_TIMEOUT_SECONDS": "11",
+                "MCP_CLIENT_MAX_RETRIES": "2",
+                "MCP_CLIENT_RETRY_BACKOFF_SECONDS": "0.75",
+                "MCP_CLIENT_CIRCUIT_BREAKER_FAILURES": "4",
+                "MCP_CLIENT_CIRCUIT_BREAKER_RESET_SECONDS": "90",
             },
             clear=True,
         ):
@@ -173,6 +183,15 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(loaded.gateway.request_queue_max_attempts, 9)
         self.assertEqual(loaded.gateway.request_queue_initial_backoff_seconds, 0.5)
         self.assertEqual(loaded.gateway.request_queue_max_backoff_seconds, 33)
+        self.assertTrue(loaded.mcp.client_enabled)
+        self.assertEqual(loaded.mcp.client_servers, (("github", "http://127.0.0.1:9001/mcp"), ("docs", "http://127.0.0.1:9002/mcp")))
+        self.assertEqual(loaded.mcp.client_timeout_seconds, 11)
+        self.assertEqual(loaded.mcp.client_server_timeouts["github"], 7)
+        self.assertNotIn("docs", loaded.mcp.client_server_timeouts)
+        self.assertEqual(loaded.mcp.client_max_retries, 2)
+        self.assertEqual(loaded.mcp.client_retry_backoff_seconds, 0.75)
+        self.assertEqual(loaded.mcp.client_circuit_breaker_failures, 4)
+        self.assertEqual(loaded.mcp.client_circuit_breaker_reset_seconds, 90)
 
     def test_ocr_env_values_default_and_clamp(self) -> None:
         with patch.dict(

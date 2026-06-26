@@ -1,64 +1,70 @@
 # Compatibility Matrix（兼容性矩阵）
 
-适用版本：v2.2.2。
+适用版本：v2.2.3。
 
-DeepSeek Infra 对外暴露标准协议端点（OpenAI `/v1`、MCP JSON-RPC 2.0、A2A Agent Card + 任务生命周期），也能在 v2.2.1 起作为 MCP client 桥接外部 MCP server 的工具目录。理论上它与遵循这些协议的客户端 / server 互操作；但诚实地讲，我们尚未对所有外部实现逐一跑兼容性矩阵。这个页面就是 **"测了什么、没测什么"的唯一真实记录**。
+这页只记录已经可复现的互操作结果，不把“协议上应该兼容”写成“实机已验证”。v2.2.3 的重点是把 MCP Tool Hub 从 demo 感推进到 MVP：本地 MCP server、出方向外部 MCP client、失败场景、health API、trace/metrics 都有可跑证据；Claude Desktop 和 Cursor 的配置片段已补齐，但本机未安装这两个客户端，因此 GUI 实机项仍标为待跑。
 
 ## MCP Client Compatibility
 
-| Client | Status | Notes |
-| --- | --- | --- |
-| `examples/mcp_tool_demo.py` | ✅ Tested | 本地 Python 客户端，覆盖 initialize / tools/list / tools/call / resources / prompts 全流程 |
-| MCP test suite (`tests/test_mcp.py`) | ✅ Tested | CI 门禁：握手 / 目录 / 能力切片 / 真实执行 / 错误码族 / 回环 client / 外部 server bridge |
-| `curl` JSON-RPC | ✅ Tested | 手动 daily driver：`curl -X POST http://127.0.0.1:8000/mcp -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","method":"tools/list","id":1}'` |
-| Claude Desktop | 🔲 Not tested | 协议上兼容（Streamable HTTP），有 `MCP_CAPABILITY` 能力切片，但未在 Claude Desktop 上跑过 |
-| Cursor | 🔲 Not tested | 同上，协议路径是通的 |
-| Continue.dev | 🔲 Not tested | 待验证 |
-| Any MCP-compatible client | 🔲 Planned | v2.3 Roadmap：逐客户端跑兼容矩阵 |
-
-### 能力切片说明
-
-MCP 客户端经 `MCP_CAPABILITY` 配置获得不同工具面：
-- `full`（默认）：全部 17 个本地工具；启用 `MCP_CLIENT_ENABLED=1` 时，也包含已发现的外部 MCP bridged tools
-- `researcher`：只暴露搜索 / 检索 / 抓取面
-- `coder`：暴露计算 / 文件 / 搜索面
-- `reasoner`：无工具
-
-`tools/list` 响应中每个工具带 `annotations`（`read-only` / `destructive` / `open-world`），供客户端自行做安全决策。
+| Client / Path | Status | Evidence | Notes |
+| --- | --- | --- | --- |
+| `examples/mcp_tool_demo.py` | ✅ Tested | `python examples/mcp_tool_demo.py` | 本地 Python MCP client，覆盖 `initialize` / `tools/list` / `tools/call`。 |
+| MCP test suite (`tests/test_mcp.py`) | ✅ Tested | CI + local pytest | 覆盖握手、目录、能力切片、工具执行、错误码、loopback client、外部 server profile、policy gate、结果清洗、trace diagnostics。 |
+| `curl` JSON-RPC | ✅ Tested | `POST /mcp` | 适合排查 token、协议响应和工具目录。 |
+| Claude Desktop | 🟡 Config documented | [integrations/claude-desktop.md](integrations/claude-desktop.md) | 本机未安装 Claude Desktop，未标为实机通过。DeepSeek Infra 端的 Streamable HTTP endpoint 已可用。 |
+| Cursor | 🟡 Config documented | [integrations/cursor.md](integrations/cursor.md) | 本机未安装 Cursor，未标为实机通过。Cursor MCP 配置片段与排障步骤已补。 |
+| Continue.dev | 🔲 Not tested | - | 待补配置和实机验证。 |
 
 ## MCP External Server Bridge
 
-v2.2.1 的外接方向使用 `MCP_CLIENT_ENABLED=1` + `MCP_CLIENT_SERVERS` 明确配置外部 server。外部工具会被命名为 `mcp__<server>__<tool>`，进入本地 Agent 工具面前先生成保守风险 profile，并在执行时继续经过 Tool Policy、审批、结果清洗和审计。v2.2.2 起，Agent 和 `/mcp tools/call` 两条入口都由外部 MCP executor 内部再次执行 ToolPolicy，远端 `isError=true` 不再被包装成成功。
+v2.2.1 起，外部 MCP server 的工具会以 `mcp__<server>__<tool>` 桥接进本地 Agent 工具面；v2.2.2 起，Agent 调用和 `/mcp tools/call` 都共享 executor 内部 ToolPolicy 闸门，远端 `isError=true` 会映射为本地 `upstream_tool_error`。
 
-| External Server | Status | Notes |
-| --- | --- | --- |
-| Mock MCP server (`tests/test_mcp.py`) | ✅ Tested | 覆盖工具发现、命名隔离、风险推断、策略拒绝、审批、审计、结果清洗、不可用 server 降级、Hub 路径防绕过、远端工具错误和 schema refresh |
-| `GET /api/mcp/external/tools` | ✅ Tested by code path | 运行时查看 server 可用性、bridged name、risk、network/filesystem 与 requiresApproval |
-| Third-party MCP servers | 🔲 Not tested | Roadmap v2.3：按 Claude Desktop / Cursor / Continue.dev 常用 MCP server 补互测记录 |
+## External MCP Server Bridging
 
-## A2A Interop Compatibility
+| Scenario | Status | Evidence | Notes |
+| --- | --- | --- | --- |
+| Local mock external MCP server | ✅ Tested | `tests/test_mcp.py` | `MCPClient` 消费外部 `tools/list`，生成 `mcp__<server>__<tool>` profiles。 |
+| External tool policy gate | ✅ Tested | `tests/test_mcp.py` | 高风险/敏感参数进入 Tool Policy，拒绝时不会触达外部 server。 |
+| External server unavailable | ✅ Tested | `tests/test_mcp.py` | 外部 server 失败不影响本地 MCP tools。 |
+| Timeout / retry stats | ✅ Tested | `test_client_retries_retryable_transport_failures` | `MCPClient.last_stats` 记录 attempts、retry count、latency、timeout/error type。 |
+| Circuit breaker | ✅ Tested | `test_external_mcp_registry_reports_health_and_opens_circuit` | 连续失败后进入短期 `circuit_open`，`/api/mcp/external/tools` 返回健康态。 |
+| Trace diagnostics | ✅ Tested | `test_external_mcp_call_records_trace_diagnostics` | `mcp_external` span 记录 latency、attempts、retryCount、timeout、errorType。 |
+| Real third-party Streamable HTTP MCP server | 🔲 Not tested in this workspace | - | 需要选择一个稳定公开/本地第三方 server 后补实测记录。 |
 
-| Peer | Status | Notes |
-| --- | --- | --- |
-| Local A2A test suite (`tests/test_a2a.py`) | ✅ Tested | CI 门禁：11 项 |
-| Local Agent Card discovery | ✅ Tested | `curl /.well-known/agent-card.json` daily driver |
-| `A2AClient` → external peer | 🔲 Not tested | 协议层与 A2A 规范对齐，但未与第三方 A2A 实现互测（Roadmap v2.3） |
-| Google A2A | 🔲 Not tested | 草案阶段兼容，未互测 |
+## Current MCP MVP Acceptance
+
+| Acceptance item | v2.2.3 result |
+| --- | --- |
+| 本地 MCP server | ✅ `POST /mcp` + examples + CI |
+| 本地 mock external MCP server | ✅ CI |
+| Claude Desktop | 🟡 配置文档已补，GUI 未实机 |
+| Cursor | 🟡 配置文档已补，GUI 未实机 |
+| 一个真实外部 MCP server | 🔲 待实机 |
+| 外部 server 挂掉 | ✅ health + local tools unaffected |
+| schema/响应异常 | ✅ invalid JSON / malformed tool catalog mapped to upstream failure |
+| 工具超时/重试 | ✅ client stats + trace diagnostics |
+| 危险参数拦截 | ✅ Tool Policy gate |
+
+## Health API
+
+`GET /api/mcp/external/tools` 返回：
+
+- `servers[]`: `available`、`status`、`timeoutSeconds`、`consecutiveFailures`、`lastError`、`lastErrorType`、`lastRefreshAt`、`lastLatencyMs`、`lastRetryCount`、`circuitOpenSeconds`
+- `tools[]`: `server`、`tool`、`bridgedName`、`risk`、`network`、`filesystem`、`requiresApproval`
 
 ## OpenAI API Compatibility
 
-| Client | Status | Notes |
+| Client | Status | Evidence |
 | --- | --- | --- |
-| OpenAI Python SDK (`openai>=1.0`) | ✅ Tested | `examples/openai_compatible_client.py` 覆盖 `/v1/chat/completions`（stream + non-stream）+ `/v1/models` |
-| `curl` | ✅ Tested | README 文档中的示例 |
-| Ollama (as provider) | ✅ Tested | `OLLAMA_ENABLED=1` 时 `/v1/models` 额外列出 `ollama/<tag>`，请求可经 `/v1` 网关路由 |
-| Other OpenAI-compatible SDKs | 🔲 Not tested | 理论上兼容标准 `chat/completions` 与 `models` |
+| OpenAI Python SDK (`openai>=1.0`) | ✅ Tested | `examples/openai_compatible_client.py` |
+| `curl` | ✅ Tested | README examples |
+| Ollama as provider | ✅ Tested | `OLLAMA_ENABLED=1` exposes `ollama/<tag>` through `/v1/models` |
+| Other OpenAI-compatible SDKs | 🔲 Not tested | Should work with standard `/v1/chat/completions` and `/v1/models`, but not claimed here. |
 
-## 想帮忙补兼容性矩阵？
+## A2A Interop Compatibility
 
-1. 挑一个上面标注 🔲 的客户端
-2. 按 [docs/DEMO.md](DEMO.md) 起服务
-3. 跑通你自己的客户端
-4. 开 Issue 或 PR 汇报结果，我们更新这个页面
-
-这是开源项目最实在的贡献之一。
+| Peer | Status | Evidence |
+| --- | --- | --- |
+| Local A2A test suite (`tests/test_a2a.py`) | ✅ Tested | CI |
+| Local Agent Card discovery | ✅ Tested | `GET /.well-known/agent-card.json` |
+| External A2A peer | 🔲 Not tested | Third-party interop still pending. |

@@ -13,6 +13,7 @@ from typing import Any
 
 from deepseek_infra.core.errors import AppError
 from deepseek_infra.infra.mcp.bridge import external_mcp_registry, parse_bridged_name
+from deepseek_infra.infra.observability.observability import start_span
 from deepseek_infra.infra.tool_runtime.tool_policy import (
     ToolPolicy,
     _normalized_args_hash,
@@ -24,6 +25,9 @@ def call_external_mcp_tool(
     bridged_name: str,
     arguments: dict[str, Any],
     policy: ToolPolicy | None,
+    *,
+    trace_id: str = "",
+    parent_span_id: str = "",
 ) -> dict[str, Any]:
     """Execute one bridged external MCP tool call through the policy gate.
 
@@ -74,12 +78,32 @@ def call_external_mcp_tool(
 
     start = time.perf_counter()
     error_type: str | None = None
+    span = start_span(
+        trace_id,
+        name=f"mcp.external.{server}.{tool_name}",
+        kind="mcp_external",
+        input_data={
+            "server": server,
+            "tool": tool_name,
+            "bridgedTool": bridged_name,
+            "argsHash": _normalized_args_hash(arguments),
+        },
+        parent_span_id=parent_span_id,
+    )
 
     try:
         result = client.call_tool(tool_name, arguments)
     except AppError as exc:
+        external_mcp_registry.record_call_failure(server, client, exc)
         error_type = _classify_error(exc)
+        latency_ms = int((time.perf_counter() - start) * 1000)
         output = {"ok": False, "tool": bridged_name, "error": str(exc), "code": "upstream_failure"}
+        span.finish(
+            status="error",
+            output_data={"ok": False, "code": "upstream_failure"},
+            diagnostics=_span_diagnostics(client, latency_ms=latency_ms, error_type=error_type),
+            error=str(exc),
+        )
         _write_audit_for_call(
             server=server,
             tool=tool_name,
@@ -87,13 +111,21 @@ def call_external_mcp_tool(
             arguments=arguments,
             policy_verdict=decision.policy_verdict,  # policy already said yes — this is a transport failure
             risk=risk,
-            latency_ms=int((time.perf_counter() - start) * 1000),
+            latency_ms=latency_ms,
             error_type=error_type,
         )
         return output
     except Exception as exc:
+        external_mcp_registry.record_call_failure(server, client, exc)
         error_type = "unknown"
+        latency_ms = int((time.perf_counter() - start) * 1000)
         output = {"ok": False, "tool": bridged_name, "error": str(exc), "code": "internal"}
+        span.finish(
+            status="error",
+            output_data={"ok": False, "code": "internal"},
+            diagnostics=_span_diagnostics(client, latency_ms=latency_ms, error_type=error_type),
+            error=str(exc),
+        )
         _write_audit_for_call(
             server=server,
             tool=tool_name,
@@ -101,12 +133,13 @@ def call_external_mcp_tool(
             arguments=arguments,
             policy_verdict=decision.policy_verdict,
             risk=risk,
-            latency_ms=int((time.perf_counter() - start) * 1000),
+            latency_ms=latency_ms,
             error_type=error_type,
         )
         return output
 
     latency_ms = int((time.perf_counter() - start) * 1000)
+    external_mcp_registry.record_call_success(server, client)
 
     is_error = bool(result.get("isError")) if isinstance(result, dict) else False
     output = {"ok": not is_error, "tool": bridged_name, "result": result}
@@ -126,6 +159,10 @@ def call_external_mcp_tool(
         risk=risk,
         latency_ms=latency_ms,
         error_type=error_type,
+    )
+    span.finish(
+        output_data={"ok": True, "tool": bridged_name},
+        diagnostics=_span_diagnostics(client, latency_ms=latency_ms, error_type=None),
     )
 
     return output
@@ -171,3 +208,15 @@ def _classify_error(exc: AppError) -> str:
     if "protocol" in message:
         return "protocol_error"
     return "upstream_failure"
+
+
+def _span_diagnostics(client: Any, *, latency_ms: int, error_type: str | None) -> dict[str, Any]:
+    stats = getattr(client, "last_stats", None)
+    return {
+        "latencyMs": latency_ms,
+        "transportLatencyMs": int(getattr(stats, "latency_ms", 0) or 0),
+        "attempts": int(getattr(stats, "attempts", 0) or 0),
+        "retryCount": int(getattr(stats, "retry_count", 0) or 0),
+        "timeout": bool(getattr(stats, "timeout", False)),
+        "errorType": error_type or "",
+    }

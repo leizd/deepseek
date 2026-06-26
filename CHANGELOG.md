@@ -2,6 +2,30 @@
 
 本项目使用类似 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的分组方式维护变更记录。未发布内容记录在 `[Unreleased]`，正式发版时迁移到具体版本。
 
+## [2.2.3] - MCP Interop & Trust Hardening
+
+**主题：互操作验证 + 真实场景可信度补强。** 本版不继续堆新概念，重点把 MCP 外接路径、安全闸门、失败可观测性、评测与 benchmark 的可复跑证据打实。
+
+### 新增
+
+- **外部 MCP 韧性层**：`MCPClient` 支持 per-server timeout（`MCP_CLIENT_SERVERS[].timeoutSeconds`）、retry、backoff 和 `last_stats`；`ExternalMCPToolRegistry` 维护 server health、连续失败计数和短期 circuit breaker。
+- **外部 MCP health API**：`GET /api/mcp/external/tools` 返回 `servers[]` 的 `status`、`lastError`、`lastRefreshAt`、`lastLatencyMs`、`lastRetryCount`、`circuitOpenSeconds`，以及桥接工具目录。
+- **外部 MCP trace / metrics**：外部工具调用写入 `mcp_external` span，diagnostics 记录 latency / attempts / retryCount / timeout / errorType；Prometheus 摘要增加 external MCP calls/errors/avg latency。
+- **Claude Desktop / Cursor 集成文档**：新增 `docs/integrations/claude-desktop.md`、`docs/integrations/cursor.md`，给出 remote HTTP / stdio bridge 配置片段、token 处理和排障步骤。
+- **Prompt injection 对抗小语料**：新增 `evals/golden/injection_adversarial.jsonl` 与 `evals/runners/run_injection_adversarial.py`，覆盖中文、英文、Base64、Markdown hidden instruction、多轮诱导和良性样本，输出 `blockRate` / `falsePositiveRate` / `bypassRate`（report-only）。
+
+### 更改
+
+- **MCP Tool Hub 状态**：实现状态矩阵中 MCP 从 `Experimental` 推到 `MVP`；兼容矩阵改为记录“已实测 / 配置已补 / 待实机”，不把未安装客户端写成通过。
+- **CI 覆盖率门槛**：`pytest --cov --cov-fail-under` 从 60 提到 70；README 增加 coverage gate badge。
+- **Semantic cache benchmark**：`bench_semantic_cache.py` 支持 `--provider hash|onnx`，ONNX 作为可选 benchmark 路径，不默认启用。
+- **文档同步**：README、API、Architecture、Compatibility、Eval、Benchmark、Implementation Status、`.env.example` 同步 v2.2.3 配置与验证口径。
+
+### 测试
+
+- MCP 新增覆盖：retry stats、registry health / circuit breaker、外部调用 trace diagnostics。
+- Eval 新增覆盖：adversarial injection runner 的 Base64 解码与 block / bypass / false-positive 指标聚合。
+
 ## [2.2.2] - MCP Policy Hardening
 
 **主题：MCP Policy Hardening——把外部 MCP bridged tools 的策略闸门从“主 Agent 路径可用”补强到“任何入口都不可绕过”。** 本版聚焦外部 MCP 工具的安全一致性：`/mcp tools/call`、Agent tool calls、远端工具错误、SSRF/path guard、schema 刷新和命名碰撞都进入明确的回归覆盖。

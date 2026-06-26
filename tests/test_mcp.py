@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
@@ -10,7 +11,7 @@ import deepseek_infra.infra.mcp.permissions as mcp_permissions
 import deepseek_infra.infra.mcp.registry as mcp_registry
 import deepseek_infra.infra.tool_runtime.generated_files as generated_files
 from deepseek_infra.core.errors import AppError
-from deepseek_infra.infra.mcp.client import MCPClient
+from deepseek_infra.infra.mcp.client import MCPCallStats, MCPClient
 from deepseek_infra.infra.mcp.server import (
     INVALID_PARAMS,
     INVALID_REQUEST,
@@ -202,6 +203,58 @@ def test_client_raises_apperror_on_rpc_error_and_unreachable() -> None:
     with patch("urllib.request.urlopen", side_effect=OSError("connection refused")):
         with pytest.raises(AppError):
             client.list_tools()
+
+
+def test_client_retries_retryable_transport_failures() -> None:
+    client = MCPClient("http://127.0.0.1:9/mcp", name="retrying", max_retries=1, retry_backoff_seconds=0)
+    tools_response = _FakeResponse(
+        json.dumps({"jsonrpc": "2.0", "id": 1, "result": {"tools": []}}).encode("utf-8"),
+        {"Mcp-Session-Id": "retry-session"},
+    )
+    with patch("urllib.request.urlopen", side_effect=[OSError("timed out"), tools_response]) as mocked:
+        assert client.list_tools() == []
+
+    assert mocked.call_count == 2
+    assert client.last_stats.attempts == 2
+    assert client.last_stats.retry_count == 1
+    assert client.last_stats.error_type == ""
+
+
+def test_external_mcp_registry_reports_health_and_opens_circuit(monkeypatch: pytest.MonkeyPatch) -> None:
+    from deepseek_infra.infra.mcp import bridge as bridge_mod
+    from deepseek_infra.infra.mcp.bridge import ExternalMCPToolRegistry
+
+    client = MCPClient("http://127.0.0.1:9999/mcp", name="broken")
+
+    def fail_initialize() -> dict[str, Any]:
+        client.last_stats = MCPCallStats(latency_ms=9, attempts=1, retry_count=0, timeout=True, error_type="timeout")
+        raise AppError("MCP server broken is unreachable: timed out")
+
+    client.initialize = fail_initialize  # type: ignore[method-assign]
+    fake_settings = SimpleNamespace(
+        mcp=SimpleNamespace(
+            client_enabled=True,
+            client_servers=(("broken", "http://127.0.0.1:9999/mcp"),),
+            client_server_timeouts={},
+            client_timeout_seconds=5,
+            client_circuit_breaker_failures=2,
+            client_circuit_breaker_reset_seconds=30,
+        )
+    )
+    monkeypatch.setattr(bridge_mod, "settings", fake_settings)
+    monkeypatch.setattr(bridge_mod, "configured_clients", lambda: [client])
+
+    registry = ExternalMCPToolRegistry(ttl_seconds=0)
+    registry.refresh(force=True)
+    registry.refresh(force=True)
+
+    status = registry.server_status()[0]
+    assert status["available"] is False
+    assert status["status"] == "circuit_open"
+    assert status["consecutiveFailures"] == 2
+    assert status["lastErrorType"] == "timeout"
+    assert status["timeoutCount"] == 2
+    assert status["circuitOpenSeconds"] > 0
 
 
 # --- External MCP tool bridge tests (v2.2.1) ------------------------------------
@@ -706,3 +759,65 @@ def test_agent_tool_definitions_refreshes_external_registry(monkeypatch: pytest.
         assert "mcp__docs__lookup" in names
     finally:
         external_mcp_registry._profiles.pop("mcp__docs__lookup", None)
+
+
+def test_external_mcp_call_records_trace_diagnostics(tmp_settings) -> None:
+    """External MCP calls write latency/retry/timeout diagnostics into trace spans."""
+    from deepseek_infra.infra.mcp.bridge import ExternalMCPServerHealth, ExternalMCPToolProfile, external_mcp_registry
+    from deepseek_infra.infra.mcp.executor import call_external_mcp_tool
+    from deepseek_infra.infra.observability import observability
+    from deepseek_infra.infra.tool_runtime.tool_policy import ToolPolicy
+
+    client = MCPClient("http://127.0.0.1:9998/mcp", name="trace")
+
+    def fake_call_tool(name: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
+        arguments = arguments or {}
+        client.last_stats = MCPCallStats(latency_ms=12, attempts=2, retry_count=1)
+        return {"content": [{"type": "text", "text": f"{name}:{arguments.get('message')}"}], "isError": False}
+
+    profile = ExternalMCPToolProfile(
+        server="trace",
+        tool="echo",
+        bridged_name="mcp__trace__echo",
+        input_schema={"type": "object", "properties": {"message": {"type": "string"}}},
+        risk="low",
+        network=False,
+        filesystem=False,
+        env=False,
+        requires_approval=False,
+    )
+    old_profiles = dict(external_mcp_registry._profiles)
+    old_by_client = dict(external_mcp_registry._by_client)
+    old_health = dict(external_mcp_registry._health)
+    old_unavailable = set(external_mcp_registry._unavailable)
+    try:
+        client.call_tool = fake_call_tool  # type: ignore[method-assign]
+        external_mcp_registry._profiles["mcp__trace__echo"] = profile
+        external_mcp_registry._by_client["mcp__trace__echo"] = (client, "echo")
+        external_mcp_registry._health["trace"] = ExternalMCPServerHealth(
+            name="trace",
+            url=client.base_url,
+            timeout_seconds=client.timeout_seconds,
+            available=True,
+            status="ok",
+        )
+
+        trace_id = observability.start_trace(kind="chat", title="external mcp")
+        policy = ToolPolicy(capability="full", metadata_provider=external_mcp_registry.metadata_provider)
+        result = call_external_mcp_tool("mcp__trace__echo", {"message": "hello"}, policy, trace_id=trace_id)
+        observability.finish_trace(trace_id)
+        trace = observability.get_trace(trace_id)
+
+        assert result["ok"] is True
+        assert trace is not None
+        span = next(item for item in trace["spans"] if item["kind"] == "mcp_external")
+        assert span["status"] == "ok"
+        assert span["diagnostics"]["retryCount"] == 1
+        assert span["diagnostics"]["attempts"] == 2
+        assert span["diagnostics"]["transportLatencyMs"] == 12
+        assert span["input"]["argsHash"].startswith("sha256:")
+    finally:
+        external_mcp_registry._profiles = old_profiles
+        external_mcp_registry._by_client = old_by_client
+        external_mcp_registry._health = old_health
+        external_mcp_registry._unavailable = old_unavailable

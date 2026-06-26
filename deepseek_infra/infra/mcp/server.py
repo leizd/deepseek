@@ -88,9 +88,13 @@ def _tools_call(params: dict[str, Any]) -> dict[str, Any]:
         from deepseek_infra.infra.mcp.adapters import MAX_MCP_RESULT_CHARS
         from deepseek_infra.infra.mcp.executor import call_external_mcp_tool as exec_external
         from deepseek_infra.infra.tool_runtime.tools import stable_tool_output_for_model
+        raw_meta = params.get("_meta")
+        meta: dict[str, Any] = raw_meta if isinstance(raw_meta, dict) else {}
         result = exec_external(
             name, arguments if isinstance(arguments, dict) else {},
             policy=connection_policy(approvals_from_meta(params.get("_meta"))),
+            trace_id=str(meta.get("traceId") or ""),
+            parent_span_id=str(meta.get("parentSpanId") or ""),
         )
         stable = stable_tool_output_for_model(result)
         text = json.dumps(stable, ensure_ascii=False, sort_keys=True, separators=(",", ":"))[:MAX_MCP_RESULT_CHARS]
@@ -189,6 +193,18 @@ def mcp_status() -> dict[str, Any]:
         "exposePrompts": MCP_EXPOSE_PROMPTS,
         "client": {
             "enabled": settings.mcp.client_enabled,
-            "servers": [{"name": name, "url": url} for name, url in settings.mcp.client_servers],
+            "servers": [
+                {
+                    "name": name,
+                    "url": url,
+                    "timeoutSeconds": settings.mcp.client_server_timeouts.get(name, settings.mcp.client_timeout_seconds),
+                }
+                for name, url in settings.mcp.client_servers
+            ],
+            "timeoutSeconds": settings.mcp.client_timeout_seconds,
+            "maxRetries": settings.mcp.client_max_retries,
+            "retryBackoffSeconds": settings.mcp.client_retry_backoff_seconds,
+            "circuitBreakerFailures": settings.mcp.client_circuit_breaker_failures,
+            "circuitBreakerResetSeconds": settings.mcp.client_circuit_breaker_reset_seconds,
         },
     }

@@ -305,13 +305,7 @@ def create_app() -> FastAPI:
         external_mcp_registry.refresh()
         return json_response({
             "ok": True,
-            "servers": [
-                {
-                    "name": name,
-                    "available": name not in external_mcp_registry._unavailable,
-                }
-                for name, _ in settings.mcp.client_servers
-            ],
+            "servers": external_mcp_registry.server_status(),
             "tools": [
                 {
                     "server": p.server,

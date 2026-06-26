@@ -1361,6 +1361,8 @@ def append_tool_exchange(
     web_search_callback: Callable[[str, str], dict[str, Any]] | None = None,
     cancel_event: threading.Event | None = None,
     policy: ToolPolicy | None = None,
+    trace_id: str = "",
+    parent_span_id: str = "",
 ) -> dict[str, Any]:
     raise_if_cancelled(cancel_event)
     messages = list(body.get("messages") or [])
@@ -1389,6 +1391,8 @@ def append_tool_exchange(
             web_search_callback=web_search_callback,
             cancel_event=cancel_event,
             policy=policy,
+            trace_id=trace_id,
+            parent_span_id=parent_span_id,
         )
     )
     raise_if_cancelled(cancel_event)
@@ -1588,6 +1592,8 @@ def call_deepseek(
             default_memory_scope=default_memory_scope,
             web_search_callback=perform_web_search if search_tool_enabled(payload) else None,
             policy=tool_policy,
+            trace_id=trace_context.trace_id,
+            parent_span_id=span_parent,
         )
         artifact = terminal_artifact_result_from_messages(body)
         if artifact:
@@ -2058,6 +2064,8 @@ def stream_deepseek(
                 web_search_callback=perform_web_search if search_tool_enabled(payload) else None,
                 cancel_event=cancel_event,
                 policy=tool_policy,
+                trace_id=trace_context.trace_id,
+                parent_span_id=span_parent,
             )
             artifact = terminal_artifact_result_from_messages(body)
             if artifact:

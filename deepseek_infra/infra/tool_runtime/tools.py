@@ -710,6 +710,8 @@ def execute_tool_call(
     default_memory_scope: str = "global",
     web_search_callback: Callable[[str, str], dict[str, Any]] | None = None,
     policy: ToolPolicy | None = None,
+    trace_id: str = "",
+    parent_span_id: str = "",
 ) -> dict[str, Any]:
     raw_function = tool_call.get("function")
     function: dict[str, Any] = raw_function if isinstance(raw_function, dict) else {}
@@ -719,7 +721,8 @@ def execute_tool_call(
     # Agent calls and MCP Hub calls share the same final enforcement point.
     if name.startswith("mcp__"):
         from deepseek_infra.infra.mcp.executor import call_external_mcp_tool
-        return call_external_mcp_tool(name, arguments, policy)
+
+        return call_external_mcp_tool(name, arguments, policy, trace_id=trace_id, parent_span_id=parent_span_id)
     if policy is not None:
         decision = policy.evaluate(name, arguments, schema=schema_for_tool(name))
         if not decision.allowed:
@@ -812,6 +815,8 @@ def execute_tool_calls(
     web_search_callback: Callable[[str, str], dict[str, Any]] | None = None,
     cancel_event: threading.Event | None = None,
     policy: ToolPolicy | None = None,
+    trace_id: str = "",
+    parent_span_id: str = "",
 ) -> list[dict[str, Any]]:
     selected = tool_calls[:MAX_TOOL_CALLS_PER_RESPONSE]
     outputs: list[dict[str, Any] | None] = [None] * len(selected)
@@ -837,6 +842,8 @@ def execute_tool_calls(
             default_memory_scope=default_memory_scope,
             web_search_callback=web_search_callback,
             policy=policy,
+            trace_id=trace_id,
+            parent_span_id=parent_span_id,
         )
 
     def flush_parallel_batch() -> None:

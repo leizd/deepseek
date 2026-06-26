@@ -1,6 +1,6 @@
 # Implementation Status（实现状态矩阵）
 
-适用版本：v2.2.2。
+适用版本：v2.2.3。
 
 README 把 DeepSeek Infra 描述成一个 local-first agentic AI infrastructure platform。这一页回答一个更重要的问题：**每个模块到底落地到什么程度**——代码在哪、测试在哪、怎么亲手验证。所有链接都指向仓库内真实存在的文件；如果某格是 🟡 或 ❌，说明那部分还没做完，我们直接写出来，而不是让 README 替它画饼。
 
@@ -17,7 +17,7 @@ README 把 DeepSeek Infra 描述成一个 local-first agentic AI infrastructure 
 | 4 | Tool Calling Runtime + Policy Engine | Working | ✅ [infra/tool_runtime/](../deepseek_infra/infra/tool_runtime/) | ✅ | ✅ |
 | 5 | Observability & Trace | Working | ✅ [infra/observability/](../deepseek_infra/infra/observability/) | ✅ | ✅ |
 | 6 | Edge-Cloud Model Router | Experimental | ✅ [infra/gateway/edge_inference.py](../deepseek_infra/infra/gateway/edge_inference.py) | 🟡 | 🟡 |
-| 7 | MCP Tool Hub | Experimental | ✅ [infra/mcp/](../deepseek_infra/infra/mcp/) | ✅ | ✅ |
+| 7 | MCP Tool Hub | MVP | ✅ [infra/mcp/](../deepseek_infra/infra/mcp/) | ✅ | ✅ |
 | 8 | A2A Agent Mesh | Experimental | ✅ [infra/agent_runtime/a2a.py](../deepseek_infra/infra/agent_runtime/a2a.py) | ✅ | 🟡 |
 | 9 | Context Taint Firewall | Experimental | ✅ [infra/gateway/context_taint.py](../deepseek_infra/infra/gateway/context_taint.py) | ✅ | ✅ |
 
@@ -74,12 +74,12 @@ README 把 DeepSeek Infra 描述成一个 local-first agentic AI infrastructure 
 - **测试（🟡 的原因）**：路由决策、配置面与云失败回退在 [test_deepseek_request.py](../tests/test_deepseek_request.py) / [test_config.py](../tests/test_config.py) / [test_server_integration.py](../tests/test_server_integration.py) 有覆盖，但**真实端侧推理**需要可选依赖 + GGUF 模型文件，CI 不跑真模型。
 - **亲手验证**：`EDGE_INFERENCE_ENABLED=1` + GGUF 后 `GET /api/edge/status`；或 `OLLAMA_ENABLED=1` 后 `GET /v1/models` 看到 `ollama/<tag>`。
 
-### 7. MCP Tool Hub — Experimental
+### 7. MCP Tool Hub — MVP
 
-- **代码**：[server.py](../deepseek_infra/infra/mcp/server.py)（JSON-RPC 2.0：initialize / tools / resources / prompts）、[registry.py](../deepseek_infra/infra/mcp/registry.py)（17 工具 + external bridged tools → MCP tools）、[permissions.py](../deepseek_infra/infra/mcp/permissions.py) + [adapters.py](../deepseek_infra/infra/mcp/adapters.py)（每个 tools/call 走 Tool Policy 闸门）、[client.py](../deepseek_infra/infra/mcp/client.py)（出方向 MCP client）、[bridge.py](../deepseek_infra/infra/mcp/bridge.py)（外部工具 profile / 命名空间 / 缓存 / 碰撞后缀）、[executor.py](../deepseek_infra/infra/mcp/executor.py)（executor 内部防御式 ToolPolicy、远端 `isError` 映射、policy-gated 外部 tools/call + 审计）。
-- **测试**：[test_mcp.py](../tests/test_mcp.py)（外部桥接、命名隔离、策略拒绝、审批、审计、结果清洗、不可用外部 server 不影响本地工具、`/mcp tools/call` 不绕过外部 ToolPolicy、远端 `isError=true` 不包成成功、schema 动态读取、Agent 工具面 refresh、碰撞 hash 后缀，以及握手 / 目录 / 能力切片 / 真实执行 / 错误码族 / 回环 client）。
-- **亲手验证**：[examples/mcp_tool_demo.py](../examples/mcp_tool_demo.py)；配置 `MCP_CLIENT_ENABLED=1` + `MCP_CLIENT_SERVERS` 后访问 `GET /api/mcp/external/tools` 查看 bridged tools。
-- **Experimental 的原因**：协议层、安全闸门与外部 server 桥接已实现，但尚未对 Claude Desktop / Cursor 等外部客户端逐一跑兼容性矩阵。
+- **代码**：[server.py](../deepseek_infra/infra/mcp/server.py)（JSON-RPC 2.0：initialize / tools / resources / prompts）、[registry.py](../deepseek_infra/infra/mcp/registry.py)（17 工具 → MCP tools + 风险注解）、[permissions.py](../deepseek_infra/infra/mcp/permissions.py) + [adapters.py](../deepseek_infra/infra/mcp/adapters.py)（每个 tools/call 走 Tool Policy 闸门）、[client.py](../deepseek_infra/infra/mcp/client.py)（出方向 MCP client：timeout / retry / stats）、[bridge.py](../deepseek_infra/infra/mcp/bridge.py)（外部工具 profile / health / circuit breaker）、[executor.py](../deepseek_infra/infra/mcp/executor.py)（policy-gated external call + audit + trace）。
+- **测试**：[test_mcp.py](../tests/test_mcp.py)（握手 / 目录 / 能力切片 / 真实执行 / 错误码族 / 回环 client / 外部工具 profile / policy gate / 外部 server 不可用 / 远端 `isError=true` / retry stats / circuit breaker / trace diagnostics）。
+- **亲手验证**：[examples/mcp_tool_demo.py](../examples/mcp_tool_demo.py)；`GET /api/mcp/external/tools` 查看外部 server health；[COMPATIBILITY.md](COMPATIBILITY.md) 和 [integrations/](integrations/) 提供 Claude Desktop / Cursor 配置。
+- **MVP 边界**：本地 MCP server、mock external server、失败场景、危险参数拦截和观测链路已可验证；Claude Desktop / Cursor GUI 实机与一个真实第三方 Streamable HTTP MCP server 仍待补进兼容矩阵。
 
 ### 8. A2A Agent Mesh — Experimental
 
@@ -92,5 +92,5 @@ README 把 DeepSeek Infra 描述成一个 local-first agentic AI infrastructure 
 
 - **代码**：[context_taint.py](../deepseek_infra/infra/gateway/context_taint.py)（逐段信任打标 / 三类指令扫描 / 隔离加固）+ [tool_policy.py](../deepseek_infra/infra/tool_runtime/tool_policy.py)（密钥外泄硬拦截、污染轮升级确认）。
 - **测试**：[test_context_taint.py](../tests/test_context_taint.py)（13 项）。
-- **亲手验证**：[evals/runners/run_tool_eval.py](../evals/runners/run_tool_eval.py) 输出 Prompt Injection Defense Pass Rate；运行中 `GET /api/taint` 看防火墙状态。
-- **Experimental 的原因**：检测基于确定性 pattern 族（中英），对抗性变体的系统化基准（注入语料库 + 绕过率量化）在 Roadmap v2.4。
+- **亲手验证**：[evals/runners/run_tool_eval.py](../evals/runners/run_tool_eval.py) 输出 Prompt Injection Defense Pass Rate；[evals/runners/run_injection_adversarial.py](../evals/runners/run_injection_adversarial.py) 输出对抗小语料 block / false-positive / bypass rate（report-only）；运行中 `GET /api/taint` 看防火墙状态。
+- **Experimental 的原因**：检测基于确定性 pattern 族（中英 + runner 侧 Base64 解码），对抗性变体已有小型 report-only 基准，但尚未设版本化硬门槛。

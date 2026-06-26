@@ -17,6 +17,7 @@ import re
 import threading
 import time
 from dataclasses import dataclass, field, replace
+from datetime import datetime, timezone
 from hashlib import sha256
 from typing import Any
 
@@ -102,6 +103,51 @@ class ExternalMCPToolProfile:
             sensitive_sink=self.env,
             capability="external",
         )
+
+
+@dataclass(slots=True)
+class ExternalMCPServerHealth:
+    """Operational state for one configured outbound MCP server."""
+
+    name: str
+    url: str
+    timeout_seconds: int
+    available: bool = False
+    status: str = "unknown"  # unknown | ok | unavailable | circuit_open | disabled
+    consecutive_failures: int = 0
+    circuit_open_until: float = 0.0
+    last_error: str = ""
+    last_error_type: str = ""
+    last_refresh_epoch: float = 0.0
+    last_success_epoch: float = 0.0
+    last_call_epoch: float = 0.0
+    last_latency_ms: int = 0
+    last_retry_count: int = 0
+    call_count: int = 0
+    failure_count: int = 0
+    timeout_count: int = 0
+
+    def to_dict(self) -> dict[str, Any]:
+        remaining = max(0.0, self.circuit_open_until - time.monotonic())
+        return {
+            "name": self.name,
+            "url": self.url,
+            "available": self.available and remaining <= 0,
+            "status": "circuit_open" if remaining > 0 else self.status,
+            "timeoutSeconds": self.timeout_seconds,
+            "consecutiveFailures": self.consecutive_failures,
+            "failureCount": self.failure_count,
+            "timeoutCount": self.timeout_count,
+            "callCount": self.call_count,
+            "lastError": self.last_error,
+            "lastErrorType": self.last_error_type,
+            "lastRefreshAt": _iso_or_empty(self.last_refresh_epoch),
+            "lastSuccessAt": _iso_or_empty(self.last_success_epoch),
+            "lastCallAt": _iso_or_empty(self.last_call_epoch),
+            "lastLatencyMs": self.last_latency_ms,
+            "lastRetryCount": self.last_retry_count,
+            "circuitOpenSeconds": round(remaining, 3),
+        }
 
 
 # --- Conservative risk inference -------------------------------------------------
@@ -204,6 +250,7 @@ class ExternalMCPToolRegistry:
         self._by_client: dict[str, tuple[MCPClient, str]] = {}  # bridged_name → (client, original_name)
         self._clients: dict[str, MCPClient] = {}  # server_name → client
         self._unavailable: set[str] = set()  # server names that failed last refresh
+        self._health: dict[str, ExternalMCPServerHealth] = {}
         self._last_refresh: float = 0.0
         self._ttl_seconds = float(ttl_seconds)
         self._lock = threading.Lock()
@@ -223,6 +270,7 @@ class ExternalMCPToolRegistry:
                 self._by_client.clear()
                 self._clients.clear()
                 self._unavailable.clear()
+                self._mark_disabled_locked()
             return
 
         now = time.monotonic()
@@ -236,23 +284,37 @@ class ExternalMCPToolRegistry:
                 self._by_client.clear()
                 self._clients.clear()
                 self._unavailable.clear()
+                self._mark_disabled_locked()
             return
 
         new_profiles: dict[str, ExternalMCPToolProfile] = {}
         new_by_client: dict[str, tuple[MCPClient, str]] = {}
         new_clients: dict[str, MCPClient] = {}
         new_unavailable: set[str] = set()
+        new_health: dict[str, ExternalMCPServerHealth] = {}
 
         for client in clients:
             server_name = client.name
+            health = self._health_for_client(client)
+            health.last_refresh_epoch = time.time()
+            if self._circuit_open(health):
+                health.available = False
+                health.status = "circuit_open"
+                new_unavailable.add(server_name)
+                new_health[server_name] = health
+                continue
             try:
                 client.initialize()
                 tools = client.list_tools()
-            except Exception:
+            except Exception as exc:
                 logger.warning("external_mcp_server_unavailable", extra={"server": server_name}, exc_info=True)
+                self._record_failure(health, exc, client=client, refreshed=True)
                 new_unavailable.add(server_name)
+                new_health[server_name] = health
                 continue
 
+            self._record_success(health, client=client, refreshed=True)
+            new_health[server_name] = health
             new_clients[server_name] = client
             for tool_def in tools:
                 if not isinstance(tool_def, dict):
@@ -267,6 +329,7 @@ class ExternalMCPToolRegistry:
             self._by_client = new_by_client
             self._clients = new_clients
             self._unavailable = new_unavailable
+            self._health = new_health
             self._last_refresh = now
 
         logger.info(
@@ -291,11 +354,56 @@ class ExternalMCPToolRegistry:
     def resolve(self, bridged_name: str) -> tuple[MCPClient, str] | None:
         """Resolve a bridged name → (client, original_tool_name) for execution."""
         with self._lock:
-            return self._by_client.get(str(bridged_name or ""))
+            resolved = self._by_client.get(str(bridged_name or ""))
+            if resolved is None:
+                return None
+            client, tool = resolved
+            health = self._health.get(client.name)
+            if health is not None and self._circuit_open(health):
+                health.available = False
+                health.status = "circuit_open"
+                self._unavailable.add(client.name)
+                return None
+            return client, tool
 
     def is_unavailable(self, server: str) -> bool:
         with self._lock:
             return str(server or "") in self._unavailable
+
+    def server_status(self) -> list[dict[str, Any]]:
+        """Health snapshots for configured outbound MCP servers."""
+        configured = {name: url for name, url in settings.mcp.client_servers}
+        with self._lock:
+            statuses: list[dict[str, Any]] = []
+            for name, url in configured.items():
+                health = self._health.get(name)
+                if health is None:
+                    timeout = settings.mcp.client_server_timeouts.get(name, settings.mcp.client_timeout_seconds)
+                    health = ExternalMCPServerHealth(
+                        name=name,
+                        url=url,
+                        timeout_seconds=timeout,
+                        status="unknown",
+                        available=False,
+                    )
+                statuses.append(health.to_dict())
+            return statuses
+
+    def record_call_success(self, server: str, client: MCPClient) -> None:
+        with self._lock:
+            server_name = client.name or str(server or "")
+            health = self._health_for_client(client)
+            self._record_success(health, client=client, refreshed=False)
+            self._health[server_name] = health
+            self._unavailable.discard(server_name)
+
+    def record_call_failure(self, server: str, client: MCPClient, exc: BaseException) -> None:
+        with self._lock:
+            server_name = client.name or str(server or "")
+            health = self._health_for_client(client)
+            self._record_failure(health, exc, client=client, refreshed=False)
+            self._health[server_name] = health
+            self._unavailable.add(server_name)
 
     def metadata_provider(self, tool_name: str) -> ToolMetadata | None:
         """A ``Callable[[str], ToolMetadata | None]`` ready for ``ToolPolicy``.
@@ -309,6 +417,107 @@ class ExternalMCPToolRegistry:
             return profile.to_metadata() if profile is not None else None
         return tool_metadata(name)
 
+    # -- health helpers ----------------------------------------------------------
+
+    def _mark_disabled_locked(self) -> None:
+        self._health = {
+            name: ExternalMCPServerHealth(
+                name=name,
+                url=url,
+                timeout_seconds=settings.mcp.client_server_timeouts.get(name, settings.mcp.client_timeout_seconds),
+                status="disabled" if not settings.mcp.client_enabled else "unknown",
+                available=False,
+            )
+            for name, url in settings.mcp.client_servers
+        }
+
+    def _health_for_client(self, client: MCPClient) -> ExternalMCPServerHealth:
+        client_name = str(getattr(client, "name", "external") or "external")
+        current = self._health.get(client_name)
+        if current is None:
+            current = ExternalMCPServerHealth(
+                name=client_name,
+                url=str(getattr(client, "base_url", "")),
+                timeout_seconds=int(getattr(client, "timeout_seconds", settings.mcp.client_timeout_seconds)),
+            )
+            self._health[client_name] = current
+        current.url = str(getattr(client, "base_url", current.url))
+        current.timeout_seconds = int(getattr(client, "timeout_seconds", current.timeout_seconds))
+        return current
+
+    def _circuit_open(self, health: ExternalMCPServerHealth) -> bool:
+        return health.circuit_open_until > time.monotonic()
+
+    def _record_success(self, health: ExternalMCPServerHealth, *, client: MCPClient, refreshed: bool) -> None:
+        now = time.time()
+        health.available = True
+        health.status = "ok"
+        health.consecutive_failures = 0
+        health.circuit_open_until = 0.0
+        health.last_error = ""
+        health.last_error_type = ""
+        health.last_success_epoch = now
+        if refreshed:
+            health.last_refresh_epoch = now
+        else:
+            health.last_call_epoch = now
+            health.call_count += 1
+        stats = getattr(client, "last_stats", None)
+        health.last_latency_ms = int(getattr(stats, "latency_ms", 0))
+        health.last_retry_count = int(getattr(stats, "retry_count", 0))
+
+    def _record_failure(
+        self,
+        health: ExternalMCPServerHealth,
+        exc: BaseException,
+        *,
+        client: MCPClient,
+        refreshed: bool,
+    ) -> None:
+        now = time.time()
+        health.available = False
+        health.consecutive_failures += 1
+        health.failure_count += 1
+        health.last_error = str(exc)
+        health.last_error_type = _error_type_from(client, exc)
+        stats = getattr(client, "last_stats", None)
+        health.last_latency_ms = int(getattr(stats, "latency_ms", 0))
+        health.last_retry_count = int(getattr(stats, "retry_count", 0))
+        if bool(getattr(stats, "timeout", False)) or health.last_error_type == "timeout":
+            health.timeout_count += 1
+        if refreshed:
+            health.last_refresh_epoch = now
+        else:
+            health.last_call_epoch = now
+            health.call_count += 1
+        if health.consecutive_failures >= settings.mcp.client_circuit_breaker_failures:
+            health.status = "circuit_open"
+            health.circuit_open_until = time.monotonic() + settings.mcp.client_circuit_breaker_reset_seconds
+        else:
+            health.status = "unavailable"
+
 
 # Singleton — the rest of the codebase imports this one instance.
 external_mcp_registry = ExternalMCPToolRegistry()
+
+
+def _iso_or_empty(epoch: float) -> str:
+    if not epoch:
+        return ""
+    return datetime.fromtimestamp(float(epoch), tz=timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _error_type_from(client: MCPClient, exc: BaseException) -> str:
+    stats = getattr(client, "last_stats", None)
+    if getattr(stats, "error_type", ""):
+        return str(getattr(stats, "error_type", ""))
+    message = str(exc).lower()
+    if "timeout" in message or "timed out" in message:
+        return "timeout"
+    if "invalid json" in message or "schema" in message:
+        return "schema_error"
+    if "http " in message or "http_" in message:
+        return "http_error"
+    if "unreachable" in message or "connection" in message:
+        return "unreachable"
+    return "upstream_failure"

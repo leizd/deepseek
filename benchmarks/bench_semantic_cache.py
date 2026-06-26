@@ -32,6 +32,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from deepseek_infra.infra.evaluation import harness  # noqa: E402
 from deepseek_infra.infra.gateway import semantic_cache  # noqa: E402
+from deepseek_infra.infra.rag import local_rag  # noqa: E402
 
 logging.getLogger("deepseek_infra").setLevel(logging.ERROR)
 
@@ -70,6 +71,17 @@ def body_for(question: str) -> dict[str, Any]:
     return {"model": MODEL, "messages": [{"role": "user", "content": question}]}
 
 
+def configure_embedding_provider(provider: str, *, onnx_model: str = "", tokenizer: str = "", dimensions: int = 0) -> None:
+    local_rag.LOCAL_RAG_EMBEDDING_PROVIDER = str(provider or "hash")
+    if onnx_model:
+        local_rag.LOCAL_RAG_ONNX_MODEL_PATH = onnx_model
+    if tokenizer:
+        local_rag.LOCAL_RAG_TOKENIZER_PATH = tokenizer
+    if dimensions > 0:
+        local_rag.LOCAL_RAG_EMBEDDING_DIMENSIONS = dimensions
+    local_rag.reset_embedding_pipeline()
+
+
 def run_benchmark(items: int) -> dict[str, Any]:
     pairs = [TOPICS[index % len(TOPICS)] for index in range(items)]
     store_latencies: list[float] = []
@@ -104,7 +116,10 @@ def run_benchmark(items: int) -> dict[str, Any]:
         "suite": "bench_semantic_cache",
         "items": items,
         "threshold": status.get("similarityThreshold"),
+        "requestedProvider": local_rag.LOCAL_RAG_EMBEDDING_PROVIDER,
         "embeddingProvider": status.get("embeddingProvider"),
+        "embeddingDimensions": status.get("embeddingDimensions"),
+        "lastError": status.get("lastError"),
         "storeLatencyMs": harness.latency_benchmark(store_latencies),
         "lookupLatencyMs": harness.latency_benchmark(exact_latencies + paraphrase_latencies + unrelated_latencies),
         "exactHitRate": round(exact_hits / len(exact_questions), 4) if exact_questions else 0.0,
@@ -117,6 +132,10 @@ def run_benchmark(items: int) -> dict[str, Any]:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Offline semantic cache benchmark")
     parser.add_argument("--items", type=int, default=40, help="写入缓存的条目数")
+    parser.add_argument("--provider", choices=("hash", "onnx"), default="hash", help="Embedding provider to benchmark")
+    parser.add_argument("--onnx-model", default="", help="ONNX embedding model path, required for --provider onnx")
+    parser.add_argument("--tokenizer", default="", help="Tokenizer JSON path, required for --provider onnx")
+    parser.add_argument("--dimensions", type=int, default=0, help="Override embedding dimensions for the benchmark")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 
@@ -125,6 +144,12 @@ def main() -> int:
     semantic_cache.SEMANTIC_CACHE_ENABLED = True
     semantic_cache.SEMANTIC_CACHE_DIR = cache_dir
     semantic_cache.SEMANTIC_CACHE_DB = cache_dir / "cache.sqlite3"
+    configure_embedding_provider(
+        args.provider,
+        onnx_model=args.onnx_model,
+        tokenizer=args.tokenizer,
+        dimensions=args.dimensions,
+    )
     try:
         report = run_benchmark(max(len(TOPICS), args.items))
     finally:
@@ -136,7 +161,12 @@ def main() -> int:
     store = report["storeLatencyMs"]
     lookup = report["lookupLatencyMs"]
     print("=== Benchmark · Semantic cache (offline) ===")
-    print(f"Items stored: {report['items']} · embedding={report['embeddingProvider']} · threshold={report['threshold']}")
+    print(
+        f"Items stored: {report['items']} · requested={report['requestedProvider']} "
+        f"· active={report['embeddingProvider']}({report['embeddingDimensions']}d) · threshold={report['threshold']}"
+    )
+    if report.get("lastError"):
+        print(f"Embedding note: {report['lastError']}")
     print(f"Store latency:  avg {store['avgMs']:.1f} ms · P50 {store['p50Ms']:.1f} ms · P95 {store['p95Ms']:.1f} ms")
     print(f"Lookup latency: avg {lookup['avgMs']:.1f} ms · P50 {lookup['p50Ms']:.1f} ms · P95 {lookup['p95Ms']:.1f} ms")
     print(f"Exact-repeat hit rate: {report['exactHitRate']:.2f}（应为 1.00）")
