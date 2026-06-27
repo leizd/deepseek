@@ -220,6 +220,62 @@ def test_client_retries_retryable_transport_failures() -> None:
     assert client.last_stats.error_type == ""
 
 
+def test_client_parses_sse_event_stream_response() -> None:
+    """The official MCP SDK wraps JSON-RPC responses in SSE data: lines."""
+    from deepseek_infra.infra.mcp.client import _parse_sse_jsonrpc
+
+    sse_body = (
+        'event: message\n'
+        'data: {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","serverInfo":{"name":"partner","version":"1.0"}}}\n\n'
+    )
+    parsed = _parse_sse_jsonrpc(sse_body)
+    assert parsed is not None
+    assert parsed["jsonrpc"] == "2.0"
+    assert parsed["result"]["serverInfo"]["name"] == "partner"
+
+    # multi-line data field
+    multi = 'data: {"jsonrpc":"2.0","id":2,"result":{"tools":\ndata: []}}\n\n'
+    parsed_multi = _parse_sse_jsonrpc(multi)
+    assert parsed_multi is not None
+    assert parsed_multi["result"]["tools"] == []
+
+    # empty / non-JSON returns None
+    assert _parse_sse_jsonrpc("") is None
+    assert _parse_sse_jsonrpc("event: ping\ndata: \n\n") is None
+
+
+def test_client_handles_sse_response_from_external_server() -> None:
+    """MCPClient should transparently parse SSE responses (official SDK transport)."""
+    client = MCPClient("http://127.0.0.1:9/mcp", name="sse-partner")
+
+    def sse_urlopen(request: Any, timeout: float = 0) -> _FakeResponse:
+        message = json.loads(request.data.decode("utf-8"))
+        method = message.get("method", "")
+        if method == "initialize":
+            body = (
+                'event: message\n'
+                f'data: {json.dumps({"jsonrpc":"2.0","id":message["id"],"result":{"protocolVersion":"2025-06-18","serverInfo":{"name":"sse-partner","version":"1.0"}}})}\n\n'
+            )
+            return _FakeResponse(body.encode("utf-8"), {"Content-Type": "text/event-stream", "Mcp-Session-Id": "sse-session-1"})
+        if method == "tools/list":
+            body = (
+                'event: message\n'
+                f'data: {json.dumps({"jsonrpc":"2.0","id":message["id"],"result":{"tools":[{"name":"echo","inputSchema":{"type":"object"}}]}})}\n\n'
+            )
+            return _FakeResponse(body.encode("utf-8"), {"Content-Type": "text/event-stream", "Mcp-Session-Id": "sse-session-1"})
+        if method.startswith("notifications/"):
+            return _FakeResponse(b"", {"Mcp-Session-Id": "sse-session-1"})
+        return _FakeResponse(b"", {"Content-Type": "text/event-stream"})
+
+    with patch("urllib.request.urlopen", side_effect=sse_urlopen):
+        info = client.initialize()
+        assert info["serverInfo"]["name"] == "sse-partner"
+        assert client.session_id == "sse-session-1"
+        tools = client.list_tools()
+        assert len(tools) == 1
+        assert tools[0]["name"] == "echo"
+
+
 def test_external_mcp_registry_reports_health_and_opens_circuit(monkeypatch: pytest.MonkeyPatch) -> None:
     from deepseek_infra.infra.mcp import bridge as bridge_mod
     from deepseek_infra.infra.mcp.bridge import ExternalMCPToolRegistry

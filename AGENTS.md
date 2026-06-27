@@ -41,11 +41,11 @@ node --check static/vendor/katex/katex.min.js static/math_core.js static/seek_co
 ```bash
 PYTHONHASHSEED=0 python evals/runners/run_rag_eval.py   # hash seed is REQUIRED for reproducible BM25 ties
 python evals/runners/run_tool_eval.py                    # exits 1 on any policy misjudgment — hard CI gate
-python evals/runners/run_injection_adversarial.py --no-report  # v2.2.6: soft gate (warns on unmet thresholds, exits 0; --strict exits 1)
+python evals/runners/run_injection_adversarial.py --strict --no-report  # v2.3.0: hard CI gate (exits 1 on unmet thresholds)
 ```
 - Scoring core is the pure, I/O-free `deepseek_infra/infra/evaluation/harness.py` (unit-tested in `tests/test_eval_harness.py`). Runners only orchestrate.
 - `run_agent_eval.py` is offline but **not** a CI gate yet.
-- **Injection soft gate (v2.2.6)**: `run_injection_adversarial.py` enforces versioned thresholds (`blockRate>=0.85`, `falsePositiveRate<=0.10`, `bypassRate<=0.15`) as a *soft* gate — unmet thresholds print `SOFT GATE: WARNING` but still exit 0 so CI keeps flowing. `--strict` turns it into a hard failure (the v2.3 graduation path). `run_tool_eval.py` remains the hard gate (exits 1 on any policy misjudgment).
+- **Injection hard gate (v2.3.0)**: `run_injection_adversarial.py --strict` enforces versioned thresholds (`blockRate>=0.85`, `falsePositiveRate<=0.10`, `bypassRate<=0.15`) as a *hard* CI gate — unmet thresholds exit 1 and block the PR. `run_offline_eval_suite.py` also treats an unmet injection gate as suite FAIL. Without `--strict` the runner still warns and exits 0 for local iteration. `run_tool_eval.py` remains the other hard gate (exits 1 on any policy misjudgment).
 
 ### Security scan (CI `security` job)
 

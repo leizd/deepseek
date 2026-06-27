@@ -1,10 +1,13 @@
-"""Minimal outbound MCP client (Streamable HTTP, JSON responses).
+"""Minimal outbound MCP client (Streamable HTTP, JSON + SSE responses).
 
 Lets the runtime *consume* external MCP servers, so local agents are not limited
-to built-in tools. Deliberately small: single-message JSON-RPC over ``POST``,
-JSON responses only (no SSE resumption), session id echo per the Streamable
-HTTP transport. Disabled by default (``MCP_CLIENT_ENABLED``) and only talks to
-servers explicitly configured in ``MCP_CLIENT_SERVERS``.
+to built-in tools. Deliberately small: single-message JSON-RPC over ``POST``.
+As of v2.3.0 the client handles both ``application/json`` and
+``text/event-stream`` (SSE) response bodies — the official MCP SDK's
+Streamable HTTP transport returns SSE for every POST, so SSE parsing is required
+for real third-party interop. Session id echo per the Streamable HTTP transport.
+Disabled by default (``MCP_CLIENT_ENABLED``) and only talks to servers
+explicitly configured in ``MCP_CLIENT_SERVERS``.
 """
 
 from __future__ import annotations
@@ -20,6 +23,28 @@ from deepseek_infra.core.config import settings
 from deepseek_infra.core.errors import AppError, ErrorCode
 
 CLIENT_INFO = {"name": "deepseek-infra-client", "version": "1.0"}
+
+
+def _parse_sse_jsonrpc(text: str) -> dict[str, Any] | None:
+    """Extract the first JSON-RPC object from an SSE ``text/event-stream`` body.
+
+    The official MCP SDK wraps every JSON-RPC response in an SSE ``data:`` line.
+    Multi-line ``data:`` fields are concatenated before JSON decoding.
+    """
+    for block in text.split("\n\n"):
+        data_parts: list[str] = []
+        for line in block.split("\n"):
+            if line.startswith("data:"):
+                data_parts.append(line[5:].lstrip())
+        if not data_parts:
+            continue
+        try:
+            parsed = json.loads("".join(data_parts))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+    return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,6 +69,7 @@ class MCPClient:
         timeout_seconds: int | None = None,
         max_retries: int | None = None,
         retry_backoff_seconds: float | None = None,
+        extra_headers: dict[str, str] | None = None,
     ) -> None:
         self.base_url = str(base_url or "").rstrip("/")
         self.name = str(name or "") or self.base_url
@@ -54,6 +80,7 @@ class MCPClient:
             if retry_backoff_seconds is None
             else max(0.0, float(retry_backoff_seconds))
         )
+        self.extra_headers: dict[str, str] = dict(extra_headers) if extra_headers else {}
         self.session_id = ""
         self.protocol_version = ""
         self._next_id = 0
@@ -98,8 +125,12 @@ class MCPClient:
             raise AppError(f"MCP server {self.name} is unreachable: {last_error}", code=ErrorCode.UPSTREAM_FAILURE, status=502)
         if not raw:
             return None, headers
+        content_type = headers.get("content-type", "")
         try:
-            parsed = json.loads(raw.decode("utf-8"))
+            if "text/event-stream" in content_type:
+                parsed = _parse_sse_jsonrpc(raw.decode("utf-8"))
+            else:
+                parsed = json.loads(raw.decode("utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
             self._set_stats(started, self.last_stats.attempts or 1, error_type="schema_error")
             raise AppError(f"MCP server {self.name} returned invalid JSON", code=ErrorCode.UPSTREAM_FAILURE, status=502) from exc
@@ -128,6 +159,7 @@ class MCPClient:
             headers["MCP-Protocol-Version"] = self.protocol_version
         if self.session_id:
             headers["Mcp-Session-Id"] = self.session_id
+        headers.update(self.extra_headers)
         return headers
 
     def _rpc(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:

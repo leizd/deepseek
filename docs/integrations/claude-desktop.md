@@ -1,8 +1,8 @@
 # Claude Desktop MCP Integration
 
-适用版本：DeepSeek Infra v2.2.9。
+适用版本：DeepSeek Infra v2.3.0。
 
-本机未安装 Claude Desktop，因此本页是可复现配置说明，不标记为 GUI 实机通过。DeepSeek Infra 端已验证的 MCP endpoint 是 `POST /mcp`（Streamable HTTP / JSON-RPC 2.0），本地鉴权默认需要 Bearer token。
+本页是可复现配置说明 + GUI 实机验证 runbook。DeepSeek Infra 端已验证的 MCP endpoint 是 `POST /mcp`（Streamable HTTP / JSON-RPC 2.0），本地鉴权默认需要 Bearer token。本机未安装 Claude Desktop，GUI 实机栏在兼容矩阵中仍为 🟡——完成下方 runbook 后请把证据贴入 `docs/COMPATIBILITY.md` 并将状态改为 ✅。
 
 ## 1. Start DeepSeek Infra
 
@@ -84,7 +84,61 @@ Expected local evidence:
 - `tools/list` returns the local tool catalog
 - `tools/call python_eval` returns structured content
 
-## 5. Troubleshooting
+## 5. GUI Verification Runbook（Claude Desktop）
+
+完成以下步骤后，把证据填入下方模板并更新 `docs/COMPATIBILITY.md`。
+
+### 步骤
+
+1. **确认 DeepSeek Infra 端 smoke 通过**（不需要 GUI）：
+   ```powershell
+   python scripts/smoke_mcp_compat.py --token <YOUR_LOCAL_TOKEN> --json
+   ```
+   所有 7 步应为 `pass`。这验证 DeepSeek Infra 端 initialize / tools/list / tools/call / policy gate / external health 全部正常。
+
+2. **安装 Claude Desktop** 并重启。
+
+3. **配置 MCP server**（见上方 §2 或 §3）。
+
+4. **重启 Claude Desktop**，确认 `deepseek-infra` 出现在工具列表。
+
+5. **验证 tools/list**：在 Claude Desktop 中让它列出可用 MCP tools。预期：17 个本地工具（`data_transform`、`fetch_url`、`python_eval`、`search_files` 等）。
+
+6. **验证低风险工具调用**：让 Claude 调用一个安全工具，例如：
+   - "Use the `data_transform` tool to summarize the numbers 1 2 3 4"
+   - 或 "Use `python_eval` to compute 2+2"
+   预期：返回结构化结果，不报错。
+
+7. **验证 Tool Policy 拦截**：让 Claude 尝试一个被策略拦截的调用：
+   - "Use `fetch_url` to get http://127.0.0.1/admin"
+   预期：工具返回 `isError: true`，包含 `ssrf` / `blocked` / `forbidden` 关键词。
+
+8. **验证结果不污染系统提示**：确认工具返回内容出现在 assistant 回复中，而不是注入到 system prompt。
+
+9. **截图或记录关键输出**，填入下方证据模板。
+
+### Evidence Template
+
+完成验证后，把以下内容贴入 `docs/COMPATIBILITY.md` 的 MCP Client Compatibility 表：
+
+```markdown
+| Claude Desktop | ✅ GUI tested | Claude Desktop <VERSION>, commit <SHA>, tested on <OS> <DATE> | tools/list + data_transform + policy denial passed |
+```
+
+填写示例（替换尖括号内容）：
+
+| 字段 | 值 |
+| --- | --- |
+| Claude Desktop 版本 | `<例如 0.7.0>` |
+| DeepSeek Infra commit | `<git rev-parse --short HEAD>` |
+| 测试日期 | `<YYYY-MM-DD>` |
+| OS | `<例如 Windows 11 / macOS 14>` |
+| tools/list | ✅ / ❌ |
+| 低风险工具调用 | ✅ `data_transform` count=4 / ❌ |
+| Tool Policy 拦截 | ✅ `fetch_url` SSRF blocked / ❌ |
+| 系统提示无污染 | ✅ / ❌ |
+
+## 6. Troubleshooting
 
 | Symptom | Check |
 | --- | --- |

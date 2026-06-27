@@ -1,6 +1,6 @@
-# Eval Reports
+﻿# Eval Reports
 
-适用版本：v2.2.9。
+适用版本：v2.3.0。
 
 v2.2.7 把 RAG、Tool Policy 和 Prompt Injection adversarial eval 从分散 CLI 输出升级为一份可归档、可比较、可上传到 CI artifact 的离线评测报告。v2.2.8 在这个证据链旁边补齐 Agent Eval 的稳定录制回放：`agent-latest.json` / `agent-latest.md` 作为 report-only artifact 输出，和 `agent-v2.2.8` baseline 做 warning 级对比。目标仍然不是扩大硬门禁面，而是让每次 PR 都能看到当前分数、版本信息、数据集规模、阈值和退化判断。
 
@@ -42,7 +42,7 @@ python evals/runners/run_offline_eval_suite.py \
 - `version` / `gitSha` / `gitDirty` / `generatedAt`：报告归属的代码状态。
 - `rag.recallAt5`、`rag.citationAccuracy`、`rag.mrr`：离线 RAG 检索和引用指标。
 - `toolPolicy.passRate`、`toolPolicy.injectionDefensePassRate`：真实 ToolPolicy / sanitizer / taint 用例通过率。
-- `injection.blockRate`、`injection.falsePositiveRate`、`injection.bypassRate`、`injection.softGate`：对抗注入 soft gate 指标。
+- `injection.blockRate`、`injection.falsePositiveRate`、`injection.bypassRate`、`injection.softGate`、`injection.gateMode`：对抗注入门禁指标。v2.3.0 起 `gateMode` 为 `"hard"`，未达阈值使 suite 状态为 FAIL；CI 另用 `run_injection_adversarial.py --strict` 作为独立硬门禁步骤。
 - 可选 `agent`：当使用 `--include-agent` 时，记录 Agent replay report-only 指标与 baseline warning 状态。
 
 `evals/reports/agent-latest.json` 是 Agent Eval 专用报告，包含：
@@ -92,3 +92,12 @@ Agent baseline 当前只做 report-only warning：
 ## v2.2.9
 
 v2.2.9 不扩大评测面，而是把发布侧的 evidence 补齐：`scripts/preflight_release.py --version 2.2.9` 会校验 `latest.json` 与 `agent-latest.json` 的 `version` 字段是当前版本；`scripts/smoke_release.py --offline` 一键编排 doctor + offline eval suite + Agent Eval；发布产物额外生成 `.sha256` 与 `.manifest.json`（其中 `evalReport` / `agentReport` 指向这两份报告）。eval evidence + release evidence 一起构成可归档、可校验的交付证据。详见 [docs/RELEASE_READINESS.md](RELEASE_READINESS.md)。
+
+## v2.3.0
+
+v2.3.0 把 Prompt Injection 对抗评测从 soft gate 毕业为 **CI 硬门禁**：
+
+- CI `eval` job 新增 `python evals/runners/run_injection_adversarial.py --strict --no-report` 作为独立硬门禁步骤——未达阈值（`blockRate>=0.85` / `falsePositiveRate<=0.10` / `bypassRate<=0.15`）返回 `exit 1` 阻断 PR。
+- `run_offline_eval_suite.py` 的 suite 状态也把 injection gate 未达标视为 **FAIL**（不再只是 WARNING）；报告 JSON 新增 `injection.gateMode: "hard"` 字段。
+- 本地迭代时仍可不加 `--strict`，runner 只 warning 不失败。
+- 当前指标全绿：`blockRate=1.000` / `falsePositiveRate=0.000` / `bypassRate=0.000`。

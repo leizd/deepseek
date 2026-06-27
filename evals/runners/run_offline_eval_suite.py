@@ -116,8 +116,10 @@ def build_suite_report(
     gate_passed = bool(gate.get("passed"))
     policy_passed = _round_metric(tool_policy.metrics.get("toolPolicyPassRate")) >= 1.0
     defense_passed = _round_metric(tool_policy.metrics.get("injectionDefensePassRate")) >= 1.0
-    hard_fail = not (policy_passed and defense_passed)
-    status = "FAIL" if hard_fail else ("PASS" if gate_passed else "WARNING")
+    # v2.3.0: the injection adversarial gate is now a HARD gate — an unmet
+    # threshold fails the suite (and CI) just like a Tool Policy regression.
+    hard_fail = not (policy_passed and defense_passed and gate_passed)
+    status = "FAIL" if hard_fail else "PASS"
 
     payload: dict[str, Any] = {
         "schemaVersion": SCHEMA_VERSION,
@@ -145,12 +147,13 @@ def build_suite_report(
             "latency": _latency_metrics(tool_policy),
         },
         "injection": {
-            "status": "PASS" if gate_passed else "WARNING",
+            "status": "PASS" if gate_passed else "FAIL",
             "cases": injection.cases,
             "blockRate": _round_metric(injection.metrics.get("blockRate")),
             "falsePositiveRate": _round_metric(injection.metrics.get("falsePositiveRate")),
             "bypassRate": _round_metric(injection.metrics.get("bypassRate")),
             "softGate": "PASS" if gate_passed else "WARNING",
+            "gateMode": "hard",
             "thresholds": gate.get("thresholds", {}),
             "latency": _latency_metrics(injection),
         },
@@ -202,9 +205,9 @@ def render_markdown(report: dict[str, Any]) -> str:
         f"| RAG | MRR | {rag['mrr']:.4f} | {rag['status']} |",
         f"| Tool Policy | Pass Rate | {tool_policy['passRate']:.4f} | {tool_policy['status']} |",
         f"| Tool Policy | Injection Defense Pass Rate | {tool_policy['injectionDefensePassRate']:.4f} | {tool_policy['status']} |",
-        f"| Injection | Block Rate | {injection['blockRate']:.4f} | {injection['softGate']} |",
-        f"| Injection | False Positive Rate | {injection['falsePositiveRate']:.4f} | {injection['softGate']} |",
-        f"| Injection | Bypass Rate | {injection['bypassRate']:.4f} | {injection['softGate']} |",
+        f"| Injection | Block Rate | {injection['blockRate']:.4f} | {injection['status']} |",
+        f"| Injection | False Positive Rate | {injection['falsePositiveRate']:.4f} | {injection['status']} |",
+        f"| Injection | Bypass Rate | {injection['bypassRate']:.4f} | {injection['status']} |",
     ]
     if isinstance(agent, dict):
         lines.extend(

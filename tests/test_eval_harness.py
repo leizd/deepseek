@@ -215,11 +215,29 @@ def test_offline_eval_suite_builds_json_schema_and_markdown() -> None:
     assert report["rag"]["citationAccuracy"] == 0.8333
     assert report["toolPolicy"]["passRate"] == 1.0
     assert report["injection"]["softGate"] == "PASS"
+    assert report["injection"]["status"] == "PASS"
+    assert report["injection"]["gateMode"] == "hard"
 
     markdown = runner.render_markdown(report)
     assert "# Offline Eval Report" in markdown
     assert "| RAG | Citation Accuracy | 0.8333 | PASS |" in markdown
     assert "compare_eval_baseline.py" in markdown
+
+
+def test_offline_eval_suite_injection_hard_gate_fails_suite() -> None:
+    runner = _load_offline_suite_runner()
+    rag, tool_policy, _ = _suite_reports()
+    failing_injection = harness.EvalReport(
+        suite="injection-adversarial",
+        cases=30,
+        metrics={"blockRate": 0.5, "falsePositiveRate": 0.0, "bypassRate": 0.5, "avgLatencyMs": 0.03, "p95LatencyMs": 0.06},
+        benchmarks={"softGate": {"passed": False, "thresholds": {"blockRate": {"value": 0.5, "threshold": 0.85, "op": ">=", "passed": False}}}},
+    )
+    report = runner.build_suite_report(rag, tool_policy, failing_injection, version="2.3.0", sha="abc", generated_at="2026-06-27T00:00:00Z")
+    # v2.3.0: injection gate is a HARD gate — unmet threshold fails the suite.
+    assert report["status"] == "FAIL"
+    assert report["injection"]["status"] == "FAIL"
+    assert report["injection"]["gateMode"] == "hard"
 
 
 def test_offline_eval_suite_main_writes_latest_reports(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -150,43 +150,32 @@ def _check_external_mcp(args: argparse.Namespace, steps: list[StepResult]) -> No
             as_json=args.json,
         )
         return
-    headers = {}
+    from deepseek_infra.infra.mcp.client import MCPClient  # noqa: E402
+
+    extra_headers: dict[str, str] = {}
     if args.external_bearer_token:
-        headers["Authorization"] = f"Bearer {args.external_bearer_token}"
+        extra_headers["Authorization"] = f"Bearer {args.external_bearer_token}"
     try:
-        init = rpc_result(
-            request_json(
-                "POST",
-                args.external_server_url,
-                payload=jsonrpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}}, 100),
-                timeout_seconds=args.timeout,
-                extra_headers=headers,
-            ),
-            "external initialize",
+        client = MCPClient(
+            args.external_server_url,
+            name="interop-partner",
+            timeout_seconds=args.timeout,
+            extra_headers=extra_headers,
         )
-        tools_result = rpc_result(
-            request_json(
-                "POST",
-                args.external_server_url,
-                payload=jsonrpc("tools/list", None, 101),
-                timeout_seconds=args.timeout,
-                extra_headers=headers,
-            ),
-            "external tools/list",
-        )
-        tools_value = tools_result.get("tools")
-        tools = [tool for tool in tools_value if isinstance(tool, dict)] if isinstance(tools_value, list) else []
+        init = client.initialize()
         server_info_value = init.get("serverInfo")
-        server_info = server_info_value if isinstance(server_info_value, dict) else {}
+        server_info: dict[str, Any] = server_info_value if isinstance(server_info_value, dict) else {}
+        tools = client.list_tools()
+        tool_names = [str(tool.get("name") or "") for tool in tools]
         _record(
             steps,
             "mcp.real_external_server",
             "pass",
-            f"server={server_info.get('name') or '<unknown>'} tools={len(tools)}",
-            {"serverInfo": server_info, "toolCount": len(tools)},
+            f"server={server_info.get('name') or '<unknown>'} protocol={init.get('protocolVersion')} tools={len(tools)}",
+            {"serverInfo": server_info, "protocolVersion": init.get("protocolVersion"), "toolCount": len(tools), "toolNames": tool_names},
             as_json=args.json,
         )
-    except SmokeFailure as exc:
+    except Exception as exc:
         _record(steps, "mcp.real_external_server", "fail", str(exc), as_json=args.json)
 
 

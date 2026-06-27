@@ -1,6 +1,6 @@
-# Release Readiness
+﻿# Release Readiness
 
-适用版本：v2.2.9。
+适用版本：v2.3.0。
 
 v2.2.9 是 v2.2.x 的收官版，主题是**发布前体检、运行时诊断、版本一致性与产物可验证**——不再扩大协议面或评测面，而是为 v2.3 的真实互操作验证提供一个稳定、可自证交付的底座。本页把三件事串起来：发版前体检（preflight）、一键 smoke 编排、发布产物证明（manifest + checksum）。
 
@@ -9,18 +9,18 @@ v2.2.9 是 v2.2.x 的收官版，主题是**发布前体检、运行时诊断、
 发版前确认版本号在所有该出现的地方都同步，eval 报告是当前版本，且发布脚本仍排除本地缓存 / 日志 / 密钥：
 
 ```bash
-python scripts/preflight_release.py --version 2.2.9
+python scripts/preflight_release.py --version 2.3.0
 ```
 
 检查项：
 
-- README 版本徽章是 `2.2.9`。
-- `CHANGELOG.md` 顶部有 `## [2.2.9]` 条目。
-- `Dockerfile` 示例 tag 是 `deepseek-infra:2.2.9`。
-- `docs/IMPLEMENTATION_STATUS.md` 与 `evals/README.md` 的「适用版本」是 `v2.2.9`。
+- README 版本徽章是 `2.3.0`。
+- `CHANGELOG.md` 顶部有 `## [2.3.0]` 条目。
+- `Dockerfile` 示例 tag 是 `deepseek-infra:2.3.0`。
+- `docs/IMPLEMENTATION_STATUS.md` 与 `evals/README.md` 的「适用版本」是 `v2.3.0`。
 - `docs/AGENT_EVAL.md` / `docs/EVAL_REPORTS.md` / `docs/SECURITY_SMOKE.md` 存在。
-- `evals/reports/latest.json` 的 `version` 是 `2.2.9`。
-- `evals/reports/agent-latest.json` 可解析且 `version` 是 `2.2.9`。
+- `evals/reports/latest.json` 的 `version` 是 `2.3.0`。
+- `evals/reports/agent-latest.json` 可解析且 `version` 是 `2.3.0`。
 - `scripts/release.py` 仍排除 `.traces` / `.local-rag` / `.auth-token` / `.env` / `server*.log`。
 
 退出码：`1` 表示有 `FAIL`；`WARNING`（如 eval 报告缺失）不失败。`--json` 输出机器可读摘要。
@@ -56,9 +56,9 @@ python scripts/smoke_release.py --with-server --base-url http://127.0.0.1:8000 -
 每次跑 [`scripts/release.py`](../scripts/release.py) 不再只产出一个 zip，还会在 `dist/` 下产出三件套：
 
 ```
-dist/deepseek-infra-2.2.9.zip
-dist/deepseek-infra-2.2.9.zip.sha256
-dist/deepseek-infra-2.2.9.manifest.json
+dist/deepseek-infra-2.3.0.zip
+dist/deepseek-infra-2.3.0.zip.sha256
+dist/deepseek-infra-2.3.0.manifest.json
 ```
 
 `manifest.json` 记录发布的关键事实，可独立校验：
@@ -66,14 +66,14 @@ dist/deepseek-infra-2.2.9.manifest.json
 ```json
 {
   "schemaVersion": "release-manifest.v1",
-  "version": "2.2.9",
+  "version": "2.3.0",
   "commit": "abc1234",
   "builtAt": "2026-06-27T00:00:00Z",
   "python": "3.12",
   "coverageGate": "75%",
   "evalReport": "evals/reports/latest.json",
   "agentReport": "evals/reports/agent-latest.json",
-  "artifact": "deepseek-infra-2.2.9.zip",
+  "artifact": "deepseek-infra-2.3.0.zip",
   "sha256": "...",
   "bytes": 1234567
 }
@@ -90,7 +90,7 @@ dist/deepseek-infra-2.2.9.manifest.json
 `.github/workflows/ci.yml` 新增 `release-readiness` job，在干净 Ubuntu runner 上跑：
 
 ```yaml
-- run: python scripts/preflight_release.py --version 2.2.9
+- run: python scripts/preflight_release.py --version 2.3.0
 - run: python scripts/doctor.py --offline
 - run: python scripts/release.py --clean-workspace --dry-run
 ```
@@ -104,7 +104,7 @@ dist/deepseek-infra-2.2.9.manifest.json
 python scripts/update_eval_report.py
 
 # 2. 版本一致性体检
-python scripts/preflight_release.py --version 2.2.9
+python scripts/preflight_release.py --version 2.3.0
 
 # 3. 运行时体检
 python scripts/doctor.py --offline
@@ -113,7 +113,7 @@ python scripts/doctor.py --offline
 python scripts/smoke_release.py --offline
 
 # 5. 打包并生成 manifest + checksum
-python scripts/release.py --clean-workspace --version 2.2.9
+python scripts/release.py --clean-workspace --version 2.3.0
 ```
 
 或直接用 `python scripts/smoke_release.py --offline`（已包含 doctor + evals + agent）。

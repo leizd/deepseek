@@ -2,6 +2,31 @@
 
 本项目使用类似 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的分组方式维护变更记录。未发布内容记录在 `[Unreleased]`，正式发版时迁移到具体版本。
 
+## [2.3.0] - Protocol Interop GA
+
+**主题：协议互操作真正跑通。** 本版不扩大模块面，而是把 v2.2.x 已准备好的 MCP / A2A / 安全评测能力真正拿到外部实现里验一遍：MCP 客户端与官方 MCP Python SDK 的 Streamable HTTP transport 真正互通、A2A 客户端与独立进程 peer 端到端验证、Prompt Injection 对抗评测从 soft gate 毕业为 CI 硬门禁。
+
+### 新增
+
+- **官方 MCP SDK 互操作 partner**：新增 `examples/external_mcp_server_partner.py`，使用官方 `mcp` Python SDK（PyPI `mcp>=1.0`）的 `FastMCP` + `streamable-http` transport 构建独立进程 MCP server（`echo` / `word_count` 工具），验证 DeepSeek Infra 的 `MCPClient` 与真实 MCP 协议实现端到端互通。
+- **A2A 独立进程 interop peer**：新增 `examples/a2a_interop_peer.py`，使用 Python 标准库 `http.server` 构建独立进程 A2A server（Agent Card + `message/send` / `message/stream` / `tasks/get` / `tasks/cancel` / `tasks/list` + SSE artifact chunks），验证 `A2AClient` 与外部 A2A server 端到端互通。诚实标注为独立进程 interop，非第三方生态实现。
+- **互操作文档**：新增 `docs/integrations/external-mcp-server.md` 与 `docs/integrations/a2a-interop.md`，记录复现步骤、验证结果（commit / 日期 / 工具 / 事件序列）与诚实标注。
+- **GUI 验证 runbook**：`docs/integrations/claude-desktop.md` 与 `docs/integrations/cursor.md` 增加 GUI 实机验证 runbook 与 evidence template（版本 / 日期 / commit / 检查项），供人工完成 GUI 实机后填入证据并更新兼容矩阵。
+
+### 更改
+
+- **MCP 客户端 SSE 响应解析**：`MCPClient._post()` 检查响应 `Content-Type`，`text/event-stream` 时用 `_parse_sse_jsonrpc()` 从 SSE `data:` 行提取 JSON-RPC 对象。官方 MCP SDK 对每个 POST 都返回 SSE，此前客户端只解析 JSON 无法互通——这是 v2.3.0 的关键互操作修复。
+- **MCP 客户端 extra_headers**：`MCPClient.__init__` 新增 `extra_headers` 参数，支持外部 server 鉴权（Bearer token）。
+- **MCP smoke runner 外部检查**：`scripts/smoke_mcp_compat.py` 的 `_check_external_mcp` 改用 `MCPClient`（自动处理 session ID、SSE 解析、Accept header），`scripts/_smoke_common.py` 的 `request_json()` 增加 SSE 响应解析。
+- **Prompt Injection 硬门禁**：`run_injection_adversarial.py --strict` 进入 CI `eval` job 作为独立硬门禁步骤；`run_offline_eval_suite.py` 的 suite 状态把 injection gate 未达标视为 FAIL（不再只是 WARNING）。`injection.gateMode` 字段标记为 `"hard"`。
+- **版本同步**：README 徽章、config `app_version`、Dockerfile tag、Android `versionName` / `versionCode`、各文档「适用版本」与 eval / agent 报告统一到 2.3.0。
+
+### 测试
+
+- 新增 `test_client_parses_sse_event_stream_response` 与 `test_client_handles_sse_response_from_external_server`，覆盖 SSE 单行 / 多行 `data:` 解析与 `MCPClient` 对 SSE 响应的 initialize / list_tools 端到端。
+- 新增 `test_offline_eval_suite_injection_hard_gate_fails_suite`，验证 injection gate 未达标时 suite 状态为 FAIL（v2.3.0 硬门禁行为）。
+- 现有 MCP / A2A / eval 全量测试通过，版本回归断言更新到 2.3.0。
+
 ## [2.2.9] - Release Readiness & Runtime Doctor
 
 **主题：发布前体检与运行时诊断。** 本版作为 v2.2.x 收官，不继续扩大协议面或评测面，而是把环境检查、版本一致性、发布产物证明和一键 smoke 编排补齐，为 v2.3 的真实互操作验证提供稳定交付底座。

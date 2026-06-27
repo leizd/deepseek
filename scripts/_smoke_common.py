@@ -78,6 +78,24 @@ def bearer_headers(token: str = "", *, accept: str = "application/json") -> dict
     return headers
 
 
+def _parse_sse_jsonrpc(text: str) -> dict[str, Any] | None:
+    """Extract the first JSON-RPC object from an SSE ``text/event-stream`` body."""
+    for block in text.split("\n\n"):
+        data_parts: list[str] = []
+        for line in block.split("\n"):
+            if line.startswith("data:"):
+                data_parts.append(line[5:].lstrip())
+        if not data_parts:
+            continue
+        try:
+            parsed = json.loads("".join(data_parts))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+    return None
+
+
 def request_json(
     method: str,
     url: str,
@@ -97,6 +115,7 @@ def request_json(
     try:
         with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
             raw = response.read()
+            content_type = response.headers.get("Content-Type", "")
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")
         raise SmokeFailure(f"{method.upper()} {url} returned HTTP {exc.code}: {_short(body)}") from exc
@@ -105,12 +124,15 @@ def request_json(
     if not raw:
         return {}
     try:
-        parsed = json.loads(raw.decode("utf-8"))
+        if "text/event-stream" in content_type:
+            parsed = _parse_sse_jsonrpc(raw.decode("utf-8"))
+        else:
+            parsed = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise SmokeFailure(f"{method.upper()} {url} returned non-JSON: {_short(raw.decode('utf-8', errors='replace'))}") from exc
     if not isinstance(parsed, dict):
         raise SmokeFailure(f"{method.upper()} {url} returned JSON {type(parsed).__name__}, expected object")
-    return parsed
+    return parsed if parsed is not None else {}
 
 
 def jsonrpc(method: str, params: dict[str, Any] | None = None, message_id: int | str = 1) -> dict[str, Any]:

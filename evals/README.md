@@ -1,6 +1,6 @@
-# AI Runtime Evaluation Harness
+﻿# AI Runtime Evaluation Harness
 
-适用版本：v2.2.9。
+适用版本：v2.3.0。
 
 这套 harness 对 DeepSeek Infra 的核心能力线做**自动化回归评测**（全部可离线执行，无需 API Key）。v2.2.7 已把 RAG / Tool Policy / Prompt Injection adversarial eval 整理成统一报告和 v2.2.6 baseline compare；v2.2.8 继续把 Agent Eval 从样例打分升级为稳定 JSONL 录制、归一化回放、`agent-latest` 报告和 report-only baseline 对比。Agent 指标低于建议阈值只 warning，结构错误才失败，硬门禁仍留到 v2.4。
 
@@ -14,7 +14,7 @@
 | **Agent Success Rate** | 任务最终答案是否满足成功标准且未失败 | `run_agent_eval.py` |
 | **Tool Policy Pass Rate** | 安全闸门对 SSRF / 路径越界 / 密钥外泄 / 越权等判定是否符合预期 | `run_tool_eval.py`（离线重放真实闸门） |
 | **Injection Defense Pass Rate** | 注入指令被检出 / 清洗、良性内容不误伤的比例 | `run_tool_eval.py` |
-| **Block / Bypass / False Positive Rate** | 小型对抗注入语料库的拦截率、绕过率、误伤率 | `run_injection_adversarial.py`（soft gate） |
+| **Block / Bypass / False Positive Rate** | 小型对抗注入语料库的拦截率、绕过率、误伤率 | `run_injection_adversarial.py`（v2.3.0 起 CI 硬门禁） |
 | **Latency Benchmark** | 平均 / P50 / P95 延迟 | 全部 runner |
 | **Cost Benchmark** | 平均 token 与 USD 成本（按模型定价或录制估算） | `run_agent_eval.py` |
 
@@ -73,8 +73,9 @@ PYTHONHASHSEED=0 python evals/runners/run_rag_eval.py
 # 安全闸门 / 注入防御：离线重放真实 ToolPolicy、sanitizer 与 taint scanner。
 python evals/runners/run_tool_eval.py
 
-# 对抗注入小语料：v2.2.6 起 soft gate；加 --strict 可升级为硬失败。
+# 对抗注入小语料：v2.3.0 起 CI 用 --strict 硬门禁；本地默认仍 warning。
 python evals/runners/run_injection_adversarial.py --no-report
+python evals/runners/run_injection_adversarial.py --strict --no-report  # CI 硬门禁
 ```
 
 常用参数：`--golden`、`--k`（RAG）、`--predictions`（Agent）、`--json`（机器可读）、`--no-report`（不落盘）、`--include-agent`（suite 可选聚合 Agent）。
@@ -85,7 +86,7 @@ CI 口径：
 - PR 必跑 `python evals/runners/compare_eval_baseline.py --baseline evals/baselines/v2.2.6.json --current evals/reports/latest.json`，无退化为 PASS，轻微退化为 WARNING，严重退化为 FAIL。
 - CI 跑 `python evals/runners/run_agent_eval.py --report-dir evals/reports --report-only`，生成 Agent replay 报告；指标 warning 不会阻断 CI。
 - CI 上传 `offline-eval-report` artifact，包含 `latest.json`、`latest.md`、`agent-latest.json` 与 `agent-latest.md`。
-- `run_injection_adversarial.py` 保持 v2.2.6 起的 soft gate 语义：未达阈值只 warning；加 `--strict` 可升级为硬失败（v2.3 路径）。
+- `run_injection_adversarial.py` 自 v2.3.0 起 CI 用 `--strict` 硬门禁：未达阈值返回 `exit 1` 阻断 PR；本地不加 `--strict` 仍只 warning 便于迭代。
 
 ## 输出示例
 
@@ -138,7 +139,7 @@ Soft Gate: PASS
 
 `run_tool_eval.py` 在判定不符时退出码为 1 并逐条列出错判用例，可直接当回归门禁；新增攻击样本只需往 `tool_policy_cases.jsonl` 追加一行。
 
-`run_injection_adversarial.py` 自 v2.2.6 起接入版本化阈值 soft gate（`blockRate>=0.85`、`falsePositiveRate<=0.10`、`bypassRate<=0.15`）：未达标打印 `SOFT GATE: WARNING` 但仍 `exit 0`，CI 不中断；加 `--strict` 把未达标升级为 `exit 1`，是 v2.3 硬门禁的毕业路径。
+`run_injection_adversarial.py` 自 v2.2.6 起接入版本化阈值（`blockRate>=0.85`、`falsePositiveRate<=0.10`、`bypassRate<=0.15`）。v2.3.0 起 CI 用 `--strict` 把未达标升级为 `exit 1` 硬门禁，阻断 PR；`run_offline_eval_suite.py` 的 suite 状态也把 injection gate 未达标视为 FAIL。本地不加 `--strict` 仍只 warning 便于迭代。
 
 ## 录制真实 predictions
 

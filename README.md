@@ -1,6 +1,6 @@
 # DeepSeek Infra
 
-![版本](https://img.shields.io/badge/version-2.2.9-blue)
+![版本](https://img.shields.io/badge/version-2.3.0-blue)
 ![Python](https://img.shields.io/badge/python-3.10%2B-green)
 ![Coverage Gate](https://img.shields.io/badge/coverage%20gate-75%25-brightgreen)
 ![许可证](https://img.shields.io/badge/license-MIT-black)
@@ -188,9 +188,9 @@ curl http://127.0.0.1:8000/v1/models -H "Authorization: Bearer <本地访问 tok
 | 聊天延迟（在线） | 流式 TTFT / 总延迟 avg·P50·P95、token 用量、语义缓存命中分布 | `python benchmarks/bench_chat_latency.py --n 3` |
 | Agent DAG（在线） | 端到端延迟、每 Agent 耗时表、token 与估算成本 | `python benchmarks/bench_agent_dag.py` |
 
-与之配套的**质量评测**在 [evals/](evals/)（全部离线可跑）：`python evals/runners/run_offline_eval_suite.py` 会统一留下 [latest eval report](evals/reports/latest.md)，当前 baseline 为 RAG Recall@5 1.000 / Citation Accuracy 0.8333、26 个固定攻防用例的 **Tool Policy Pass Rate 1.000 / Prompt Injection Defense Pass 1.000**，以及对抗注入小语料的 `block_rate` / `false_positive_rate` / `bypass_rate` soft gate；`run_agent_eval.py` 额外生成 [Agent Eval report](evals/reports/agent-latest.md)，对照 [agent-v2.2.8 baseline](evals/baselines/agent-v2.2.8.json) 做 report-only warning。详见 [evals/README.md](evals/README.md)、[docs/EVAL_REPORTS.md](docs/EVAL_REPORTS.md) 与 [docs/AGENT_EVAL.md](docs/AGENT_EVAL.md)。本地安全能力复现最小命令集见 [docs/SECURITY_SMOKE.md](docs/SECURITY_SMOKE.md)。
+与之配套的**质量评测**在 [evals/](evals/)（全部离线可跑）：`python evals/runners/run_offline_eval_suite.py` 会统一留下 [latest eval report](evals/reports/latest.md)，当前 baseline 为 RAG Recall@5 1.000 / Citation Accuracy 0.8333、26 个固定攻防用例的 **Tool Policy Pass Rate 1.000 / Prompt Injection Defense Pass 1.000**，以及对抗注入小语料的 `block_rate` / `false_positive_rate` / `bypass_rate` 硬门禁（v2.3.0 起 CI 用 `--strict`）；`run_agent_eval.py` 额外生成 [Agent Eval report](evals/reports/agent-latest.md)，对照 [agent-v2.2.8 baseline](evals/baselines/agent-v2.2.8.json) 做 report-only warning。详见 [evals/README.md](evals/README.md)、[docs/EVAL_REPORTS.md](docs/EVAL_REPORTS.md) 与 [docs/AGENT_EVAL.md](docs/AGENT_EVAL.md)。本地安全能力复现最小命令集见 [docs/SECURITY_SMOKE.md](docs/SECURITY_SMOKE.md)。
 
-**发版前一键体检（v2.2.9）**：先 `python scripts/doctor.py --offline` 做运行时体检（Python / 依赖 / .env / 数据目录权限 / static / 端口 / token，PASS / WARNING / FAIL），再 `python scripts/preflight_release.py --version 2.2.9` 校验版本徽章 / CHANGELOG / Docker tag / 文档与 eval 报告版本同步，最后 `python scripts/smoke_release.py --offline` 一键编排 doctor + offline eval + Agent Eval（`--with-server --base-url ... --token ...` 额外跑 MCP / A2A smoke）。发布产物会同时生成 `.sha256` 与 `.manifest.json` 作为 release evidence。详见 [docs/RUNTIME_DOCTOR.md](docs/RUNTIME_DOCTOR.md) 与 [docs/RELEASE_READINESS.md](docs/RELEASE_READINESS.md)。
+**发版前一键体检（v2.3.0）**：先 `python scripts/doctor.py --offline` 做运行时体检（Python / 依赖 / .env / 数据目录权限 / static / 端口 / token，PASS / WARNING / FAIL），再 `python scripts/preflight_release.py --version 2.3.0` 校验版本徽章 / CHANGELOG / Docker tag / 文档与 eval 报告版本同步，最后 `python scripts/smoke_release.py --offline` 一键编排 doctor + offline eval + Agent Eval（`--with-server --base-url ... --token ...` 额外跑 MCP / A2A smoke）。发布产物会同时生成 `.sha256` 与 `.manifest.json` 作为 release evidence。详见 [docs/RUNTIME_DOCTOR.md](docs/RUNTIME_DOCTOR.md) 与 [docs/RELEASE_READINESS.md](docs/RELEASE_READINESS.md)。
 
 ## 快速开始
 
@@ -427,11 +427,11 @@ python scripts/release.py --clean-workspace
 - [x] Release manifest & checksum：发布产物生成 `dist/deepseek-infra-2.2.9.zip.sha256` 与 `.manifest.json`
 - [x] Release smoke suite：`python scripts/smoke_release.py --offline` 一键编排 doctor + offline eval + Agent Eval（`--with-server` 额外跑 MCP / A2A smoke）
 
-### v2.3: 协议兼容与交付增强
-- [ ] Claude Desktop / Cursor GUI 实机跑通后更新 `docs/COMPATIBILITY.md`
-- [ ] 一个真实第三方 Streamable HTTP MCP server 桥接实测记录（v2.2.5 已提供 `--external-server-url` smoke 入口）
-- [ ] Third-party A2A implementation interop（v2.2.5 已固化本地 contract smoke；真实第三方仍待实机）
-- [ ] Prompt injection soft gate 升级为硬门禁（`run_injection_adversarial.py --strict` 进 CI 必过项）
+### v2.3: Protocol Interop GA
+- [x] MCP 客户端 SSE 响应解析 + 官方 MCP SDK Streamable HTTP partner 实测（`examples/external_mcp_server_partner.py`，`docs/integrations/external-mcp-server.md`）
+- [x] A2A 独立进程 interop peer 实测（`examples/a2a_interop_peer.py`，`docs/integrations/a2a-interop.md`）
+- [x] Prompt injection soft gate 升级为硬门禁（`run_injection_adversarial.py --strict` 进 CI 必过项 + suite 硬门禁）
+- [x] Claude Desktop / Cursor GUI 验证 runbook 与 evidence template 落地（`docs/integrations/claude-desktop.md` / `cursor.md`）；GUI 实机仍待人工完成后更新 `docs/COMPATIBILITY.md`
 
 ### v2.4: 评测与安全
 - [ ] Coverage gate 提升到 80%

@@ -1,6 +1,6 @@
-# Security Smoke Checklist
+﻿# Security Smoke Checklist
 
-适用版本：v2.2.9。
+适用版本：v2.3.0。
 
 这页是 DeepSeek Infra 安全能力的**最小可复现命令集**：任何人克隆仓库后，无需 API Key、无需联网，都能在本地验证 Tool Policy、Context Taint 防火墙与 Prompt Injection 评测门禁是否工作。先跑通这套冒烟，再去看 [THREAT_MODEL.md](THREAT_MODEL.md) 的威胁分类与 [SECURITY.md](SECURITY.md) 的数据驻留口径。
 
@@ -31,9 +31,9 @@ Prompt Injection Defense Pass: 1.000
 
 期望 Pass Rate = `1.000`。低于此值说明策略回归，不可发布。
 
-## 3. Prompt Injection 对抗评测 soft gate（v2.2.6）
+## 3. Prompt Injection 对抗评测 hard gate（v2.3.0）
 
-30 个对抗样本（中文 / 英文 / Base64 / Markdown hidden instruction / 多轮诱导 / 良性样本）输出 `blockRate` / `falsePositiveRate` / `bypassRate`，并对照版本化阈值做 **soft gate**：
+30 个对抗样本（中文 / 英文 / Base64 / Markdown hidden instruction / 多轮诱导 / 良性样本）输出 `blockRate` / `falsePositiveRate` / `bypassRate`，并对照版本化阈值做门禁：
 
 ```bash
 python evals/runners/run_injection_adversarial.py
@@ -56,8 +56,7 @@ Soft Gate: PASS (all thresholds met)
   - bypassRate: 0.000 <= 0.15 [PASS]
 ```
 
-- **soft gate**：未达标只打印 `SOFT GATE: WARNING`，仍 `exit 0`，CI 不中断。
-- **hard gate（毕业路径）**：加 `--strict` 让未达标返回 `exit 1`，这是 v2.3 的目标。
+- **hard gate（v2.3.0 起 CI 必过）**：加 `--strict` 让未达标返回 `exit 1` 阻断 PR；CI 已接入。本地不加 `--strict` 仍只 warning 便于迭代。
 
 ```bash
 python evals/runners/run_injection_adversarial.py --strict --no-report

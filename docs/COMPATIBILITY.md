@@ -1,8 +1,8 @@
-# Compatibility Matrix（兼容性矩阵）
+﻿# Compatibility Matrix（兼容性矩阵）
 
-适用版本：v2.2.9。
+适用版本：v2.3.0。
 
-这页只记录已经可复现的互操作结果，不把“协议上应该兼容”写成“实机已验证”。v2.2.5 的重点是把 v2.2.3/v2.2.4 已完成的 MCP / A2A 能力整理成一键 smoke 入口：本地服务可跑、失败能排查、日志可贴回兼容矩阵。Claude Desktop / Cursor 的配置片段已补齐，但本机未安装这两个 GUI 客户端；真实第三方 Streamable HTTP MCP server 与第三方 A2A 实现也仍标为待实机。
+这页只记录已经可复现的互操作结果，不把“协议上应该兼容”写成“实机已验证”。v2.3.0 的重点是把 v2.2.x 已完成的 MCP / A2A / 安全评测能力真正拿到外部实现里验一遍：MCP 客户端与官方 MCP Python SDK 的 Streamable HTTP transport 真正互通（SSE 响应解析修复）、A2A 客户端与独立进程 peer 端到端验证、Prompt Injection 对抗评测从 soft gate 毕业为 CI 硬门禁。Claude Desktop / Cursor 的 GUI 实机验证 runbook 已落地，待人工完成 GUI 测试后填入证据。
 
 ## Compatibility Smoke Pack（v2.2.5）
 
@@ -73,17 +73,17 @@ v2.2.1 起，外部 MCP server 的工具会以 `mcp__<server>__<tool>` 桥接进
 | Timeout / retry stats | ✅ Tested | `test_client_retries_retryable_transport_failures` | `MCPClient.last_stats` 记录 attempts、retry count、latency、timeout/error type。 |
 | Circuit breaker | ✅ Tested | `test_external_mcp_registry_reports_health_and_opens_circuit` | 连续失败后进入短期 `circuit_open`，`/api/mcp/external/tools` 返回健康态。 |
 | Trace diagnostics | ✅ Tested | `test_external_mcp_call_records_trace_diagnostics` | `mcp_external` span 记录 latency、attempts、retryCount、timeout、errorType。 |
-| Real third-party Streamable HTTP MCP server | 🟡 Smoke entry ready, not tested in this workspace | `scripts/smoke_mcp_compat.py --external-server-url <url>` | 需要选择一个稳定公开/本地第三方 server 后补实测记录。 |
+| Real third-party Streamable HTTP MCP server | ✅ Official MCP SDK interop tested | `scripts/smoke_mcp_compat.py --external-server-url <url>` + [integrations/external-mcp-server.md](integrations/external-mcp-server.md) | 官方 `mcp` Python SDK v1.28.1 FastMCP `streamable-http` partner（`echo` / `word_count`），commit `6edcda5`，2026-06-27 验证：initialize / tools/list / tools/call / 桥接 `mcp__interop-partner__echo` / health API / 外部 server 挂掉时本地工具不受影响。SSE 响应解析为 v2.3.0 关键修复。 |
 
 ## Current MCP MVP Acceptance
 
-| Acceptance item | v2.2.5 result |
+| Acceptance item | v2.3.0 result |
 | --- | --- |
 | 本地 MCP server | ✅ `POST /mcp` + examples + CI + smoke runner |
 | 本地 mock external MCP server | ✅ CI |
-| Claude Desktop | 🟡 配置文档已补，smoke 入口已补，GUI 未实机 |
-| Cursor | 🟡 配置文档已补，smoke 入口已补，GUI 未实机 |
-| 一个真实外部 MCP server | 🟡 smoke 入口已补，待实机 |
+| Claude Desktop | 🟡 配置文档 + smoke 入口 + GUI 验证 runbook 已补，GUI 未实机 |
+| Cursor | 🟡 配置文档 + smoke 入口 + GUI 验证 runbook 已补，GUI 未实机 |
+| 一个真实外部 MCP server | ✅ 官方 MCP SDK v1.28.1 partner 实测通过（SSE 解析 + 桥接 + health + policy gate） |
 | 外部 server 挂掉 | ✅ health + local tools unaffected |
 | schema/响应异常 | ✅ invalid JSON / malformed tool catalog mapped to upstream failure |
 | 工具超时/重试 | ✅ client stats + trace diagnostics |
@@ -115,15 +115,16 @@ v2.2.1 起，外部 MCP server 的工具会以 `mcp__<server>__<tool>` 桥接进
 | A2A live smoke runner | ✅ Runner added | `python scripts/smoke_a2a_compat.py` | Endpoint-level smoke against a running local server; artifact chunks can be strict with `--strict-artifacts` |
 | Local Agent Card discovery | ✅ Tested | `GET /.well-known/agent-card.json` |
 | Local external A2A peer loopback | ✅ Tested | `examples/a2a_peer_demo.py` against `http://127.0.0.1:8001/a2a/agents/reasoner` |
-| Third-party A2A implementation | 🟡 Contract smoke ready, not tested | `scripts/smoke_a2a_compat.py` / `examples/a2a_compat_smoke.py`; ecosystem interop still pending. |
+| Third-party A2A implementation | 🟡 Independent-process peer tested (not third-party ecosystem) | [integrations/a2a-interop.md](integrations/a2a-interop.md) + `examples/a2a_interop_peer.py` | 独立进程 A2A peer（Python stdlib `http.server`）验证 Agent Card / `message/send` / `message/stream` / `tasks/get` / `tasks/cancel` / `tasks/list`，commit `6edcda5`，2026-06-27。诚实标注：独立进程 interop，非第三方生态实现；第三方生态实现仍待实机。 |
 
 ## A2A MVP Acceptance
 
-| Acceptance item | v2.2.5 result |
+| Acceptance item | v2.3.0 result |
 | --- | --- |
 | Artifact streaming chunks | ✅ `artifactId` / `chunkIndex` / `append` / `final` in `artifact-update` SSE events |
 | `tasks/resubscribe` | ✅ Reconnect by `taskId` and `afterChunkIndex` |
 | Local external peer loopback | ✅ `A2AClient.message_stream()` + `examples/a2a_peer_demo.py` |
+| Independent-process A2A interop | ✅ `examples/a2a_interop_peer.py` — Agent Card / send / stream / get / cancel / list 全通过 |
 | A2A trace / metrics | ✅ `a2a_task` / `a2a_peer_call` spans + `ai_a2a_*` Prometheus metrics |
 | Cancellation lifecycle | ✅ `cancelRequestedAt`, `canceling -> canceled`, `discardedResult` trace diagnostics |
 | Compatibility smoke entry | ✅ `scripts/smoke_a2a_compat.py` + `tests/test_a2a_compat_contract.py` |

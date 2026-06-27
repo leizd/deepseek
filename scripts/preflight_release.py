@@ -6,7 +6,7 @@ CHANGELOG, Dockerfile tag, Implementation Status / evals README headers, that
 the eval / agent reports are current, that the smoke / eval docs exist, and that
 ``scripts/release.py`` still excludes runtime caches and logs.
 
-    python scripts/preflight_release.py --version 2.2.9
+    python scripts/preflight_release.py --version 2.3.0
 
 Exits 1 on any FAIL; WARNINGs do not fail. Version defaults to
 ``settings.app_version``.
