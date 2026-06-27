@@ -2,6 +2,26 @@
 
 本项目使用类似 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的分组方式维护变更记录。未发布内容记录在 `[Unreleased]`，正式发版时迁移到具体版本。
 
+## [2.3.1] - GUI Interop Evidence Patch
+
+**主题：协议互操作证据补丁。** 本版不开新功能，只做小版本收口：修正文档残留、把 GUI 实机证据纳入发版前体检、明确第三方 A2A 验证下一步。
+
+### 新增
+
+- **GUI interop evidence 检查**：`scripts/preflight_release.py` 新增 `gui_interop_evidence` 检查，扫描 `docs/COMPATIBILITY.md` 中 Claude Desktop / Cursor 行的状态标记——🟡 为 WARNING（不阻断 CI），✅ GUI tested 为 PASS。人工完成 GUI 验证并更新矩阵后自动转为 PASS。
+- **GUI 验证流程文档**：`docs/RELEASE_READINESS.md` 新增「GUI Interop Evidence Checklist」节，说明人工完成 Claude Desktop / Cursor GUI 验证的步骤和 preflight 联动。
+- **第三方 A2A 验证计划**：新增 `docs/integrations/a2a-third-party-plan.md`，记录验证 Google A2A reference / CrewAI / LangGraph 等第三方生态实现的候选与验收标准。兼容矩阵保持 🟡，不强行标 ✅。
+
+### 更改
+
+- **文档残留修正**：`docs/COMPATIBILITY.md` 的 `## Compatibility Smoke Pack（v2.2.5）` 标题去掉版本后缀，改为 `## Compatibility Smoke Pack`，避免每次小版本都要改标题。
+- **版本同步**：README 徽章、config `app_version`、Dockerfile tag、Android `versionName` / `versionCode`、各文档「适用版本」与 eval / agent 报告统一到 2.3.1。
+
+### 测试
+
+- 新增 `test_preflight_warns_on_pending_gui_interop_evidence` 与 `test_preflight_passes_on_completed_gui_interop_evidence`，覆盖 GUI 证据 WARNING / PASS 两条路径。
+- 版本回归断言更新到 2.3.1。
+
 ## [2.3.0] - Protocol Interop GA
 
 **主题：协议互操作真正跑通。** 本版不扩大模块面，而是把 v2.2.x 已准备好的 MCP / A2A / 安全评测能力真正拿到外部实现里验一遍：MCP 客户端与官方 MCP Python SDK 的 Streamable HTTP transport 真正互通、A2A 客户端与独立进程 peer 端到端验证、Prompt Injection 对抗评测从 soft gate 毕业为 CI 硬门禁。

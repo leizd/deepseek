@@ -127,3 +127,48 @@ def test_preflight_fails_on_missing_docs(tmp_path: Path) -> None:
     (root / "docs" / "AGENT_EVAL.md").unlink()
     links = next(r for r in preflight.run_preflight(root, "2.2.9") if r.name == "doc_links")
     assert links.status == "fail"
+
+
+def _skeleton_with_compat(tmp_path: Path, version: str, *, claude_status: str, cursor_status: str) -> Path:
+    root = _skeleton(tmp_path, version)
+    compat_lines = [
+        "# Compatibility Matrix",
+        "",
+        f"适用版本：v{version}。",
+        "",
+        "## MCP Client Compatibility",
+        "",
+        "| Client / Path | Status | Evidence | Notes |",
+        "| --- | --- | --- | --- |",
+        f"| Claude Desktop | {claude_status} | integrations/claude-desktop.md | notes |",
+        f"| Cursor | {cursor_status} | integrations/cursor.md | notes |",
+        "",
+    ]
+    (root / "docs" / "COMPATIBILITY.md").write_text("\n".join(compat_lines), encoding="utf-8")
+    return root
+
+
+def test_preflight_warns_on_pending_gui_interop_evidence(tmp_path: Path) -> None:
+    preflight = _load_preflight()
+    root = _skeleton_with_compat(tmp_path, "2.3.1", claude_status="🟡 Config documented", cursor_status="🟡 Config documented")
+    result = next(r for r in preflight.run_preflight(root, "2.3.1") if r.name == "gui_interop_evidence")
+    assert result.status == "warn"
+    assert "Claude Desktop" in result.detail and "Cursor" in result.detail
+    # WARNING does not fail the preflight exit code
+    assert preflight.main(["--root", str(root), "--version", "2.3.1", "--json"]) == 0
+
+
+def test_preflight_passes_on_completed_gui_interop_evidence(tmp_path: Path) -> None:
+    preflight = _load_preflight()
+    root = _skeleton_with_compat(tmp_path, "2.3.1", claude_status="✅ GUI tested", cursor_status="✅ GUI tested")
+    result = next(r for r in preflight.run_preflight(root, "2.3.1") if r.name == "gui_interop_evidence")
+    assert result.status == "pass"
+
+
+def test_preflight_warns_when_only_one_gui_evidence_filled(tmp_path: Path) -> None:
+    preflight = _load_preflight()
+    root = _skeleton_with_compat(tmp_path, "2.3.1", claude_status="✅ GUI tested", cursor_status="🟡 Config documented")
+    result = next(r for r in preflight.run_preflight(root, "2.3.1") if r.name == "gui_interop_evidence")
+    assert result.status == "warn"
+    assert "Cursor" in result.detail
+    assert "Claude Desktop" not in result.detail

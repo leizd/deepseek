@@ -1,6 +1,6 @@
 # DeepSeek Infra
 
-![版本](https://img.shields.io/badge/version-2.3.0-blue)
+![版本](https://img.shields.io/badge/version-2.3.1-blue)
 ![Python](https://img.shields.io/badge/python-3.10%2B-green)
 ![Coverage Gate](https://img.shields.io/badge/coverage%20gate-75%25-brightgreen)
 ![许可证](https://img.shields.io/badge/license-MIT-black)
@@ -190,7 +190,7 @@ curl http://127.0.0.1:8000/v1/models -H "Authorization: Bearer <本地访问 tok
 
 与之配套的**质量评测**在 [evals/](evals/)（全部离线可跑）：`python evals/runners/run_offline_eval_suite.py` 会统一留下 [latest eval report](evals/reports/latest.md)，当前 baseline 为 RAG Recall@5 1.000 / Citation Accuracy 0.8333、26 个固定攻防用例的 **Tool Policy Pass Rate 1.000 / Prompt Injection Defense Pass 1.000**，以及对抗注入小语料的 `block_rate` / `false_positive_rate` / `bypass_rate` 硬门禁（v2.3.0 起 CI 用 `--strict`）；`run_agent_eval.py` 额外生成 [Agent Eval report](evals/reports/agent-latest.md)，对照 [agent-v2.2.8 baseline](evals/baselines/agent-v2.2.8.json) 做 report-only warning。详见 [evals/README.md](evals/README.md)、[docs/EVAL_REPORTS.md](docs/EVAL_REPORTS.md) 与 [docs/AGENT_EVAL.md](docs/AGENT_EVAL.md)。本地安全能力复现最小命令集见 [docs/SECURITY_SMOKE.md](docs/SECURITY_SMOKE.md)。
 
-**发版前一键体检（v2.3.0）**：先 `python scripts/doctor.py --offline` 做运行时体检（Python / 依赖 / .env / 数据目录权限 / static / 端口 / token，PASS / WARNING / FAIL），再 `python scripts/preflight_release.py --version 2.3.0` 校验版本徽章 / CHANGELOG / Docker tag / 文档与 eval 报告版本同步，最后 `python scripts/smoke_release.py --offline` 一键编排 doctor + offline eval + Agent Eval（`--with-server --base-url ... --token ...` 额外跑 MCP / A2A smoke）。发布产物会同时生成 `.sha256` 与 `.manifest.json` 作为 release evidence。详见 [docs/RUNTIME_DOCTOR.md](docs/RUNTIME_DOCTOR.md) 与 [docs/RELEASE_READINESS.md](docs/RELEASE_READINESS.md)。
+**发版前一键体检（v2.3.1）**：先 `python scripts/doctor.py --offline` 做运行时体检（Python / 依赖 / .env / 数据目录权限 / static / 端口 / token，PASS / WARNING / FAIL），再 `python scripts/preflight_release.py --version 2.3.1` 校验版本徽章 / CHANGELOG / Docker tag / 文档与 eval 报告版本同步（含 GUI interop evidence 存在性检查），最后 `python scripts/smoke_release.py --offline` 一键编排 doctor + offline eval + Agent Eval（`--with-server --base-url ... --token ...` 额外跑 MCP / A2A smoke）。发布产物会同时生成 `.sha256` 与 `.manifest.json` 作为 release evidence。详见 [docs/RUNTIME_DOCTOR.md](docs/RUNTIME_DOCTOR.md) 与 [docs/RELEASE_READINESS.md](docs/RELEASE_READINESS.md)。
 
 ## 快速开始
 
@@ -432,6 +432,13 @@ python scripts/release.py --clean-workspace
 - [x] A2A 独立进程 interop peer 实测（`examples/a2a_interop_peer.py`，`docs/integrations/a2a-interop.md`）
 - [x] Prompt injection soft gate 升级为硬门禁（`run_injection_adversarial.py --strict` 进 CI 必过项 + suite 硬门禁）
 - [x] Claude Desktop / Cursor GUI 验证 runbook 与 evidence template 落地（`docs/integrations/claude-desktop.md` / `cursor.md`）；GUI 实机仍待人工完成后更新 `docs/COMPATIBILITY.md`
+
+### v2.3.1: GUI Interop Evidence Patch
+- [x] `docs/COMPATIBILITY.md` 标题残留修正（`Compatibility Smoke Pack（v2.2.5）` → `Compatibility Smoke Pack`）
+- [x] `preflight_release.py` 新增 `gui_interop_evidence` 检查：扫描 COMPATIBILITY.md 中 Claude Desktop / Cursor 行的状态，🟡 为 WARNING，✅ GUI tested 为 PASS
+- [x] `docs/RELEASE_READINESS.md` 新增 GUI Interop Evidence Checklist 节
+- [x] 新增 `docs/integrations/a2a-third-party-plan.md`：第三方生态 A2A 验证计划，兼容矩阵保持 🟡
+- [ ] Claude Desktop / Cursor GUI 实机证据填入（需人工完成 GUI 测试后更新矩阵与 integration docs）
 
 ### v2.4: 评测与安全
 - [ ] Coverage gate 提升到 80%

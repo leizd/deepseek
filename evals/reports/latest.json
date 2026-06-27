@@ -1,9 +1,9 @@
 {
   "schemaVersion": "offline-eval-suite.v1",
-  "version": "2.3.0",
-  "gitSha": "6edcda5",
+  "version": "2.3.1",
+  "gitSha": "7174539",
   "gitDirty": true,
-  "generatedAt": "2026-06-27T07:18:19Z",
+  "generatedAt": "2026-06-27T08:55:51Z",
   "status": "PASS",
   "paths": {
     "ragGolden": "evals/golden/rag_questions.jsonl",
@@ -22,8 +22,8 @@
     "citationAccuracy": 0.8333,
     "keywordCoverage": 1.0,
     "latency": {
-      "avgMs": 32.99,
-      "p95Ms": 33.91
+      "avgMs": 33.45,
+      "p95Ms": 34.08
     }
   },
   "toolPolicy": {
@@ -66,7 +66,7 @@
     },
     "latency": {
       "avgMs": 0.03,
-      "p95Ms": 0.06
+      "p95Ms": 0.05
     }
   }
 }

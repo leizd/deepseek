@@ -3,10 +3,12 @@
 
 Checks that the version string is consistent across the README badge,
 CHANGELOG, Dockerfile tag, Implementation Status / evals README headers, that
-the eval / agent reports are current, that the smoke / eval docs exist, and that
-``scripts/release.py`` still excludes runtime caches and logs.
+the eval / agent reports are current, that the smoke / eval docs exist, that
+``scripts/release.py`` still excludes runtime caches and logs, and (since
+v2.3.1) that GUI interop evidence for Claude Desktop / Cursor has been recorded
+in ``docs/COMPATIBILITY.md``.
 
-    python scripts/preflight_release.py --version 2.3.0
+    python scripts/preflight_release.py --version 2.3.1
 
 Exits 1 on any FAIL; WARNINGs do not fail. Version defaults to
 ``settings.app_version``.
@@ -118,6 +120,41 @@ def check_release_exclusions(root: Path) -> CheckResult:
     return CheckResult("release_exclusions", STATUS_PASS, "release.py excludes runtime caches, secrets and logs", {"checked": list(required)})
 
 
+def check_gui_interop_evidence(root: Path) -> CheckResult:
+    """Verify Claude Desktop / Cursor GUI evidence is recorded in COMPATIBILITY.md.
+
+    A WARNING (not FAIL) is emitted while GUI testing is still pending — the
+    check scans the MCP Client Compatibility table for ``✅ GUI tested`` markers.
+    Once a human runs the GUI verification runbook and updates the matrix, this
+    check flips to PASS automatically.
+    """
+    text = _read(root / "docs" / "COMPATIBILITY.md")
+    pending: list[str] = []
+    for client in ("Claude Desktop", "Cursor"):
+        # Look for the row: | <client> | <status> | ...
+        for line in text.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("|") and client in stripped:
+                if "✅ GUI tested" in stripped or "✅ GUI verified" in stripped:
+                    break
+                if "🟡" in stripped:
+                    pending.append(client)
+                break
+    if not pending:
+        return CheckResult(
+            "gui_interop_evidence",
+            STATUS_PASS,
+            "Claude Desktop / Cursor GUI evidence recorded in COMPATIBILITY.md",
+            {"pending": []},
+        )
+    return CheckResult(
+        "gui_interop_evidence",
+        STATUS_WARN,
+        f"GUI interop evidence still pending for: {', '.join(pending)} (fill the runbook in docs/integrations/ then update COMPATIBILITY.md)",
+        {"pending": pending},
+    )
+
+
 def run_preflight(root: Path, version: str) -> list[CheckResult]:
     return [
         check_readme_badge(root, version),
@@ -129,6 +166,7 @@ def run_preflight(root: Path, version: str) -> list[CheckResult]:
         check_eval_report_version(root, version),
         check_agent_report(root, version),
         check_release_exclusions(root),
+        check_gui_interop_evidence(root),
     ]
 
 
