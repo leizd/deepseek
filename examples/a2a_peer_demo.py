@@ -19,7 +19,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import sys
 from typing import Any
 
 from deepseek_infra.infra.agent_runtime.a2a import A2AClient
