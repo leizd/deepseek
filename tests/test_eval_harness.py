@@ -154,6 +154,123 @@ def test_eval_report_to_text_and_to_dict_and_write(tmp_path: Path) -> None:
     assert json.loads(out.read_text(encoding="utf-8"))["suite"] == "rag"
 
 
+def _load_offline_suite_runner():
+    path = Path("evals/runners/run_offline_eval_suite.py").resolve()
+    spec = importlib.util.spec_from_file_location("run_offline_eval_suite_under_test", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _suite_reports() -> tuple[harness.EvalReport, harness.EvalReport, harness.EvalReport]:
+    rag = harness.EvalReport(
+        suite="rag",
+        cases=6,
+        metrics={
+            "ragRecallAtK": 1.0,
+            "ragMrr": 0.9167,
+            "citationAccuracy": 0.8333,
+            "keywordCoverage": 1.0,
+            "avgLatencyMs": 34.9,
+            "p95LatencyMs": 37.28,
+        },
+        k=5,
+    )
+    tool_policy = harness.EvalReport(
+        suite="tool-policy",
+        cases=26,
+        metrics={"toolPolicyPassRate": 1.0, "injectionDefensePassRate": 1.0, "avgLatencyMs": 0.03, "p95LatencyMs": 0.07},
+    )
+    injection = harness.EvalReport(
+        suite="injection-adversarial",
+        cases=30,
+        metrics={"blockRate": 1.0, "falsePositiveRate": 0.0, "bypassRate": 0.0, "avgLatencyMs": 0.03, "p95LatencyMs": 0.06},
+        benchmarks={"softGate": {"passed": True, "thresholds": {"blockRate": {"value": 1.0, "threshold": 0.85, "op": ">=", "passed": True}}}},
+    )
+    return rag, tool_policy, injection
+
+
+def test_offline_eval_suite_builds_json_schema_and_markdown() -> None:
+    runner = _load_offline_suite_runner()
+    rag, tool_policy, injection = _suite_reports()
+    report = runner.build_suite_report(
+        rag,
+        tool_policy,
+        injection,
+        version="2.2.7",
+        sha="abc1234",
+        dirty=True,
+        generated_at="2026-06-27T00:00:00Z",
+        paths={"ragGolden": "evals/golden/rag_questions.jsonl"},
+    )
+    assert report["schemaVersion"] == "offline-eval-suite.v1"
+    assert report["version"] == "2.2.7"
+    assert report["gitDirty"] is True
+    assert report["status"] == "PASS"
+    assert report["rag"]["recallAt5"] == 1.0
+    assert report["rag"]["citationAccuracy"] == 0.8333
+    assert report["toolPolicy"]["passRate"] == 1.0
+    assert report["injection"]["softGate"] == "PASS"
+
+    markdown = runner.render_markdown(report)
+    assert "# Offline Eval Report" in markdown
+    assert "| RAG | Citation Accuracy | 0.8333 | PASS |" in markdown
+    assert "compare_eval_baseline.py" in markdown
+
+
+def test_offline_eval_suite_main_writes_latest_reports(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    runner = _load_offline_suite_runner()
+    monkeypatch.setattr(runner, "run_all", lambda args: _suite_reports())
+    monkeypatch.setattr(runner, "git_sha", lambda: "abc1234")
+    monkeypatch.setattr(runner, "git_dirty", lambda: False)
+
+    json_path = tmp_path / "latest.json"
+    markdown_path = tmp_path / "latest.md"
+    rc = runner.main(["--out", str(json_path), "--markdown", str(markdown_path), "--json"])
+
+    assert rc == 0
+    payload = json.loads(json_path.read_text(encoding="utf-8"))
+    assert payload["schemaVersion"] == "offline-eval-suite.v1"
+    assert payload["gitSha"] == "abc1234"
+    assert payload["toolPolicy"]["status"] == "PASS"
+    assert "Offline Eval Report" in markdown_path.read_text(encoding="utf-8")
+
+
+def _load_baseline_compare_runner():
+    path = Path("evals/runners/compare_eval_baseline.py").resolve()
+    spec = importlib.util.spec_from_file_location("compare_eval_baseline_under_test", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_eval_baseline_compare_pass_warning_and_fail_paths() -> None:
+    runner = _load_baseline_compare_runner()
+    baseline = {
+        "version": "2.2.6",
+        "gitSha": "base",
+        "rag": {"recallAt5": 1.0, "citationAccuracy": 0.8333},
+        "toolPolicy": {"passRate": 1.0},
+        "injection": {"bypassRate": 0.0, "falsePositiveRate": 0.0},
+    }
+
+    assert runner.compare_reports(baseline, json.loads(json.dumps(baseline)))["status"] == "PASS"
+
+    warning_current = json.loads(json.dumps(baseline))
+    warning_current["rag"]["recallAt5"] = 0.99
+    warning = runner.compare_reports(baseline, warning_current)
+    assert warning["status"] == "WARNING"
+    assert [check for check in warning["checks"] if check["metric"] == "rag.recallAt5"][0]["status"] == "WARNING"
+
+    fail_current = json.loads(json.dumps(baseline))
+    fail_current["injection"]["bypassRate"] = 0.08
+    fail = runner.compare_reports(baseline, fail_current)
+    assert fail["status"] == "FAIL"
+    assert [check for check in fail["checks"] if check["metric"] == "injection.bypassRate"][0]["status"] == "FAIL"
+
+
 def test_build_rag_report_aggregates_cases() -> None:
     rows = [
         {"id": "a", "hit": True, "rank": 1, "keywordCoverage": 1.0, "accurate": True, "latencyMs": 10.0},

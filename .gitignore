@@ -24,6 +24,8 @@
 # Eval harness: generated reports (keep the dir + .gitkeep)
 evals/reports/*
 !evals/reports/.gitkeep
+!evals/reports/latest.json
+!evals/reports/latest.md
 
 .coverage
 .mypy_cache/

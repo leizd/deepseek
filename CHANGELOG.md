@@ -2,6 +2,28 @@
 
 本项目使用类似 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的分组方式维护变更记录。未发布内容记录在 `[Unreleased]`，正式发版时迁移到具体版本。
 
+## [2.2.7] - Eval Reports & Regression Evidence
+
+**主题：评测报告沉淀与回归证据链。** 本版不继续扩大协议面，也不直接把 injection soft gate 升级为 hard gate，而是把 v2.2.6 已接入的 RAG / Tool Policy / Prompt Injection 离线评测整理成统一报告、版本基线和 CI artifact，为 v2.3 的严格门禁与真实互操作验收提供可追踪证据。
+
+### 新增
+
+- **Offline eval suite**：新增 `evals/runners/run_offline_eval_suite.py`，统一运行 RAG、Tool Policy 与 Prompt Injection adversarial eval，并输出机器可读 JSON 与 Markdown 摘要。
+- **Eval report artifacts**：新增 `evals/reports/latest.json` / `latest.md` 报告格式，记录版本、git SHA、数据集大小、阈值、指标与 pass/warning 状态。
+- **Regression baseline compare**：新增 `evals/baselines/v2.2.6.json` 与 `evals/runners/compare_eval_baseline.py`，对比当前评测与上个稳定版本，标记 recall、citation、policy pass rate、bypass rate、false-positive rate 的退化。
+- **Eval reports 文档**：新增 `docs/EVAL_REPORTS.md`，说明如何本地复跑、如何解读指标、如何更新 baseline。
+
+### 更改
+
+- **CI 评测产物化**：CI 在离线 eval job 中生成 JSON / Markdown 报告、执行 baseline compare，并上传为 `offline-eval-report` artifact，便于 PR 审查和版本回溯。
+- **README / evals 文档更新**：补充 latest eval report 入口，把“CI 会跑”升级为“CI 会留下可审查报告与回归比较”。
+- **Implementation Status 同步**：Evaluation Harness 标注为“报告与基线对比已落地”。
+
+### 测试
+
+- 新增 offline eval suite 聚合测试，覆盖 JSON schema、Markdown 输出、soft gate 状态聚合。
+- 新增 baseline compare 测试，覆盖无退化、轻微退化 warning、严重退化 fail 三类路径。
+
 ## [2.2.6] - Eval Gate & Security Hardening
 
 **主题：安全评测门禁与策略可解释性。** 本版不继续扩大协议面，而是把 Context Taint、Tool Policy 和 Injection Eval 从“已有能力”推进到“可量化、可解释、可在 CI 中持续守住”的安全工程闭环。

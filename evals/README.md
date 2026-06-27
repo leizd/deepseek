@@ -1,8 +1,8 @@
 # AI Runtime Evaluation Harness
 
-适用版本：v2.2.6。
+适用版本：v2.2.7。
 
-这套 harness 对 DeepSeek Infra 的核心能力线做**自动化回归评测**（全部可离线执行，无需 API Key）。v2.2.6 CI 必过项包含稳定、无需录制输入的 `run_rag_eval.py` 与 `run_tool_eval.py`；`run_injection_adversarial.py` 输出对抗注入指标并对照版本化阈值做 **soft gate**（未达标只 warning，`--strict` 升级为硬失败）；`run_agent_eval.py` 继续提供离线样例打分，等录制数据完全稳定后再加入必过门禁。
+这套 harness 对 DeepSeek Infra 的核心能力线做**自动化回归评测**（全部可离线执行，无需 API Key）。v2.2.7 CI 通过 `run_offline_eval_suite.py` 统一运行稳定、无需录制输入的 RAG / Tool Policy / Prompt Injection adversarial eval，写出 `evals/reports/latest.json` 与 `latest.md`，再用 `compare_eval_baseline.py` 对照 v2.2.6 baseline 判断退化；`run_agent_eval.py` 继续提供离线样例打分，等录制数据完全稳定后再加入必过门禁。
 
 | 指标族 | 含义 | 由谁产出 |
 | --- | --- | --- |
@@ -29,11 +29,18 @@ evals/
     tool_policy_cases.jsonl         # 安全闸门 / 注入防御标注用例（policy | sanitize | taint）
     injection_adversarial.jsonl     # 对抗注入小语料（中文 / 英文 / Base64 / Markdown hidden / 多轮）
   runners/
+    run_offline_eval_suite.py
+    compare_eval_baseline.py
     run_rag_eval.py
     run_agent_eval.py
     run_tool_eval.py
     run_injection_adversarial.py
-  reports/                          # 生成的 JSON 报告（.gitignore）
+  baselines/
+    v2.2.6.json                      # 版本化回归基线
+  reports/
+    latest.json                      # 统一机器可读报告（入库）
+    latest.md                        # PR 审查摘要（入库）
+    <suite>-<timestamp>.json         # 单项 runner 本地产物（.gitignore）
 ```
 
 评分核心是纯函数库 `deepseek_infra/infra/evaluation/harness.py`（无 I/O、可单测，见
@@ -42,6 +49,13 @@ evals/
 ## 运行
 
 ```bash
+# 统一离线评测套件：运行 RAG / Tool Policy / Prompt Injection adversarial eval，
+# 写出 evals/reports/latest.json 与 latest.md。
+python evals/runners/run_offline_eval_suite.py --out evals/reports/latest.json --markdown evals/reports/latest.md
+
+# 与 v2.2.6 baseline 比较，输出 PASS / WARNING / FAIL。
+python evals/runners/compare_eval_baseline.py --baseline evals/baselines/v2.2.6.json --current evals/reports/latest.json
+
 # RAG 召回 / 引用准确率：把每个 expected_source 文档索引进一个临时本地 RAG 索引
 # （hash embedding + BM25，离线、无需 API Key，不动你真实的 .local-rag），逐题检索打分。
 python evals/runners/run_rag_eval.py
@@ -63,10 +77,11 @@ python evals/runners/run_injection_adversarial.py
 
 CI 口径：
 
-- PR 必跑 `python evals/runners/run_rag_eval.py`，失败时 CI 红。
-- PR 必跑 `python evals/runners/run_tool_eval.py`，覆盖 Tool Policy Pass Rate 与 Prompt Injection Defense Pass Rate，失败时 CI 红。
-- PR 跑 `python evals/runners/run_injection_adversarial.py --no-report`，v2.2.6 起为 soft gate：未达阈值只 warning，不阻断 CI；加 `--strict` 可升级为硬失败（v2.3 路径）。
-- `python evals/runners/run_agent_eval.py` 目前作为离线样例回归，不属于 v2.2.6 必过项。
+- PR 必跑 `python evals/runners/run_offline_eval_suite.py --out evals/reports/latest.json --markdown evals/reports/latest.md`，生成统一 JSON / Markdown 报告。
+- PR 必跑 `python evals/runners/compare_eval_baseline.py --baseline evals/baselines/v2.2.6.json --current evals/reports/latest.json`，无退化为 PASS，轻微退化为 WARNING，严重退化为 FAIL。
+- CI 上传 `offline-eval-report` artifact，包含 `latest.json` 与 `latest.md`。
+- `run_injection_adversarial.py` 保持 v2.2.6 起的 soft gate 语义：未达阈值只 warning；加 `--strict` 可升级为硬失败（v2.3 路径）。
+- `python evals/runners/run_agent_eval.py` 目前作为离线样例回归，不属于 v2.2.7 必过项。
 
 ## 输出示例
 
