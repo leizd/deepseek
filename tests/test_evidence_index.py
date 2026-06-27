@@ -1,0 +1,28 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+
+def test_evidence_index_lists_headless_mcp_bridge() -> None:
+    index = Path("docs/EVIDENCE_INDEX.md").read_text(encoding="utf-8")
+    assert "docs/evidence/headless-mcp-bridge.json" in index
+    assert "scripts/smoke_mcp_headless_bridge.py" in index
+
+
+def test_evidence_index_lists_a2a_external_peer() -> None:
+    index = Path("docs/EVIDENCE_INDEX.md").read_text(encoding="utf-8")
+    assert "docs/evidence/a2a-external-peer.json" in index
+    assert "scripts/smoke_a2a_external_peer.py" in index
+
+
+def test_evidence_index_lists_eval_reports() -> None:
+    index = Path("docs/EVIDENCE_INDEX.md").read_text(encoding="utf-8")
+    assert "evals/reports/latest.json" in index
+    assert "evals/reports/agent-latest.json" in index
+
+
+def test_evidence_index_lists_gui_and_third_party_entries() -> None:
+    index = Path("docs/EVIDENCE_INDEX.md").read_text(encoding="utf-8")
+    assert "Claude Desktop" in index
+    assert "Cursor" in index
+    assert "Third-party A2A ecosystem" in index

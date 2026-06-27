@@ -1,8 +1,8 @@
 # Offline Eval Report
 
-- Version: 2.3.3
-- Git SHA: 1001084 (dirty)
-- Generated: 2026-06-27T10:51:29Z
+- Version: 2.3.4
+- Git SHA: 544df86 (dirty)
+- Generated: 2026-06-27T12:16:27Z
 - Overall: PASS
 
 | Suite | Metric | Value | Status |
@@ -15,12 +15,16 @@
 | Injection | Block Rate | 1.0000 | PASS |
 | Injection | False Positive Rate | 0.0000 | PASS |
 | Injection | Bypass Rate | 0.0000 | PASS |
+| Agent | Tool Call Accuracy | 1.0000 | PASS |
+| Agent | Agent Success Rate | 1.0000 | PASS |
+| Agent | Prompt Regression Pass | 1.0000 | PASS |
 
 ## Dataset Sizes
 
 - RAG: 6 cases
 - Tool Policy: 26 cases
 - Injection adversarial: 30 cases
+- Agent replay: 6 cases
 
 ## Regression Compare
 

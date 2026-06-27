@@ -33,6 +33,9 @@ def test_headless_mcp_bridge_evidence_passes_without_token_leak() -> None:
     assert evidence["transport"]["auth"] == "bearer"
     assert "Authorization" not in str(evidence)
     assert "tools/call:data_transform" in evidence["covers"]
+    assert "commit" in evidence
+    assert "environment" in evidence
+    assert set(evidence["environment"].keys()) == {"os", "python", "ci"}
 
 
 def test_headless_mcp_bridge_evidence_fails_when_a_step_fails() -> None:

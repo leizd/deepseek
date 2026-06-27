@@ -1,6 +1,6 @@
 # DeepSeek Infra
 
-![版本](https://img.shields.io/badge/version-2.3.3-blue)
+![版本](https://img.shields.io/badge/version-2.3.4-blue)
 ![Python](https://img.shields.io/badge/python-3.10%2B-green)
 ![Coverage Gate](https://img.shields.io/badge/coverage%20gate-75%25-brightgreen)
 ![许可证](https://img.shields.io/badge/license-MIT-black)
@@ -190,7 +190,7 @@ curl http://127.0.0.1:8000/v1/models -H "Authorization: Bearer <本地访问 tok
 
 与之配套的**质量评测**在 [evals/](evals/)（全部离线可跑）：`python evals/runners/run_offline_eval_suite.py` 会统一留下 [latest eval report](evals/reports/latest.md)，当前 baseline 为 RAG Recall@5 1.000 / Citation Accuracy 0.8333、26 个固定攻防用例的 **Tool Policy Pass Rate 1.000 / Prompt Injection Defense Pass 1.000**，以及对抗注入小语料的 `block_rate` / `false_positive_rate` / `bypass_rate` 硬门禁（v2.3.0 起 CI 用 `--strict`）；`run_agent_eval.py` 额外生成 [Agent Eval report](evals/reports/agent-latest.md)，对照 [agent-v2.2.8 baseline](evals/baselines/agent-v2.2.8.json) 做 report-only warning。详见 [evals/README.md](evals/README.md)、[docs/EVAL_REPORTS.md](docs/EVAL_REPORTS.md) 与 [docs/AGENT_EVAL.md](docs/AGENT_EVAL.md)。本地安全能力复现最小命令集见 [docs/SECURITY_SMOKE.md](docs/SECURITY_SMOKE.md)。
 
-**发版前一键体检（v2.3.3）**：先 `python scripts/doctor.py --offline` 做运行时体检（Python / 依赖 / .env / 数据目录权限 / static / 端口 / token，PASS / WARNING / FAIL），再 `python scripts/smoke_mcp_headless_bridge.py` 生成无 GUI 的 MCP stdio bridge 证据，并用 `python scripts/smoke_a2a_external_peer.py` 生成 A2A external peer 证据，随后 `python scripts/preflight_release.py --version 2.3.3` 校验版本徽章 / CHANGELOG / Docker tag / 文档与 eval 报告版本同步（headless MCP 与 A2A external evidence 为硬项，GUI interop 与第三方 A2A ecosystem evidence 仍为 WARNING/PASS 分层），最后 `python scripts/smoke_release.py --offline` 一键编排 doctor + offline eval + Agent Eval（`--with-server --base-url ... --token ...` 额外跑 MCP / A2A smoke）。发布产物会同时生成 `.sha256` 与 `.manifest.json` 作为 release evidence。详见 [docs/RUNTIME_DOCTOR.md](docs/RUNTIME_DOCTOR.md) 与 [docs/RELEASE_READINESS.md](docs/RELEASE_READINESS.md)。
+**发版前一键体检（v2.3.4）**：先 `python scripts/doctor.py --offline` 做运行时体检（Python / 依赖 / .env / 数据目录权限 / static / 端口 / token，PASS / WARNING / FAIL），再 `python scripts/smoke_mcp_headless_bridge.py` 生成无 GUI 的 MCP stdio bridge 证据，并用 `python scripts/smoke_a2a_external_peer.py` 生成 A2A external peer 证据，随后 `python scripts/preflight_release.py --version 2.3.4` 校验版本徽章 / CHANGELOG / Docker tag / 文档与 eval 报告版本同步（headless MCP 与 A2A external evidence 为硬项，GUI interop 与第三方 A2A ecosystem evidence 仍为 WARNING/PASS 分层），最后 `python scripts/smoke_release.py --offline` 一键编排 doctor + offline eval + Agent Eval（`--with-server --base-url ... --token ...` 额外跑 MCP / A2A smoke）。发布产物会同时生成 `.sha256` 与 `.manifest.json` 作为 release evidence。详见 [docs/RUNTIME_DOCTOR.md](docs/RUNTIME_DOCTOR.md) 与 [docs/RELEASE_READINESS.md](docs/RELEASE_READINESS.md)。
 
 ## 快速开始
 
@@ -454,6 +454,15 @@ python scripts/release.py --clean-workspace
 - [x] Preflight 分层：`a2a_external_peer_evidence` 缺失或不完整时 FAIL；`a2a_third_party_evidence` 缺失时 WARNING
 - [x] Compatibility matrix 新增 A2A external peer smoke ✅ Tested 行，第三方 A2A ecosystem peer 仍保持 🟡
 
+### v2.3.4: Release Evidence Polish & Encoding Fix
+- [x] 修复 CHANGELOG v2.3.3 顶部乱码（`???` / `??`），恢复为正常中文
+- [x] 新增 `docs/EVIDENCE_INDEX.md`：MCP / A2A / GUI / eval / release evidence 统一索引入口
+- [x] `scripts/preflight_release.py` 新增 `docs_encoding_sanity` 检查，发现文档乱码即 FAIL
+- [x] Evidence JSON 元数据统一：`docs/evidence/*.json`、`evals/reports/*.json` 均包含 `version` / `commit` / `generatedAt` / `environment` / `status`
+- [x] Release manifest 新增 `evidence` 字段，明确列出发布产物包含的证据文件
+- [ ] Claude Desktop / Cursor GUI 实机证据填入（需人工完成 GUI 测试后更新矩阵与 integration docs）
+- [ ] 第三方 A2A 生态实机验证（LangGraph / CrewAI 等真实 peer）
+
 ### v2.4: 评测与安全
 - [ ] Coverage gate 提升到 80%
 - [ ] Agent Eval CI 固化（`run_agent_eval` 在完全离线、稳定录制后加入 CI 必过门禁）
@@ -471,6 +480,7 @@ python scripts/release.py --clean-workspace
 - [docs/FRONTEND_MODULES.md](docs/FRONTEND_MODULES.md) — 前端模块拆分。
 - [docs/APK.md](docs/APK.md) — Android 打包、签名与安装。
 - [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) — MCP / A2A / OpenAI 客户端兼容性矩阵。
+- [docs/EVIDENCE_INDEX.md](docs/EVIDENCE_INDEX.md) — MCP / A2A / GUI / eval / release evidence 总索引。
 - [docs/EDGE_ROUTER_RUNBOOK.md](docs/EDGE_ROUTER_RUNBOOK.md) — Edge Router / Ollama / GGUF 本地验收步骤。
 - [docs/integrations/claude-desktop.md](docs/integrations/claude-desktop.md) / [docs/integrations/cursor.md](docs/integrations/cursor.md) — MCP 客户端配置片段与排障步骤。
 - [evals/README.md](evals/README.md) — 评测 harness；[docs/EVAL_REPORTS.md](docs/EVAL_REPORTS.md) — 离线评测报告与回归基线；[docs/AGENT_EVAL.md](docs/AGENT_EVAL.md) — Agent 录制回放规范；[benchmarks/README.md](benchmarks/README.md) — 基准说明。

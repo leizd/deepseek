@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import platform
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -35,6 +37,22 @@ PROMPT_REGRESSION_WARNING_THRESHOLD = 0.80
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def git_sha(root: Path = REPO_ROOT) -> str:
+    import subprocess
+
+    result = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=root, check=False, capture_output=True, text=True)
+    value = result.stdout.strip()
+    return value if result.returncode == 0 and value else "unknown"
+
+
+def build_environment() -> dict[str, Any]:
+    return {
+        "os": platform.system(),
+        "python": platform.python_version(),
+        "ci": bool(os.environ.get("CI")),
+    }
 
 
 def evaluate(golden: list[dict[str, Any]], predictions: list[dict[str, Any]]) -> harness.EvalReport:
@@ -138,7 +156,9 @@ def build_agent_report(
     payload: dict[str, Any] = {
         "schemaVersion": SCHEMA_VERSION,
         "version": version,
+        "commit": git_sha(),
         "generatedAt": generated_at or utc_now(),
+        "environment": build_environment(),
         "status": "WARNING" if warning_list else "PASS",
         "warnings": warning_list,
         "agent": agent_metrics(report),

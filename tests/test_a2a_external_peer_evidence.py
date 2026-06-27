@@ -40,6 +40,9 @@ def test_a2a_external_evidence_passes_with_all_required_checks() -> None:
     assert evidence["status"] == "PASS"
     assert evidence["checks"] == {name: "pass" for name in smoke.REQUIRED_CHECKS}
     assert evidence["peer"]["type"] == "independent-process"
+    assert "commit" in evidence
+    assert "environment" in evidence
+    assert set(evidence["environment"].keys()) == {"os", "python", "ci"}
 
 
 def test_a2a_external_evidence_fails_when_required_check_is_missing() -> None:

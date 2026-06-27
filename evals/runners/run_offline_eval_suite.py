@@ -7,6 +7,7 @@ import argparse
 import json
 import logging
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -46,6 +47,14 @@ def git_sha(root: Path = REPO_ROOT) -> str:
 def git_dirty(root: Path = REPO_ROOT) -> bool:
     result = subprocess.run(["git", "status", "--short"], cwd=root, check=False, capture_output=True, text=True)
     return bool(result.stdout.strip()) if result.returncode == 0 else False
+
+
+def build_environment() -> dict[str, Any]:
+    return {
+        "os": platform.system(),
+        "python": platform.python_version(),
+        "ci": bool(os.environ.get("CI")),
+    }
 
 
 def run_rag_report(golden_path: Path, docs_root: Path, k: int) -> harness.EvalReport:
@@ -124,9 +133,11 @@ def build_suite_report(
     payload: dict[str, Any] = {
         "schemaVersion": SCHEMA_VERSION,
         "version": version,
+        "commit": sha,
+        "generatedAt": generated_at or utc_now(),
+        "environment": build_environment(),
         "gitSha": sha,
         "gitDirty": dirty,
-        "generatedAt": generated_at or utc_now(),
         "status": status,
         "paths": paths or {},
         "rag": {

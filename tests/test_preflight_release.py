@@ -26,6 +26,10 @@ def _skeleton(tmp_path: Path, version: str, *, release_exclusions: bool = True) 
     (root / "docs" / "AGENT_EVAL.md").write_text("agent eval\n", encoding="utf-8")
     (root / "docs" / "EVAL_REPORTS.md").write_text("eval reports\n", encoding="utf-8")
     (root / "docs" / "SECURITY_SMOKE.md").write_text("security smoke\n", encoding="utf-8")
+    (root / "docs" / "COMPATIBILITY.md").write_text(f"适用版本：v{version}。\n", encoding="utf-8")
+    (root / "docs" / "IMPLEMENTATION_STATUS.md").write_text(f"适用版本：v{version}。\n", encoding="utf-8")
+    (root / "docs" / "RELEASE_READINESS.md").write_text(f"适用版本：v{version}。\n", encoding="utf-8")
+    (root / "docs" / "EVIDENCE_INDEX.md").write_text("evidence index\n", encoding="utf-8")
     (root / "docs" / "integrations").mkdir()
     (root / "docs" / "integrations" / "headless-mcp-client.md").write_text("headless mcp\n", encoding="utf-8")
     (root / "docs" / "integrations" / "a2a-external-peer.md").write_text("a2a external peer\n", encoding="utf-8")
@@ -38,8 +42,30 @@ def _skeleton(tmp_path: Path, version: str, *, release_exclusions: bool = True) 
     (root / "evals" / "README.md").write_text(f"适用版本：v{version}。\n", encoding="utf-8")
     reports = root / "evals" / "reports"
     reports.mkdir()
-    (reports / "latest.json").write_text(json.dumps({"version": version, "status": "PASS"}), encoding="utf-8")
-    (reports / "agent-latest.json").write_text(json.dumps({"version": version, "status": "PASS"}), encoding="utf-8")
+    (reports / "latest.json").write_text(
+        json.dumps(
+            {
+                "version": version,
+                "commit": "abc1234",
+                "generatedAt": "2026-06-27T00:00:00Z",
+                "environment": {"os": "Linux", "python": "3.12", "ci": True},
+                "status": "PASS",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (reports / "agent-latest.json").write_text(
+        json.dumps(
+            {
+                "version": version,
+                "commit": "abc1234",
+                "generatedAt": "2026-06-27T00:00:00Z",
+                "environment": {"os": "Linux", "python": "3.12", "ci": True},
+                "status": "PASS",
+            }
+        ),
+        encoding="utf-8",
+    )
     scripts = root / "scripts"
     scripts.mkdir()
     if release_exclusions:
@@ -49,7 +75,7 @@ def _skeleton(tmp_path: Path, version: str, *, release_exclusions: bool = True) 
     return root
 
 
-def _write_headless_evidence(path: Path, version: str, *, status: str = "PASS", omit_step: str = "") -> None:
+def _write_headless_evidence(path: Path, version: str, *, status: str = "PASS", omit_step: str = "", omit_metadata: str = "") -> None:
     steps = [
         {"name": "bridge.start", "status": "pass"},
         {"name": "mcp.initialize", "status": "pass"},
@@ -59,10 +85,20 @@ def _write_headless_evidence(path: Path, version: str, *, status: str = "PASS", 
     ]
     if omit_step:
         steps = [step for step in steps if step["name"] != omit_step]
-    path.write_text(json.dumps({"version": version, "status": status, "steps": steps}), encoding="utf-8")
+    payload: dict[str, Any] = {
+        "version": version,
+        "commit": "abc1234",
+        "generatedAt": "2026-06-27T00:00:00Z",
+        "environment": {"os": "Linux", "python": "3.12", "ci": True},
+        "status": status,
+        "steps": steps,
+    }
+    if omit_metadata:
+        payload.pop(omit_metadata, None)
+    path.write_text(json.dumps(payload), encoding="utf-8")
 
 
-def _write_a2a_evidence(path: Path, version: str, *, status: str = "PASS", omit_check: str = "", peer_type: str = "independent-process") -> None:
+def _write_a2a_evidence(path: Path, version: str, *, status: str = "PASS", omit_check: str = "", peer_type: str = "independent-process", omit_metadata: str = "") -> None:
     checks = {
         "agentCard": "pass",
         "messageSend": "pass",
@@ -75,17 +111,18 @@ def _write_a2a_evidence(path: Path, version: str, *, status: str = "PASS", omit_
     }
     if omit_check:
         checks.pop(omit_check, None)
-    path.write_text(
-        json.dumps(
-            {
-                "version": version,
-                "status": status,
-                "peer": {"name": "peer", "type": peer_type},
-                "checks": checks,
-            }
-        ),
-        encoding="utf-8",
-    )
+    payload: dict[str, Any] = {
+        "version": version,
+        "commit": "abc1234",
+        "generatedAt": "2026-06-27T00:00:00Z",
+        "environment": {"os": "Linux", "python": "3.12", "ci": True},
+        "status": status,
+        "peer": {"name": "peer", "type": peer_type},
+        "checks": checks,
+    }
+    if omit_metadata:
+        payload.pop(omit_metadata, None)
+    path.write_text(json.dumps(payload), encoding="utf-8")
 
 
 def test_preflight_all_pass(tmp_path: Path) -> None:
@@ -132,7 +169,18 @@ def test_preflight_fails_on_doc_version(tmp_path: Path) -> None:
 def test_preflight_fails_on_eval_report_version(tmp_path: Path) -> None:
     preflight = _load_preflight()
     root = _skeleton(tmp_path, "2.2.9")
-    (root / "evals" / "reports" / "latest.json").write_text(json.dumps({"version": "2.2.8"}), encoding="utf-8")
+    (root / "evals" / "reports" / "latest.json").write_text(
+        json.dumps(
+            {
+                "version": "2.2.8",
+                "commit": "abc1234",
+                "generatedAt": "2026-06-27T00:00:00Z",
+                "environment": {"os": "Linux", "python": "3.12", "ci": True},
+                "status": "PASS",
+            }
+        ),
+        encoding="utf-8",
+    )
     report = next(r for r in preflight.run_preflight(root, "2.2.9") if r.name == "eval_report")
     assert report.status == "fail"
 
@@ -148,7 +196,18 @@ def test_preflight_warns_on_missing_eval_report(tmp_path: Path) -> None:
 def test_preflight_fails_on_agent_report_version(tmp_path: Path) -> None:
     preflight = _load_preflight()
     root = _skeleton(tmp_path, "2.2.9")
-    (root / "evals" / "reports" / "agent-latest.json").write_text(json.dumps({"version": "2.2.8"}), encoding="utf-8")
+    (root / "evals" / "reports" / "agent-latest.json").write_text(
+        json.dumps(
+            {
+                "version": "2.2.8",
+                "commit": "abc1234",
+                "generatedAt": "2026-06-27T00:00:00Z",
+                "environment": {"os": "Linux", "python": "3.12", "ci": True},
+                "status": "PASS",
+            }
+        ),
+        encoding="utf-8",
+    )
     report = next(r for r in preflight.run_preflight(root, "2.2.9") if r.name == "agent_report")
     assert report.status == "fail"
 
@@ -264,3 +323,57 @@ def test_preflight_warns_when_only_one_gui_evidence_filled(tmp_path: Path) -> No
     assert result.status == "warn"
     assert "Cursor" in result.detail
     assert "Claude Desktop" not in result.detail
+
+
+def test_preflight_fails_when_docs_encoding_is_corrupt(tmp_path: Path) -> None:
+    preflight = _load_preflight()
+    root = _skeleton(tmp_path, "2.3.4")
+    (root / "CHANGELOG.md").write_text("## [2.3.3]\n\n**???A2A ?? peer**\n", encoding="utf-8")
+    result = next(r for r in preflight.run_preflight(root, "2.3.4") if r.name == "docs_encoding_sanity")
+    assert result.status == "fail"
+    assert preflight.main(["--root", str(root), "--version", "2.3.4"]) == 1
+
+
+def test_preflight_passes_when_docs_encoding_is_clean(tmp_path: Path) -> None:
+    preflight = _load_preflight()
+    root = _skeleton(tmp_path, "2.3.4")
+    result = next(r for r in preflight.run_preflight(root, "2.3.4") if r.name == "docs_encoding_sanity")
+    assert result.status == "pass"
+
+
+def test_preflight_fails_when_headless_mcp_evidence_missing_metadata(tmp_path: Path) -> None:
+    preflight = _load_preflight()
+    root = _skeleton(tmp_path, "2.3.4")
+    _write_headless_evidence(root / "docs" / "evidence" / "headless-mcp-bridge.json", "2.3.4", omit_metadata="environment")
+    result = next(r for r in preflight.run_preflight(root, "2.3.4") if r.name == "evidence_metadata:headless_mcp_bridge")
+    assert result.status == "fail"
+    assert "environment" in result.detail
+
+
+def test_preflight_fails_when_a2a_external_peer_evidence_missing_metadata(tmp_path: Path) -> None:
+    preflight = _load_preflight()
+    root = _skeleton(tmp_path, "2.3.4")
+    _write_a2a_evidence(root / "docs" / "evidence" / "a2a-external-peer.json", "2.3.4", omit_metadata="commit")
+    result = next(r for r in preflight.run_preflight(root, "2.3.4") if r.name == "evidence_metadata:a2a_external_peer")
+    assert result.status == "fail"
+    assert "commit" in result.detail
+
+
+def test_preflight_fails_when_eval_report_missing_metadata(tmp_path: Path) -> None:
+    preflight = _load_preflight()
+    root = _skeleton(tmp_path, "2.3.4")
+    (root / "evals" / "reports" / "latest.json").write_text(
+        json.dumps({"version": "2.3.4", "status": "PASS"}), encoding="utf-8"
+    )
+    result = next(r for r in preflight.run_preflight(root, "2.3.4") if r.name == "evidence_metadata:eval_report")
+    assert result.status == "fail"
+
+
+def test_preflight_fails_when_agent_report_missing_metadata(tmp_path: Path) -> None:
+    preflight = _load_preflight()
+    root = _skeleton(tmp_path, "2.3.4")
+    (root / "evals" / "reports" / "agent-latest.json").write_text(
+        json.dumps({"version": "2.3.4", "status": "PASS"}), encoding="utf-8"
+    )
+    result = next(r for r in preflight.run_preflight(root, "2.3.4") if r.name == "evidence_metadata:agent_report")
+    assert result.status == "fail"

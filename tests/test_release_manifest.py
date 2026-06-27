@@ -37,6 +37,27 @@ def test_build_manifest_has_required_fields(tmp_path: Path) -> None:
     assert manifest["artifact"] == "deepseek-infra-2.2.9.zip"
     assert manifest["sha256"] == "deadbeef"
     assert manifest["bytes"] == len(b"zip-bytes")
+    assert "evidence" in manifest
+    assert isinstance(manifest["evidence"], list)
+    assert "docs/evidence/headless-mcp-bridge.json" in manifest["evidence"]
+    assert "docs/EVIDENCE_INDEX.md" in manifest["evidence"]
+
+
+def test_build_manifest_uses_custom_evidence_when_provided(tmp_path: Path) -> None:
+    artifact = tmp_path / "deepseek-infra-2.3.4.zip"
+    artifact.write_bytes(b"zip-bytes")
+    manifest = release_manifest.build_manifest(
+        version="2.3.4",
+        commit="abc1234",
+        python_version="3.12",
+        coverage_gate="75%",
+        eval_report="evals/reports/latest.json",
+        agent_report="evals/reports/agent-latest.json",
+        artifact=artifact,
+        sha256="deadbeef",
+        evidence=["docs/evidence/custom.json"],
+    )
+    assert manifest["evidence"] == ["docs/evidence/custom.json"]
 
 
 def test_write_checksum_format(tmp_path: Path) -> None:
@@ -113,6 +134,8 @@ def test_release_script_emits_manifest_and_checksum(tmp_path: Path) -> None:
     recorded = data["sha256"]
     assert release_manifest.verify_checksum(artifact, recorded) is True
     assert checksum.read_text(encoding="utf-8").startswith(recorded)
+    assert "evidence" in data
+    assert "docs/evidence/headless-mcp-bridge.json" in data["evidence"]
 
 
 def test_release_script_dry_run_writes_nothing(tmp_path: Path) -> None:

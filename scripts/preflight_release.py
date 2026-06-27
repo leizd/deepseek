@@ -5,11 +5,11 @@ Checks that the version string is consistent across the README badge,
 CHANGELOG, Dockerfile tag, Implementation Status / evals README headers, that
 the eval / agent reports are current, that the smoke / eval docs exist, that
 ``scripts/release.py`` still excludes runtime caches and logs, that headless MCP
-bridge and A2A external peer evidence are present, and (since v2.3.1) that GUI
-interop evidence for Claude Desktop / Cursor has been recorded in
-``docs/COMPATIBILITY.md``.
+bridge and A2A external peer evidence are present, that key docs do not contain
+encoding corruption (since v2.3.4), and (since v2.3.1) that GUI interop evidence
+for Claude Desktop / Cursor has been recorded in ``docs/COMPATIBILITY.md``.
 
-    python scripts/preflight_release.py --version 2.3.3
+    python scripts/preflight_release.py --version 2.3.4
 
 Exits 1 on any FAIL; WARNINGs do not fail. Version defaults to
 ``settings.app_version``.
@@ -19,11 +19,27 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+# Common mojibake / encoding-corruption signatures that should never ship.
+GARBLED_PATTERNS = (
+    re.compile(r"\?{3,}"),  # three or more question marks (encoding fallback)
+    re.compile(r"锟斤拷"),  # classic GBK/UTF-8 mojibake
+    re.compile(r"\ufffd"),  # Unicode replacement character
+)
+GARBLED_DOC_PATHS = (
+    "CHANGELOG.md",
+    "README.md",
+    "docs/COMPATIBILITY.md",
+    "docs/IMPLEMENTATION_STATUS.md",
+    "docs/RELEASE_READINESS.md",
+    "docs/EVIDENCE_INDEX.md",
+)
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
@@ -74,6 +90,57 @@ def check_doc_version(root: Path, doc_rel: str, version: str) -> CheckResult:
     return CheckResult(f"doc_version:{doc_rel}", STATUS_FAIL, f"{doc_rel} 适用版本 is not v{version} (missing '{needle}')", {"needle": needle})
 
 
+_INLINE_CODE_RE = re.compile(r"`[^`\n]+`")
+_FENCE_RE = re.compile(r"(```|~~~)[^\n]*\n.*?\n\1", re.DOTALL)
+
+
+def _strip_code_spans(text: str) -> str:
+    """Remove inline code and fenced code blocks so literal examples of
+    garbled patterns (e.g. `` `???` ``) inside documentation do not trigger
+    the sanity check.
+    """
+    text = _FENCE_RE.sub("", text)
+    return _INLINE_CODE_RE.sub("", text)
+
+
+def check_docs_encoding_sanity(root: Path) -> CheckResult:
+    """Detect encoding corruption in key human-readable docs.
+
+    Catches the kind of mojibake that appeared in CHANGELOG.md for v2.3.3
+    before it was polished in v2.3.4. Inline code spans and fenced blocks are
+    ignored because they may intentionally document the checked patterns.
+    """
+    findings: list[dict[str, Any]] = []
+    checked_paths: list[str] = []
+    for rel in GARBLED_DOC_PATHS:
+        path = root / rel
+        if not path.is_file():
+            continue
+        checked_paths.append(rel)
+        text = _strip_code_spans(_read(path))
+        for pattern in GARBLED_PATTERNS:
+            for match in pattern.finditer(text):
+                findings.append({"path": rel, "pattern": pattern.pattern, "snippet": text[max(0, match.start() - 20):match.end() + 20]})
+    # Also scan docs/integrations/*.md which are the primary interoperability runbooks.
+    integrations_dir = root / "docs" / "integrations"
+    if integrations_dir.is_dir():
+        checked_paths.append("docs/integrations/*.md")
+        for path in integrations_dir.glob("*.md"):
+            text = _strip_code_spans(_read(path))
+            for pattern in GARBLED_PATTERNS:
+                for match in pattern.finditer(text):
+                    findings.append({"path": f"docs/integrations/{path.name}", "pattern": pattern.pattern, "snippet": text[max(0, match.start() - 20):match.end() + 20]})
+    if findings:
+        paths = sorted({f["path"] for f in findings})
+        return CheckResult(
+            "docs_encoding_sanity",
+            STATUS_FAIL,
+            f"encoding corruption detected in {', '.join(paths)}; fix mojibake before release",
+            {"findings": findings[:10]},
+        )
+    return CheckResult("docs_encoding_sanity", STATUS_PASS, "no encoding corruption in key docs", {"checked": checked_paths})
+
+
 def check_doc_links_exist(root: Path) -> CheckResult:
     missing: list[str] = []
     for rel in (
@@ -98,6 +165,9 @@ def check_eval_report_version(root: Path, version: str) -> CheckResult:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         return CheckResult("eval_report", STATUS_FAIL, f"cannot parse latest.json: {exc}", {"path": str(path)})
+    metadata_fail = _check_evidence_metadata("eval_report", data, path)
+    if metadata_fail:
+        return metadata_fail
     reported = str(data.get("version") or "")
     if reported == version:
         return CheckResult("eval_report", STATUS_PASS, f"latest.json version is {version}", {"version": reported})
@@ -112,6 +182,9 @@ def check_agent_report(root: Path, version: str) -> CheckResult:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         return CheckResult("agent_report", STATUS_FAIL, f"cannot parse agent-latest.json: {exc}", {"path": str(path)})
+    metadata_fail = _check_evidence_metadata("agent_report", data, path)
+    if metadata_fail:
+        return metadata_fail
     reported = str(data.get("version") or "")
     if reported == version:
         return CheckResult("agent_report", STATUS_PASS, f"agent-latest.json version is {version}", {"version": reported})
@@ -140,6 +213,9 @@ def check_headless_mcp_bridge_evidence(root: Path, version: str) -> CheckResult:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         return CheckResult("headless_mcp_bridge_evidence", STATUS_FAIL, f"cannot parse headless MCP bridge evidence: {exc}", {"path": str(path)})
+    metadata_fail = _check_evidence_metadata("headless_mcp_bridge", data, path)
+    if metadata_fail:
+        return metadata_fail
     reported = str(data.get("version") or "")
     if reported != version:
         return CheckResult(
@@ -187,6 +263,9 @@ def check_a2a_external_peer_evidence(root: Path, version: str) -> CheckResult:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         return CheckResult("a2a_external_peer_evidence", STATUS_FAIL, f"cannot parse A2A external peer evidence: {exc}", {"path": str(path)})
+    metadata_fail = _check_evidence_metadata("a2a_external_peer", data, path)
+    if metadata_fail:
+        return metadata_fail
     reported = str(data.get("version") or "")
     if reported != version:
         return CheckResult(
@@ -291,6 +370,31 @@ def check_gui_interop_evidence(root: Path) -> CheckResult:
     )
 
 
+def _check_evidence_metadata(name: str, data: dict[str, Any], path: Path) -> CheckResult | None:
+    """Validate unified evidence metadata fields.
+
+    Returns None if all required fields are present, otherwise a FAIL result.
+    """
+    required = ("version", "commit", "generatedAt", "environment", "status")
+    missing = [key for key in required if not data.get(key)]
+    if missing:
+        return CheckResult(
+            f"evidence_metadata:{name}",
+            STATUS_FAIL,
+            f"{path.name} missing unified metadata fields: {', '.join(missing)}",
+            {"path": str(path), "missing": missing},
+        )
+    env = data.get("environment")
+    if not isinstance(env, dict) or not all(k in env for k in ("os", "python", "ci")):
+        return CheckResult(
+            f"evidence_metadata:{name}",
+            STATUS_FAIL,
+            f"{path.name} environment metadata incomplete (expected os/python/ci)",
+            {"path": str(path), "environment": env},
+        )
+    return None
+
+
 def run_preflight(root: Path, version: str) -> list[CheckResult]:
     return [
         check_readme_badge(root, version),
@@ -298,6 +402,7 @@ def run_preflight(root: Path, version: str) -> list[CheckResult]:
         check_dockerfile_tag(root, version),
         check_doc_version(root, "docs/IMPLEMENTATION_STATUS.md", version),
         check_doc_version(root, "evals/README.md", version),
+        check_docs_encoding_sanity(root),
         check_doc_links_exist(root),
         check_eval_report_version(root, version),
         check_agent_report(root, version),

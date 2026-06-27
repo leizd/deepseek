@@ -37,6 +37,15 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
+DEFAULT_EVIDENCE_PATHS = (
+    "docs/evidence/headless-mcp-bridge.json",
+    "docs/evidence/a2a-external-peer.json",
+    "evals/reports/latest.json",
+    "evals/reports/agent-latest.json",
+    "docs/EVIDENCE_INDEX.md",
+)
+
+
 def build_manifest(
     *,
     version: str,
@@ -48,6 +57,7 @@ def build_manifest(
     agent_report: str,
     artifact: Path,
     sha256: str,
+    evidence: list[str] | None = None,
 ) -> dict[str, Any]:
     return {
         "schemaVersion": SCHEMA_VERSION,
@@ -58,6 +68,7 @@ def build_manifest(
         "coverageGate": coverage_gate,
         "evalReport": eval_report,
         "agentReport": agent_report,
+        "evidence": list(evidence) if evidence is not None else list(DEFAULT_EVIDENCE_PATHS),
         "artifact": artifact.name,
         "sha256": sha256,
         "bytes": artifact.stat().st_size,

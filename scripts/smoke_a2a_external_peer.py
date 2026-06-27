@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import platform
 import socket
 import subprocess
 import sys
@@ -57,6 +58,14 @@ def app_version() -> str:
     from deepseek_infra.core.config import APP_VERSION
 
     return APP_VERSION
+
+
+def build_environment() -> dict[str, Any]:
+    return {
+        "os": platform.system(),
+        "python": platform.python_version(),
+        "ci": bool(os.environ.get("CI")),
+    }
 
 
 def record(steps: list[dict[str, Any]], name: str, status: str, detail: str, data: dict[str, Any] | None = None) -> None:
@@ -322,7 +331,9 @@ def build_evidence(steps: list[dict[str, Any]], *, peer: dict[str, Any], peer_ty
     return {
         "schemaVersion": SCHEMA_VERSION,
         "version": app_version(),
+        "commit": git_value("rev-parse", "--short", "HEAD") or "unknown",
         "generatedAt": utc_now(),
+        "environment": build_environment(),
         "gitSha": git_value("rev-parse", "--short", "HEAD") or "unknown",
         "gitDirty": bool(git_value("status", "--short")),
         "peer": {

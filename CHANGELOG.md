@@ -2,27 +2,50 @@
 
 本项目使用类似 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的分组方式维护变更记录。未发布内容记录在 `[Unreleased]`，正式发版时迁移到具体版本。
 
+## [2.3.4] - Release Evidence Polish & Encoding Fix
+
+**主题：Release Evidence Polish / Encoding Fix。** 本版不继续扩大 MCP / A2A 协议面，而是修复 v2.3.3 文档编码残留，统一 evidence 文件格式，新增互操作证据索引页，并让 preflight 检查文档可读性与证据完整性。属于 v2.3 系列的验收闭环。
+
+### 新增
+
+- **Evidence 索引页**：新增 `docs/EVIDENCE_INDEX.md`，汇总 v2.3.x 以来所有 MCP / A2A / GUI / eval / release evidence，给出文件位置、状态与复现命令，作为项目证据链的统一入口。
+- **文档编码检查**：`scripts/preflight_release.py` 新增 `docs_encoding_sanity` 检查，扫描 CHANGELOG / README / COMPATIBILITY / IMPLEMENTATION_STATUS / RELEASE_READINESS / EVIDENCE_INDEX 与 `docs/integrations/*.md`，发现 `???`、`锟斤拷`、\ufffd 等乱码模式即 FAIL。
+- **Release manifest evidence 清单**：`scripts/release.py` 生成的 `.manifest.json` 新增 `evidence` 字段，明确列出本次发布包含的 evidence 文件。
+
+### 更改
+
+- **修复 CHANGELOG v2.3.3 乱码**：把 v2.3.3 顶部因编码问题变成 `???` / `??` 的主题、分组标题与条目恢复为正常中文。
+- **Evidence JSON 元数据统一**：`docs/evidence/headless-mcp-bridge.json`、`docs/evidence/a2a-external-peer.json`、`evals/reports/latest.json`、`evals/reports/agent-latest.json` 统一包含 `version`、`commit`、`generatedAt`、`environment`、`status` 字段，使 evidence 像真正的 release artifact。
+- **Preflight evidence 元数据检查**：preflight 在检查 evidence 版本与步骤的同时，校验关键 evidence JSON 包含 `commit` / `generatedAt` / `environment` / `status` 字段。
+
+### 测试
+
+- 新增 `tests/test_docs_encoding_sanity.py`，覆盖 CHANGELOG 出现 `???` 时 preflight FAIL、正常中文时 PASS。
+- 新增 `tests/test_evidence_index.py`，覆盖 EVIDENCE_INDEX 缺 Headless MCP bridge 或 A2A external peer 时 FAIL。
+- 新增 `tests/test_release_manifest.py`，覆盖 manifest 缺 `evidence` 列表、evidence JSON 缺 `version` / `commit` / `generatedAt` / `status` 时 FAIL。
+- 更新 `tests/test_preflight_release.py`，覆盖 `docs_encoding_sanity` PASS / FAIL 路径。
+
 ## [2.3.3] - A2A External Peer Compatibility Pack
 
-**???A2A ?? peer ???????** ????? Agent Runtime ?????????????????????????? A2A ???????? demo ??????? external peer smoke???? evidence?preflight ?????????? adapter ???
+**主题：A2A 外部 peer 兼容性证据包。** 本版不扩大 Agent Runtime 功能面，而是把 A2A 互操作从独立进程 demo 推进为可复现的 external peer smoke、结构化 evidence、preflight 分层检查和第三方生态 adapter 路径。
 
-### ??
+### 新增
 
-- **A2A external peer smoke**??? `scripts/smoke_a2a_external_peer.py`????? `examples/a2a_interop_peer.py` ?????? peer???? `--peer-url` ?????? A2A server??? Agent Card?`message/send`?`message/stream`?`tasks/get`?`tasks/cancel`?`tasks/list`?artifact chunks ? SSE final event?
-- **A2A evidence schema**??? `evals/schemas/a2a_external_peer_evidence.schema.json` ? `docs/evidence/a2a-external-peer.json`??? peer metadata?check ???????? PASS/FAIL ????
-- **A2A adapter skeletons**??? `examples/a2a_adapters/langgraph_peer_adapter.py` ? `crewai_peer_adapter.py`??? LangGraph / CrewAI ?? A2A peer ? adapter ???
-- **A2A external peer ??**??? `docs/integrations/a2a-external-peer.md`???????/CI ?? external peer evidence???????? evidence ???????
+- **A2A external peer smoke**：新增 `scripts/smoke_a2a_external_peer.py`，复用 `examples/a2a_interop_peer.py` 启动独立 peer，通过 `--peer-url` 连接外部 A2A server，验证 Agent Card、`message/send`、`message/stream`、`tasks/get`、`tasks/cancel`、`tasks/list`、artifact chunks 与 SSE final event。
+- **A2A evidence schema**：新增 `evals/schemas/a2a_external_peer_evidence.schema.json`，规范 peer metadata、checks 字段与每个 PASS/FAIL 状态。
+- **A2A adapter skeletons**：新增 `examples/a2a_adapters/langgraph_peer_adapter.py` 与 `crewai_peer_adapter.py`，给出 LangGraph / CrewAI 作为 A2A peer 的 adapter 路径。
+- **A2A external peer 文档**：新增 `docs/integrations/a2a-external-peer.md`，说明本地 / CI 环境如何复现 external peer evidence，并解释 evidence 文件字段。
 
-### ??
+### 更改
 
-- **Preflight A2A evidence ??**?`scripts/preflight_release.py` ?? `a2a_external_peer_evidence` ????????? check ? `pass` ? FAIL??? `a2a_third_party_evidence` ???????????? evidence ???? WARNING?
-- **CI release-readiness ??**?CI ? preflight ??? A2A external peer evidence?? v2.3.2 ? headless MCP bridge evidence ????????????
-- **Compatibility matrix ??**??? A2A external peer smoke `? Tested` ???? Third-party A2A ecosystem peer ??? `?? Adapter path documented`?
+- **Preflight A2A evidence 分层**：`scripts/preflight_release.py` 新增 `a2a_external_peer_evidence` 硬检查，关键 check 不 `pass` 则 FAIL；`a2a_third_party_evidence` 继续保持 WARNING，因为真实第三方 evidence 尚未实测。
+- **CI release-readiness 增强**：CI 在 preflight 前同时运行 A2A external peer evidence 与 v2.3.2 的 headless MCP bridge evidence，确保无 GUI 兼容证据可复现。
+- **Compatibility matrix 更新**：新增 A2A external peer smoke `✅ Tested` 行；Third-party A2A ecosystem peer 保持 `🟡 Adapter path documented`。
 
-### ??
+### 测试
 
-- ?? A2A external peer smoke / evidence ????? Agent Card ????`message/send` ? task id?`message/stream` ? final event?artifact chunk ?????`tasks/cancel` ????? evidence ???
-- ?? preflight A2A evidence ????? external evidence ?? FAIL?check ??? FAIL??? third-party evidence ?? WARNING?
+- 新增 A2A external peer smoke / evidence 测试，覆盖 Agent Card 获取、`message/send` 与 task id、`message/stream` 与 final event、artifact chunk 顺序、`tasks/cancel` 与完整 evidence 结构。
+- 新增 preflight A2A evidence 测试，覆盖 external evidence 缺失 FAIL、check 缺失 FAIL、third-party evidence 缺失 WARNING 路径。
 
 ## [2.3.2] - Headless MCP Client Compatibility Pack
 
