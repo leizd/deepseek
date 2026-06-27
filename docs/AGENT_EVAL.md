@@ -1,6 +1,6 @@
 # Agent Eval Replay
 
-适用版本：v2.2.8。
+适用版本：v2.2.9。
 
 Agent Eval 仍然是离线回放：真实多 Agent 运行可以在线生成 prediction，但 CI 只读取已经录制好的 JSONL，与 `evals/golden/agent_tasks.jsonl` 按 `id` join 后评分。v2.2.8 的目标是先稳定录制格式和报告，不把 Agent Success 或 latency 退化升级为 hard gate。
 
@@ -84,3 +84,7 @@ python evals/runners/run_offline_eval_suite.py --include-agent
 ## Baseline
 
 `evals/baselines/agent-v2.2.8.json` 是当前 Agent replay baseline。2.2.8 中 baseline compare 只输出 `PASS` / `WARNING`，不阻断 CI。只有当录制格式、样本和 normalizer 稳定到足以承受真实输出波动后，才应在 v2.4 之类的后续版本把 Agent Eval 升级为 hard gate。
+
+## v2.2.9
+
+v2.2.9 是 v2.2.x 收官版，主题是发布前体检与运行时诊断，**不改变 Agent Eval 的录制格式、normalizer 或 report-only 语义**。`agent-latest.json` 仍是 report-only artifact，baseline 仍是 `agent-v2.2.8.json`。发版前用 `python scripts/preflight_release.py --version 2.2.9` 校验 `agent-latest.json` 可解析且版本同步；用 `python scripts/smoke_release.py --offline` 一键跑 doctor + offline eval + Agent Eval。详见 [docs/RELEASE_READINESS.md](RELEASE_READINESS.md)。

@@ -2,6 +2,33 @@
 
 本项目使用类似 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的分组方式维护变更记录。未发布内容记录在 `[Unreleased]`，正式发版时迁移到具体版本。
 
+## [2.2.9] - Release Readiness & Runtime Doctor
+
+**主题：发布前体检与运行时诊断。** 本版作为 v2.2.x 收官，不继续扩大协议面或评测面，而是把环境检查、版本一致性、发布产物证明和一键 smoke 编排补齐，为 v2.3 的真实互操作验证提供稳定交付底座。
+
+### 新增
+
+- **Runtime Doctor**：新增 `scripts/doctor.py` 与 `docs/RUNTIME_DOCTOR.md`，检查 Python / 依赖 / .env / 数据目录权限 / static 目录 / 端口 / healthz / readyz / metrics，并以 PASS / WARNING / FAIL 输出；核心检查在 `deepseek_infra/infra/diagnostics/runtime_doctor.py`，离线模式不要求 API Key、不访问公网。
+- **Release Preflight**：新增 `scripts/preflight_release.py`，发版前检查 README 徽章、CHANGELOG、Docker tag、Implementation Status / evals README 适用版本、eval / agent 报告版本、smoke / eval 文档链接与 release 排除规则是否同步。
+- **Release manifest & checksum**：`scripts/release.py` 发布产物新增 `dist/deepseek-infra-<version>.zip.sha256` 与 `.manifest.json`，记录版本、commit、构建时间、Python、coverage gate、eval / agent 报告、artifact 与 sha256；核心在 `deepseek_infra/infra/diagnostics/release_manifest.py`。
+- **Release smoke suite**：新增 `scripts/smoke_release.py`，统一编排 doctor、offline eval suite、Agent Eval 与（`--with-server` 时）MCP / A2A smoke，离线与带服务两种模式。
+- **发版文档**：新增 `docs/RUNTIME_DOCTOR.md` 与 `docs/RELEASE_READINESS.md`。
+
+### 更改
+
+- **CI release-readiness job**：`.github/workflows/ci.yml` 新增 release readiness 检查，确保版本同步（`preflight_release.py --version 2.2.9`）、doctor offline 通过、release dry-run 可执行。
+- **部署文档增强**：`docs/DEPLOYMENT.md` 与 `docs/RUNTIME_DOCTOR.md` 补充常见启动失败排查（端口占用、数据目录不可写、token 缺失、static 路径错误、Docker volume 权限）。
+- **README 收口**：新增「发版前一键体检」入口与 v2.2.9 Roadmap，明确 v2.2.9 是进入 v2.3 前的 runtime readiness 版本。
+- **版本同步**：README 徽章、config `app_version`、Dockerfile tag、Android `versionName` / `versionCode`、各文档「适用版本」与 eval / agent 报告统一到 2.2.9。
+
+### 测试
+
+- 新增 Runtime Doctor 单元测试，覆盖 Python 版本、依赖缺失、.env / API Key 缺失、目录不可写、端口占用、static 缺失、token 脱敏、offline 跳过健康探针与 with-server 探活。
+- 新增 Release Preflight 测试，覆盖版本号不同步、缺失 CHANGELOG 条目、Docker tag / 文档版本不一致、eval / agent 报告版本不一致或不可解析、release 排除规则缺失与 all-pass 路径。
+- 新增 manifest / checksum 测试，确保 sha256 匹配、manifest 字段完整、`scripts/release.py` 产出三件套且 `--dry-run` 不写产物。
+- 新增 smoke_release 测试，覆盖 offline / with-server 阶段编排、skip 标志、默认 offline 与 `--json` 计划输出。
+- 新增 `test_v229_release_readiness_is_present` 版本回归测试，锁定新文件、版本同步与 CI job 存在。
+
 ## [2.2.8] - Agent Eval Replay & Stability
 
 **主题：Agent Eval 录制回放稳定化。** 本版不把 Agent Eval 直接升级为 CI 硬门禁，而是先补齐稳定录制格式、非确定字段归一化、report-only 报告和 baseline 对比，为 v2.4 的 Agent Eval CI 固化做准备。

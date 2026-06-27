@@ -1,6 +1,6 @@
 # Eval Reports
 
-适用版本：v2.2.8。
+适用版本：v2.2.9。
 
 v2.2.7 把 RAG、Tool Policy 和 Prompt Injection adversarial eval 从分散 CLI 输出升级为一份可归档、可比较、可上传到 CI artifact 的离线评测报告。v2.2.8 在这个证据链旁边补齐 Agent Eval 的稳定录制回放：`agent-latest.json` / `agent-latest.md` 作为 report-only artifact 输出，和 `agent-v2.2.8` baseline 做 warning 级对比。目标仍然不是扩大硬门禁面，而是让每次 PR 都能看到当前分数、版本信息、数据集规模、阈值和退化判断。
 
@@ -88,3 +88,7 @@ Agent baseline 当前只做 report-only warning：
 4. 更新 CI 的 `--baseline` 参数和本文档中的 baseline 版本。
 
 不要把带时间戳的 `evals/reports/<suite>-*.json` 提交进仓库；它们仍是本地产物。仓库只跟踪 `latest.json` / `latest.md`、`agent-latest.json` / `agent-latest.md` 和版本化 baseline。
+
+## v2.2.9
+
+v2.2.9 不扩大评测面，而是把发布侧的 evidence 补齐：`scripts/preflight_release.py --version 2.2.9` 会校验 `latest.json` 与 `agent-latest.json` 的 `version` 字段是当前版本；`scripts/smoke_release.py --offline` 一键编排 doctor + offline eval suite + Agent Eval；发布产物额外生成 `.sha256` 与 `.manifest.json`（其中 `evalReport` / `agentReport` 指向这两份报告）。eval evidence + release evidence 一起构成可归档、可校验的交付证据。详见 [docs/RELEASE_READINESS.md](RELEASE_READINESS.md)。
