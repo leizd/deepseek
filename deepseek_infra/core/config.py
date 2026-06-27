@@ -401,7 +401,7 @@ class ContextTaintSettings:
 @dataclass(frozen=True, slots=True)
 class Settings:
     root: Path = ROOT
-    app_version: str = "2.3.1"
+    app_version: str = "2.3.2"
     deepseek_url: str = "https://api.deepseek.com/chat/completions"
     tavily_url: str = "https://api.tavily.com/search"
     deepseek_timeout_seconds: int = 180
@@ -470,7 +470,6 @@ class Settings:
     mcp: MCPSettings = field(default_factory=MCPSettings)
     a2a: A2ASettings = field(default_factory=A2ASettings)
     context_taint: ContextTaintSettings = field(default_factory=ContextTaintSettings)
-
     @property
     def static_dir(self) -> Path:
         return _bundled_static_dir()
@@ -1169,7 +1168,3 @@ def configure_logging(level: int = logging.INFO) -> None:
     handler.setFormatter(JsonLogFormatter())
     root_logger.addHandler(handler)
     root_logger.setLevel(level)
-
-
-
-

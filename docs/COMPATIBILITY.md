@@ -1,6 +1,6 @@
-﻿# Compatibility Matrix（兼容性矩阵）
+# Compatibility Matrix（兼容性矩阵）
 
-适用版本：v2.3.1。
+适用版本：v2.3.2。
 
 这页只记录已经可复现的互操作结果，不把“协议上应该兼容”写成“实机已验证”。v2.3.0 的重点是把 v2.2.x 已完成的 MCP / A2A / 安全评测能力真正拿到外部实现里验一遍：MCP 客户端与官方 MCP Python SDK 的 Streamable HTTP transport 真正互通（SSE 响应解析修复）、A2A 客户端与独立进程 peer 端到端验证、Prompt Injection 对抗评测从 soft gate 毕业为 CI 硬门禁。Claude Desktop / Cursor 的 GUI 实机验证 runbook 已落地，待人工完成 GUI 测试后填入证据。
 
@@ -55,6 +55,7 @@ python scripts/smoke_mcp_compat.py --token <local-token> --external-server-url h
 | --- | --- | --- | --- |
 | `examples/mcp_tool_demo.py` | ✅ Tested | `python examples/mcp_tool_demo.py` | 本地 Python MCP client，覆盖 `initialize` / `tools/list` / `tools/call`。 |
 | MCP local smoke runner | ✅ Runner added | `python scripts/smoke_mcp_compat.py` | 覆盖本地 health、握手、目录、工具执行、policy gate 和外部 health API。 |
+| Headless MCP bridge | ✅ Tested | `python scripts/smoke_mcp_headless_bridge.py` + [integrations/headless-mcp-client.md](integrations/headless-mcp-client.md) | 无 GUI 环境下验证 stdio bridge → Streamable HTTP、`tools/list`、`data_transform` 调用与 `fetch_url` policy denial。 |
 | MCP test suite (`tests/test_mcp.py`) | ✅ Tested | CI + local pytest | 覆盖握手、目录、能力切片、工具执行、错误码、loopback client、外部 server profile、policy gate、结果清洗、trace diagnostics。 |
 | `curl` JSON-RPC | ✅ Tested | `POST /mcp` | 适合排查 token、协议响应和工具目录。 |
 | Claude Desktop | 🟡 Config documented + smoke entry ready | [integrations/claude-desktop.md](integrations/claude-desktop.md) + `scripts/smoke_mcp_compat.py` | 本机未安装 Claude Desktop，未标为 GUI 实机通过。先用 smoke 验 DeepSeek Infra 端，再接 GUI。 |

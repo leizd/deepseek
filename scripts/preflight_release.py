@@ -4,11 +4,11 @@
 Checks that the version string is consistent across the README badge,
 CHANGELOG, Dockerfile tag, Implementation Status / evals README headers, that
 the eval / agent reports are current, that the smoke / eval docs exist, that
-``scripts/release.py`` still excludes runtime caches and logs, and (since
-v2.3.1) that GUI interop evidence for Claude Desktop / Cursor has been recorded
-in ``docs/COMPATIBILITY.md``.
+``scripts/release.py`` still excludes runtime caches and logs, that headless MCP
+bridge evidence is present, and (since v2.3.1) that GUI interop evidence for
+Claude Desktop / Cursor has been recorded in ``docs/COMPATIBILITY.md``.
 
-    python scripts/preflight_release.py --version 2.3.1
+    python scripts/preflight_release.py --version 2.3.2
 
 Exits 1 on any FAIL; WARNINGs do not fail. Version defaults to
 ``settings.app_version``.
@@ -75,12 +75,12 @@ def check_doc_version(root: Path, doc_rel: str, version: str) -> CheckResult:
 
 def check_doc_links_exist(root: Path) -> CheckResult:
     missing: list[str] = []
-    for rel in ("docs/AGENT_EVAL.md", "docs/EVAL_REPORTS.md", "docs/SECURITY_SMOKE.md"):
+    for rel in ("docs/AGENT_EVAL.md", "docs/EVAL_REPORTS.md", "docs/SECURITY_SMOKE.md", "docs/integrations/headless-mcp-client.md"):
         if not (root / rel).is_file():
             missing.append(rel)
     if missing:
         return CheckResult("doc_links", STATUS_FAIL, f"missing docs: {', '.join(missing)}", {"missing": missing})
-    return CheckResult("doc_links", STATUS_PASS, "AGENT_EVAL / EVAL_REPORTS / SECURITY_SMOKE docs present", {})
+    return CheckResult("doc_links", STATUS_PASS, "AGENT_EVAL / EVAL_REPORTS / SECURITY_SMOKE / headless MCP docs present", {})
 
 
 def check_eval_report_version(root: Path, version: str) -> CheckResult:
@@ -118,6 +118,53 @@ def check_release_exclusions(root: Path) -> CheckResult:
     if missing:
         return CheckResult("release_exclusions", STATUS_FAIL, f"release.py no longer excludes: {', '.join(missing)}", {"missing": missing})
     return CheckResult("release_exclusions", STATUS_PASS, "release.py excludes runtime caches, secrets and logs", {"checked": list(required)})
+
+
+def check_headless_mcp_bridge_evidence(root: Path, version: str) -> CheckResult:
+    path = root / "docs" / "evidence" / "headless-mcp-bridge.json"
+    if not path.is_file():
+        return CheckResult(
+            "headless_mcp_bridge_evidence",
+            STATUS_FAIL,
+            "headless MCP bridge evidence missing; run scripts/smoke_mcp_headless_bridge.py",
+            {"path": str(path)},
+        )
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return CheckResult("headless_mcp_bridge_evidence", STATUS_FAIL, f"cannot parse headless MCP bridge evidence: {exc}", {"path": str(path)})
+    reported = str(data.get("version") or "")
+    if reported != version:
+        return CheckResult(
+            "headless_mcp_bridge_evidence",
+            STATUS_FAIL,
+            f"headless MCP bridge evidence version is {reported!r}, expected {version!r}",
+            {"version": reported, "expected": version},
+        )
+    if data.get("status") != "PASS":
+        return CheckResult(
+            "headless_mcp_bridge_evidence",
+            STATUS_FAIL,
+            f"headless MCP bridge evidence status is {data.get('status')!r}, expected PASS",
+            {"status": data.get("status")},
+        )
+    steps = data.get("steps")
+    step_status = {str(step.get("name")): str(step.get("status")) for step in steps if isinstance(step, dict)} if isinstance(steps, list) else {}
+    required = ("bridge.start", "mcp.initialize", "mcp.tools_list", "mcp.tools_call", "mcp.policy_denial")
+    missing_or_failed = [name for name in required if step_status.get(name) != "pass"]
+    if missing_or_failed:
+        return CheckResult(
+            "headless_mcp_bridge_evidence",
+            STATUS_FAIL,
+            f"headless MCP bridge evidence missing PASS steps: {', '.join(missing_or_failed)}",
+            {"missingOrFailed": missing_or_failed},
+        )
+    return CheckResult(
+        "headless_mcp_bridge_evidence",
+        STATUS_PASS,
+        "headless MCP stdio bridge evidence recorded",
+        {"path": str(path), "steps": list(required)},
+    )
 
 
 def check_gui_interop_evidence(root: Path) -> CheckResult:
@@ -166,6 +213,7 @@ def run_preflight(root: Path, version: str) -> list[CheckResult]:
         check_eval_report_version(root, version),
         check_agent_report(root, version),
         check_release_exclusions(root),
+        check_headless_mcp_bridge_evidence(root, version),
         check_gui_interop_evidence(root),
     ]
 

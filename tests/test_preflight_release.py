@@ -26,6 +26,11 @@ def _skeleton(tmp_path: Path, version: str, *, release_exclusions: bool = True) 
     (root / "docs" / "AGENT_EVAL.md").write_text("agent eval\n", encoding="utf-8")
     (root / "docs" / "EVAL_REPORTS.md").write_text("eval reports\n", encoding="utf-8")
     (root / "docs" / "SECURITY_SMOKE.md").write_text("security smoke\n", encoding="utf-8")
+    (root / "docs" / "integrations").mkdir()
+    (root / "docs" / "integrations" / "headless-mcp-client.md").write_text("headless mcp\n", encoding="utf-8")
+    evidence_dir = root / "docs" / "evidence"
+    evidence_dir.mkdir()
+    _write_headless_evidence(evidence_dir / "headless-mcp-bridge.json", version)
     (root / "evals").mkdir()
     (root / "evals" / "README.md").write_text(f"适用版本：v{version}。\n", encoding="utf-8")
     reports = root / "evals" / "reports"
@@ -39,6 +44,19 @@ def _skeleton(tmp_path: Path, version: str, *, release_exclusions: bool = True) 
     else:
         (scripts / "release.py").write_text("print('no exclusions here')\n", encoding="utf-8")
     return root
+
+
+def _write_headless_evidence(path: Path, version: str, *, status: str = "PASS", omit_step: str = "") -> None:
+    steps = [
+        {"name": "bridge.start", "status": "pass"},
+        {"name": "mcp.initialize", "status": "pass"},
+        {"name": "mcp.tools_list", "status": "pass"},
+        {"name": "mcp.tools_call", "status": "pass"},
+        {"name": "mcp.policy_denial", "status": "pass"},
+    ]
+    if omit_step:
+        steps = [step for step in steps if step["name"] != omit_step]
+    path.write_text(json.dumps({"version": version, "status": status, "steps": steps}), encoding="utf-8")
 
 
 def test_preflight_all_pass(tmp_path: Path) -> None:
@@ -127,6 +145,24 @@ def test_preflight_fails_on_missing_docs(tmp_path: Path) -> None:
     (root / "docs" / "AGENT_EVAL.md").unlink()
     links = next(r for r in preflight.run_preflight(root, "2.2.9") if r.name == "doc_links")
     assert links.status == "fail"
+
+
+def test_preflight_fails_on_missing_headless_mcp_evidence(tmp_path: Path) -> None:
+    preflight = _load_preflight()
+    root = _skeleton(tmp_path, "2.3.2")
+    (root / "docs" / "evidence" / "headless-mcp-bridge.json").unlink()
+    result = next(r for r in preflight.run_preflight(root, "2.3.2") if r.name == "headless_mcp_bridge_evidence")
+    assert result.status == "fail"
+    assert preflight.main(["--root", str(root), "--version", "2.3.2"]) == 1
+
+
+def test_preflight_fails_on_incomplete_headless_mcp_evidence(tmp_path: Path) -> None:
+    preflight = _load_preflight()
+    root = _skeleton(tmp_path, "2.3.2")
+    _write_headless_evidence(root / "docs" / "evidence" / "headless-mcp-bridge.json", "2.3.2", omit_step="mcp.policy_denial")
+    result = next(r for r in preflight.run_preflight(root, "2.3.2") if r.name == "headless_mcp_bridge_evidence")
+    assert result.status == "fail"
+    assert "mcp.policy_denial" in result.detail
 
 
 def _skeleton_with_compat(tmp_path: Path, version: str, *, claude_status: str, cursor_status: str) -> Path:

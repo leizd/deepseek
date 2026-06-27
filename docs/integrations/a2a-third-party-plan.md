@@ -1,6 +1,6 @@
 # A2A Third-Party Ecosystem — Verification Plan
 
-适用版本：DeepSeek Infra v2.3.1。
+适用版本：DeepSeek Infra v2.3.2。
 
 本页说明 DeepSeek Infra 验证真实第三方生态 A2A 实现的下一步计划。v2.3.0 已完成独立进程 A2A peer 互操作验证（见 [a2a-interop.md](a2a-interop.md)），但那不是第三方生态实现。兼容矩阵中 "Third-party A2A implementation" 仍标为 🟡，本页记录验证路径，不强行标 ✅。
 

@@ -2,6 +2,29 @@
 
 本项目使用类似 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的分组方式维护变更记录。未发布内容记录在 `[Unreleased]`，正式发版时迁移到具体版本。
 
+## [2.3.2] - Headless MCP Client Compatibility Pack
+
+**主题：无头 MCP 客户端兼容性证据包。** 本版不把 Claude Desktop / Cursor 未实机强行标 ✅，而是补齐无 GUI 环境下可自动复现的 MCP 客户端兼容性证据：stdio bridge、配置生成、headless smoke 和 preflight 硬证据。
+
+### 新增
+
+- **Headless MCP bridge smoke**：新增 `scripts/smoke_mcp_headless_bridge.py`，启动本地 DeepSeek Infra，经内置 stdio → Streamable HTTP bridge 跑 `initialize`、`tools/list`、`data_transform` 工具调用和 `fetch_url` SSRF policy denial，并输出 `docs/evidence/headless-mcp-bridge.json`。
+- **MCP client config generator**：新增 `scripts/generate_mcp_client_config.py`，生成 Claude Desktop direct HTTP、Claude Desktop stdio bridge（`mcp-remote`）和 Cursor `.cursor/mcp.json` 配置。
+- **Headless MCP client 文档**：新增 `docs/integrations/headless-mcp-client.md`，说明 CI / server / 未安装 GUI 客户端环境下如何验证 stdio bridge + tools/list + tools/call + policy denial。
+- **Preflight headless evidence**：`scripts/preflight_release.py` 新增 `headless_mcp_bridge_evidence` 检查，缺失或步骤不完整时 FAIL。
+
+### 更改
+
+- **Release readiness 分层**：headless MCP bridge evidence 成为最低交付硬证据；Claude Desktop / Cursor GUI evidence 继续保持 WARNING/PASS，不阻断无 GUI 发版。
+- **Compatibility matrix 更新**：新增 Headless MCP bridge `✅ Tested` 行；Claude Desktop / Cursor 仍保持 `🟡 Config documented + smoke entry ready`。
+- **CI release-readiness 增强**：CI 在 preflight 前运行 headless MCP bridge smoke，确保无 GUI 兼容证据可在干净 runner 上复现。
+
+### 测试
+
+- 新增 MCP client config generator 测试，覆盖 auth disabled、Bearer header、Claude stdio bridge 与 Cursor stdio bridge 拒绝路径。
+- 新增 headless MCP bridge evidence 测试，覆盖 PASS/FAIL 状态和 token 不进入 evidence。
+- 新增 preflight headless MCP evidence 测试，覆盖 evidence 缺失与关键步骤缺失时 FAIL。
+
 ## [2.3.1] - GUI Interop Evidence Patch
 
 **主题：协议互操作证据补丁。** 本版不开新功能，只做小版本收口：修正文档残留、把 GUI 实机证据纳入发版前体检、明确第三方 A2A 验证下一步。

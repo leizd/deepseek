@@ -34,7 +34,7 @@ from deepseek_infra.core.config import (
 
 class ConfigTests(unittest.TestCase):
     def test_nested_settings_back_compat_constants_match(self) -> None:
-        self.assertEqual(settings.app_version, "2.3.1")
+        self.assertEqual(settings.app_version, "2.3.2")
         self.assertEqual(settings.default_host, "127.0.0.1")
         self.assertEqual(DEFAULT_HOST, settings.default_host)
         self.assertEqual(MULTI_AGENT_TIMEOUT_SECONDS, settings.multi_agent_timeout_seconds)
@@ -268,7 +268,6 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(loaded.agent_models["coder"], "deepseek-v4-pro")
         self.assertEqual(loaded.agent_models["researcher"], "deepseek-v4-pro")
         self.assertEqual(loaded.agent_models["reasoner"], "deepseek-v4-pro")
-
     def test_auth_token_persists_across_settings_loads(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, patch.dict("os.environ", {}, clear=True):
             root = Path(tmp)
@@ -306,4 +305,3 @@ class ConfigTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
