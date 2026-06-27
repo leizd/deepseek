@@ -25,17 +25,22 @@ from deepseek_infra.infra.agent_runtime.a2a import A2AClient
 
 
 def _text_part(event: dict[str, Any]) -> str:
-    artifact = event.get("artifact") if isinstance(event.get("artifact"), dict) else {}
-    parts = artifact.get("parts") if isinstance(artifact.get("parts"), list) else []
+    artifact_value = event.get("artifact")
+    artifact: dict[str, Any] = artifact_value if isinstance(artifact_value, dict) else {}
+    parts_value = artifact.get("parts")
+    parts: list[Any] = parts_value if isinstance(parts_value, list) else []
     texts = [str(part.get("text") or "") for part in parts if isinstance(part, dict)]
     return "".join(texts)
 
 
 def _print_event(event: dict[str, Any]) -> None:
-    result = event.get("result") if isinstance(event.get("result"), dict) else {}
+    result_value = event.get("result")
+    result: dict[str, Any] = result_value if isinstance(result_value, dict) else {}
     kind = str(result.get("kind") or "")
     if kind == "task":
-        print(f"task {result.get('id')} state={((result.get('status') or {}).get('state') or '')}")
+        status_value = result.get("status")
+        status: dict[str, Any] = status_value if isinstance(status_value, dict) else {}
+        print(f"task {result.get('id')} state={status.get('state') or ''}")
         return
     if kind == "artifact-update":
         print(
@@ -48,7 +53,8 @@ def _print_event(event: dict[str, Any]) -> None:
         )
         return
     if kind == "status-update":
-        status = result.get("status") if isinstance(result.get("status"), dict) else {}
+        status_value = result.get("status")
+        status = status_value if isinstance(status_value, dict) else {}
         print(f"status state={status.get('state')} final={result.get('final')}")
         return
     print(json.dumps(event, ensure_ascii=False))

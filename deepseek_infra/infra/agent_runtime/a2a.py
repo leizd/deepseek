@@ -317,7 +317,8 @@ def _append_artifact_chunk(
 
 
 def _artifact_update_from_chunk(task: dict[str, Any], chunk: dict[str, Any]) -> dict[str, Any]:
-    artifact = chunk.get("artifact") if isinstance(chunk.get("artifact"), dict) else {}
+    artifact_value = chunk.get("artifact")
+    artifact: dict[str, Any] = artifact_value if isinstance(artifact_value, dict) else {}
     return {
         "taskId": str(task.get("id") or chunk.get("taskId") or ""),
         "contextId": task.get("contextId") or chunk.get("contextId"),
@@ -634,7 +635,8 @@ def _chunk_index(value: Any) -> int:
 
 
 def _task_chunks_after(task: dict[str, Any], after_chunk_index: int) -> list[dict[str, Any]]:
-    chunks = task.get("artifactChunks") if isinstance(task.get("artifactChunks"), list) else []
+    chunks_value = task.get("artifactChunks")
+    chunks: list[Any] = chunks_value if isinstance(chunks_value, list) else []
     result = []
     for chunk in chunks:
         if isinstance(chunk, dict) and _chunk_index(chunk.get("chunkIndex")) > after_chunk_index:
