@@ -9,7 +9,7 @@ bridge and A2A external peer evidence are present, that key docs do not contain
 encoding corruption (since v2.3.4), and (since v2.3.1) that GUI interop evidence
 for Claude Desktop / Cursor has been recorded in ``docs/COMPATIBILITY.md``.
 
-    python scripts/preflight_release.py --version 2.4.1
+    python scripts/preflight_release.py --version 2.4.2
 
 Exits 1 on any FAIL; WARNINGs do not fail. Version defaults to
 ``settings.app_version``.

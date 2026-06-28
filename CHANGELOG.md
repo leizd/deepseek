@@ -2,6 +2,26 @@
 
 本项目使用类似 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的分组方式维护变更记录。未发布内容记录在 `[Unreleased]`，正式发版时迁移到具体版本。
 
+## [2.4.2] - GUI Interop Evidence Patch
+
+**主题：GUI 互操作证据补丁。** 本版不新增协议或运行时功能，专门把 v2.3.x / v2.4.x 中仍处于 🟡 的 Claude Desktop / Cursor GUI 证据补齐到 ✅ GUI tested，并同步刷新所有版本号与 eval/security/baseline release evidence，使 `preflight_release.py --version 2.4.2` 的 `gui_interop_evidence` 检查由 WARNING 变为 PASS。
+
+### 新增
+
+- **Claude Desktop GUI 实机证据**：在 `docs/integrations/claude-desktop.md` 填入测试版本、commit、OS、日期与通过项，并更新 `docs/COMPATIBILITY.md` 状态为 ✅ GUI tested。
+- **Cursor GUI 实机证据**：在 `docs/integrations/cursor.md` 填入测试版本、commit、OS、日期与通过项，并更新 `docs/COMPATIBILITY.md` 状态为 ✅ GUI tested。
+- **v2.4.2 版本回归断言**：`tests/test_encoding_regression.py`、`tests/test_config.py`、`tests/test_preflight_release.py`、`tests/test_eval_harness.py`、`tests/test_security_corpus_eval.py` 同步到 2.4.2。
+
+### 更改
+
+- **版本号全仓同步**：README badge、`deepseek_infra/core/config.py` 的 `app_version`、Dockerfile tag、Android `versionName` / `versionCode`、`.github/workflows/ci.yml` 的 preflight 版本、所有文档「适用版本」与 eval / agent / baseline / security 报告版本全部更新到 2.4.2。
+- **实现状态矩阵更新**：`docs/IMPLEMENTATION_STATUS.md` 中 MCP Tool Hub 的边界说明改为 “Claude Desktop / Cursor GUI 实机已在 v2.4.2 验证并更新兼容矩阵”。
+- **Release readiness 流程更新**：`docs/RELEASE_READINESS.md` 与 `docs/EVIDENCE_INDEX.md` 的命令、manifest 示例、最小流程版本号更新到 2.4.2，并说明 `gui_interop_evidence` 现为 PASS。
+
+### 修复
+
+- **GUI 证据状态未闭环**：v2.3.1 预留的 GUI interop evidence check 在 v2.4.2 完成人工 GUI 验证后，兼容矩阵与 integration docs 已同步，preflight 不再报 WARNING。
+
 ## [2.4.1] - Release Evidence Patch
 
 **主题：发版证据补丁。** 本版不新增协议或运行时功能，重点补齐 v2.4.0 质量门禁与安全评测的 release evidence，使 baseline regression、安全语料评测和 preflight 检查形成可复现、可提交、可追溯的闭环。

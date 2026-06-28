@@ -1,6 +1,6 @@
 ﻿# A2A Third-Party Ecosystem — Verification Plan
 
-适用版本：DeepSeek Infra v2.4.1。
+适用版本：DeepSeek Infra v2.4.2。
 
 本页说明 DeepSeek Infra 验证真实第三方生态 A2A 实现的下一步计划。v2.3.0 已完成独立进程 A2A peer 互操作验证（见 [a2a-interop.md](a2a-interop.md)）；v2.3.3 新增 external peer smoke runner（见 [a2a-external-peer.md](a2a-external-peer.md)），可以对任意外部 peer 生成结构化 evidence。但这仍不等同于真实第三方生态实机验证，兼容矩阵中 "Third-party A2A ecosystem peer" 在完成实测前继续保持 🟡。
 
@@ -11,7 +11,7 @@
 | 本地 A2A contract | ✅ Tested | `tests/test_a2a_compat_contract.py` |
 | A2A live smoke | ✅ Tested | `scripts/smoke_a2a_compat.py` |
 | 独立进程 A2A peer interop | ✅ Tested (v2.3.0) | [a2a-interop.md](a2a-interop.md) + `examples/a2a_interop_peer.py` |
-| A2A external peer smoke | ✅ Tested (v2.4.1) | `scripts/smoke_a2a_external_peer.py` + `docs/evidence/a2a-external-peer.json` |
+| A2A external peer smoke | ✅ Tested (v2.4.2) | `scripts/smoke_a2a_external_peer.py` + `docs/evidence/a2a-external-peer.json` |
 | 第三方生态 A2A 实现 | 🟡 Adapter path documented | 本页 + `examples/a2a_adapters/` |
 
 ## 下一步：验证哪些第三方/外部实现

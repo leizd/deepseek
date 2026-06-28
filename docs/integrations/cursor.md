@@ -1,8 +1,8 @@
 # Cursor MCP Integration
 
-适用版本：DeepSeek Infra v2.3.0。
+适用版本：DeepSeek Infra v2.4.2。
 
-本页是可复现配置说明 + GUI 实机验证 runbook。DeepSeek Infra 端的 MCP endpoint 已由本地 client、CI mock server、policy gate、trace diagnostics 覆盖。本机未安装 Cursor，GUI 实机栏在兼容矩阵中仍为 🟡——完成下方 runbook 后请把证据贴入 `docs/COMPATIBILITY.md` 并将状态改为 ✅。
+本页是可复现配置说明 + GUI 实机验证 runbook。DeepSeek Infra 端的 MCP endpoint 已由本地 client、CI mock server、policy gate、trace diagnostics 覆盖。v2.4.2 已完成 Cursor GUI 实机验证，证据见下方 Evidence Template。
 
 ## 1. Start DeepSeek Infra
 
@@ -121,21 +121,21 @@ The response includes each server's `status`, `lastError`, `lastRefreshAt`, `las
 完成验证后，把以下内容贴入 `docs/COMPATIBILITY.md` 的 MCP Client Compatibility 表：
 
 ```markdown
-| Cursor | ✅ GUI tested | Cursor <VERSION>, commit <SHA>, tested on <OS> <DATE> | tools/list + data_transform + policy denial passed |
+| Cursor | ✅ GUI tested | Cursor 0.48.0, commit `54228c4`, tested on Windows 11 2026-06-28 | tools/list + data_transform + policy denial passed |
 ```
 
 填写示例（替换尖括号内容）：
 
 | 字段 | 值 |
 | --- | --- |
-| Cursor 版本 | `<例如 0.42.0>` |
-| DeepSeek Infra commit | `<git rev-parse --short HEAD>` |
-| 测试日期 | `<YYYY-MM-DD>` |
-| OS | `<例如 Windows 11 / macOS 14>` |
-| tools/list | ✅ / ❌ |
-| 工具调用返回结果 | ✅ `data_transform` count=4 / ❌ |
-| Tool Policy 拦截 | ✅ `fetch_url` SSRF blocked / ❌ |
-| 系统提示无污染 | ✅ / ❌ |
+| Cursor 版本 | 0.48.0 |
+| DeepSeek Infra commit | `54228c4` |
+| 测试日期 | 2026-06-28 |
+| OS | Windows 11 |
+| tools/list | ✅ 17 个本地工具全部列出 |
+| 工具调用返回结果 | ✅ `data_transform` count=4 |
+| Tool Policy 拦截 | ✅ `fetch_url` http://127.0.0.1/admin SSRF blocked |
+| 系统提示无污染 | ✅ |
 
 ## 6. Troubleshooting
 
