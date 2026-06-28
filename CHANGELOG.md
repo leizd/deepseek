@@ -2,6 +2,29 @@
 
 本项目使用类似 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的分组方式维护变更记录。未发布内容记录在 `[Unreleased]`，正式发版时迁移到具体版本。
 
+## [2.4.4] - A2A Third-Party Ecosystem Evidence Patch
+
+**主题：A2A 第三方生态互操作证据补丁。** 本版不新增核心运行时能力，重点把 v2.3.x / v2.4.x 中仍处于 🟡 的 Third-party A2A ecosystem peer 从 adapter path documented 推进为结构化 third-party evidence，验证 DeepSeek Infra 的 A2AClient 能连接外部 A2A-compatible peer 并完成 Agent Card、message/send、message/stream、tasks/get、tasks/cancel、tasks/list、artifact chunks 与 SSE final event 全流程。
+
+### 新增
+
+- **A2A third-party peer evidence**：新增 `docs/evidence/a2a-third-party-peer.json` 与 `docs/evidence/a2a-third-party-peer.md`，记录第三方 A2A-compatible peer 的互操作验收结果。
+- **A2A third-party evidence schema**：新增 `evals/schemas/a2a_third_party_peer_evidence.schema.json`，固定 metadata、peer 信息、`peerType=third-party`、checks 与 PASS / FAIL 状态结构。
+- **External peer smoke markdown 输出**：`scripts/smoke_a2a_external_peer.py` 支持 `--markdown`，可同时生成机器可读 JSON 与人工可读验收摘要。
+- **Preflight third-party A2A evidence 检查**：`scripts/preflight_release.py` 新增 `a2a_third_party_peer_evidence` 检查；缺失时 WARNING，提交后若 status、metadata、peerType 或关键 checks 不完整则 FAIL。
+
+### 更改
+
+- **版本号全仓同步**：README badge、`deepseek_infra/core/config.py` 的 `app_version`、Dockerfile tag、Android `versionName` / `versionCode`、`.github/workflows/ci.yml` 的 preflight 版本、所有文档「适用版本」与 eval / agent / baseline / security 报告版本全部更新到 2.4.4。
+- **Compatibility Matrix 更新**：将 Third-party A2A ecosystem peer 从 `🟡 Adapter path documented` 更新为 `✅ Third-party evidence tested`，并链接到 `docs/evidence/a2a-third-party-peer.json`。
+- **A2A third-party plan 收口**：`docs/integrations/a2a-third-party-plan.md` 从“验证计划”更新为“验证记录 + 复现流程”，保留候选实现与排障说明。
+- **Release Readiness 更新**：将 A2A third-party evidence 纳入 v2.4.4 发版前检查流程，并同步 release manifest evidence 清单。
+
+### 测试
+
+- 新增 A2A third-party evidence schema / preflight 测试，覆盖 evidence 缺失 WARNING、status 非 PASS 失败、必要 checks 缺失失败、metadata 缺失失败、peerType 错误失败与完整 PASS。
+- 更新 A2A external peer smoke 测试，覆盖 `--peer-type third-party`、JSON evidence 输出与 Markdown evidence 输出。
+
 ## [2.4.3] - Edge Router Evidence Patch
 
 **主题：Edge Router 实机证据补丁。** 本版不新增协议或运行时功能，重点把 v2.4.x 中仍处于 🟡 的 Edge-Cloud Model Router 验收路径从 runbook 推进为结构化 evidence，补齐 Ollama provider、本地 `/v1/models` 暴露、Edge status endpoint 与 OpenAI-compatible local call 的可复现证据。

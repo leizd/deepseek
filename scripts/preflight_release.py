@@ -5,11 +5,12 @@ Checks that the version string is consistent across the README badge,
 CHANGELOG, Dockerfile tag, Implementation Status / evals README headers, that
 the eval / agent reports are current, that the smoke / eval docs exist, that
 ``scripts/release.py`` still excludes runtime caches and logs, that headless MCP
-bridge and A2A external peer evidence are present, that key docs do not contain
+bridge and A2A external peer evidence are present, that optional third-party A2A
+and Edge Router evidence is strict when submitted, that key docs do not contain
 encoding corruption (since v2.3.4), and (since v2.3.1) that GUI interop evidence
 for Claude Desktop / Cursor has been recorded in ``docs/COMPATIBILITY.md``.
 
-    python scripts/preflight_release.py --version 2.4.3
+    python scripts/preflight_release.py --version 2.4.4
 
 Exits 1 on any FAIL; WARNINGs do not fail. Version defaults to
 ``settings.app_version``.
@@ -366,9 +367,9 @@ def check_a2a_external_peer_evidence(root: Path, version: str) -> CheckResult:
             {"status": data.get("status")},
         )
     checks = data.get("checks")
-    check_status = {str(k): str(v) for k, v in checks.items()} if isinstance(checks, dict) else {}
+    check_status = {str(k): str(v).upper() for k, v in checks.items()} if isinstance(checks, dict) else {}
     required = ("agentCard", "messageSend", "messageStream", "tasksGet", "tasksCancel", "tasksList", "artifactChunks", "sseFinalEvent")
-    missing_or_failed = [name for name in required if check_status.get(name) != "pass"]
+    missing_or_failed = [name for name in required if check_status.get(name) != "PASS"]
     if missing_or_failed:
         return CheckResult(
             "a2a_external_peer_evidence",
@@ -386,11 +387,11 @@ def check_a2a_external_peer_evidence(root: Path, version: str) -> CheckResult:
     )
 
 
-def check_a2a_third_party_evidence(root: Path) -> CheckResult:
+def check_a2a_third_party_peer_evidence(root: Path, version: str) -> CheckResult:
     path = root / "docs" / "evidence" / "a2a-third-party-peer.json"
     if not path.is_file():
         return CheckResult(
-            "a2a_third_party_evidence",
+            "a2a_third_party_peer_evidence",
             STATUS_WARN,
             "third-party A2A ecosystem evidence still pending; adapter path is documented",
             {"path": str(path)},
@@ -398,24 +399,51 @@ def check_a2a_third_party_evidence(root: Path) -> CheckResult:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        return CheckResult("a2a_third_party_evidence", STATUS_WARN, f"third-party A2A evidence is present but unparsable: {exc}", {"path": str(path)})
+        return CheckResult("a2a_third_party_peer_evidence", STATUS_FAIL, f"cannot parse third-party A2A evidence: {exc}", {"path": str(path)})
+    metadata_fail = _check_evidence_metadata("a2a_third_party_peer", data, path)
+    if metadata_fail:
+        return metadata_fail
+    reported = str(data.get("version") or "")
+    if reported != version:
+        return CheckResult(
+            "a2a_third_party_peer_evidence",
+            STATUS_FAIL,
+            f"third-party A2A evidence version is {reported!r}, expected {version!r}",
+            {"version": reported, "expected": version},
+        )
+    if data.get("status") != "PASS":
+        return CheckResult(
+            "a2a_third_party_peer_evidence",
+            STATUS_FAIL,
+            f"third-party A2A evidence status is {data.get('status')!r}, expected PASS",
+            {"status": data.get("status")},
+        )
     peer = data.get("peer")
     peer_data = peer if isinstance(peer, dict) else {}
-    checks = data.get("checks")
-    check_status = {str(k): str(v) for k, v in checks.items()} if isinstance(checks, dict) else {}
-    required = ("agentCard", "messageSend", "messageStream", "tasksGet", "tasksCancel", "tasksList", "artifactChunks", "sseFinalEvent")
-    if data.get("status") == "PASS" and peer_data.get("type") in {"third-party", "adapter"} and all(check_status.get(name) == "pass" for name in required):
+    peer_type = str(data.get("peerType") or peer_data.get("type") or "")
+    if peer_type != "third-party":
         return CheckResult(
-            "a2a_third_party_evidence",
-            STATUS_PASS,
-            "third-party / adapter A2A ecosystem evidence recorded",
-            {"path": str(path), "peer": peer_data.get("name"), "type": peer_data.get("type")},
+            "a2a_third_party_peer_evidence",
+            STATUS_FAIL,
+            f"third-party A2A evidence peerType is {peer_type!r}, expected 'third-party'",
+            {"path": str(path), "peerType": peer_type},
+        )
+    checks = data.get("checks")
+    check_status = {str(k): str(v).upper() for k, v in checks.items()} if isinstance(checks, dict) else {}
+    required = ("agentCard", "messageSend", "messageStream", "tasksGet", "tasksCancel", "tasksList", "artifactChunks", "sseFinalEvent")
+    missing_or_failed = [name for name in required if check_status.get(name) != "PASS"]
+    if missing_or_failed:
+        return CheckResult(
+            "a2a_third_party_peer_evidence",
+            STATUS_FAIL,
+            f"third-party A2A evidence missing PASS checks: {', '.join(missing_or_failed)}",
+            {"missingOrFailed": missing_or_failed},
         )
     return CheckResult(
-        "a2a_third_party_evidence",
-        STATUS_WARN,
-        "third-party A2A ecosystem evidence is not PASS yet",
-        {"path": str(path), "status": data.get("status"), "type": peer_data.get("type")},
+        "a2a_third_party_peer_evidence",
+        STATUS_PASS,
+        "third-party A2A ecosystem evidence recorded",
+        {"path": str(path), "peer": peer_data.get("name"), "type": peer_type, "checks": list(required)},
     )
 
 
@@ -546,7 +574,7 @@ def run_preflight(root: Path, version: str) -> list[CheckResult]:
         check_release_exclusions(root),
         check_headless_mcp_bridge_evidence(root, version),
         check_a2a_external_peer_evidence(root, version),
-        check_a2a_third_party_evidence(root),
+        check_a2a_third_party_peer_evidence(root, version),
         check_edge_router_smoke_evidence(root, version),
         check_gui_interop_evidence(root),
     ]

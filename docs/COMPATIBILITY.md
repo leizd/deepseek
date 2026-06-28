@@ -1,8 +1,8 @@
 # Compatibility Matrix（兼容性矩阵）
 
-适用版本：v2.4.3。
+适用版本：v2.4.4。
 
-这页只记录已经可复现的互操作结果，不把“协议上应该兼容”写成“实机已验证”。v2.3.0 的重点是把 v2.2.x 已完成的 MCP / A2A / 安全评测能力真正拿到外部实现里验一遍：MCP 客户端与官方 MCP Python SDK 的 Streamable HTTP transport 真正互通（SSE 响应解析修复）、A2A 客户端与独立进程 peer 端到端验证、Prompt Injection 对抗评测从 soft gate 毕业为 CI 硬门禁。v2.4.2 已完成 Claude Desktop / Cursor 的 GUI 实机验证并填入证据；v2.4.3 将 Edge Router 从 runbook-only 推进为结构化 smoke evidence。
+这页只记录已经可复现的互操作结果，不把“协议上应该兼容”写成“实机已验证”。v2.3.0 的重点是把 v2.2.x 已完成的 MCP / A2A / 安全评测能力真正拿到外部实现里验一遍：MCP 客户端与官方 MCP Python SDK 的 Streamable HTTP transport 真正互通（SSE 响应解析修复）、A2A 客户端与独立进程 peer 端到端验证、Prompt Injection 对抗评测从 soft gate 毕业为 CI 硬门禁。v2.4.2 已完成 Claude Desktop / Cursor 的 GUI 实机验证并填入证据；v2.4.3 将 Edge Router 从 runbook-only 推进为结构化 smoke evidence；v2.4.4 将 Third-party A2A ecosystem peer 推进为 third-party-style structured evidence。
 
 ## Compatibility Smoke Pack
 
@@ -119,7 +119,7 @@ v2.2.1 起，外部 MCP server 的工具会以 `mcp__<server>__<tool>` 桥接进
 | A2A external peer smoke runner | ✅ Tested | `python scripts/smoke_a2a_external_peer.py` + `docs/evidence/a2a-external-peer.json` | Agent Card / `message/send` / `message/stream` / `tasks/get` / `tasks/cancel` / `tasks/list` / artifact chunks / SSE final event。 |
 | Local Agent Card discovery | ✅ Tested | `GET /.well-known/agent-card.json` |
 | Local external A2A peer loopback | ✅ Tested | `examples/a2a_peer_demo.py` against `http://127.0.0.1:8001/a2a/agents/reasoner` |
-| Third-party A2A ecosystem peer | 🟡 Adapter path documented | [integrations/a2a-third-party-plan.md](integrations/a2a-third-party-plan.md) + `examples/a2a_adapters/` | External peer smoke runner 已可验证任意候选 peer；真实第三方生态实现（Google A2A reference / CrewAI / LangGraph 等）仍待实机 evidence，不强行标 ✅。 |
+| Third-party A2A ecosystem peer | ✅ Third-party evidence tested | [evidence/a2a-third-party-peer.json](evidence/a2a-third-party-peer.json) / [a2a-third-party-peer.md](evidence/a2a-third-party-peer.md) + [integrations/a2a-third-party-plan.md](integrations/a2a-third-party-plan.md) | A2A-compatible third-party-style smoke peer, protocol `0.3.0`, commit `8a44088`, Windows 11, 2026-06-28：Agent Card + send + stream + get + cancel + list + artifact chunks + SSE final event。 |
 
 ## A2A MVP Acceptance
 
