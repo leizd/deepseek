@@ -120,14 +120,19 @@ def build_suite_report(
     dirty: bool = False,
     generated_at: str | None = None,
     paths: dict[str, str] | None = None,
+    strict: bool = False,
 ) -> dict[str, Any]:
     gate = injection.benchmarks.get("softGate", {})
     gate_passed = bool(gate.get("passed"))
     policy_passed = _round_metric(tool_policy.metrics.get("toolPolicyPassRate")) >= 1.0
     defense_passed = _round_metric(tool_policy.metrics.get("injectionDefensePassRate")) >= 1.0
+    agent_passed = True
+    if strict and agent is not None:
+        agent_passed = str(agent.get("status") or "WARNING") == "PASS"
     # v2.3.0: the injection adversarial gate is now a HARD gate — an unmet
     # threshold fails the suite (and CI) just like a Tool Policy regression.
-    hard_fail = not (policy_passed and defense_passed and gate_passed)
+    # v2.4.0: --strict also promotes the Agent replay block to a hard gate.
+    hard_fail = not (policy_passed and defense_passed and gate_passed and agent_passed)
     status = "FAIL" if hard_fail else "PASS"
 
     payload: dict[str, Any] = {
@@ -173,7 +178,7 @@ def build_suite_report(
         agent_metrics = agent.get("agent", {})
         payload["agent"] = {
             "status": str(agent.get("status") or "WARNING"),
-            "reportOnly": True,
+            "reportOnly": not strict,
             "cases": int(agent_metrics.get("cases") or 0),
             "toolCallAccuracy": _round_metric(agent_metrics.get("toolCallAccuracy")),
             "toolCallF1": _round_metric(agent_metrics.get("toolCallF1")),
@@ -246,7 +251,7 @@ def render_markdown(report: dict[str, Any]) -> str:
             "## Regression Compare",
             "",
             "```bash",
-            "python evals/runners/compare_eval_baseline.py --baseline evals/baselines/v2.2.6.json --current evals/reports/latest.json",
+            "python evals/runners/compare_eval_baseline.py --strict --baseline evals/baselines/v2.2.6.json --current evals/reports/latest.json --agent-baseline evals/baselines/agent-v2.2.8.json --out evals/reports/baseline-compare-latest.json",
             "```",
             "",
         ]
@@ -288,13 +293,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--k", type=int, default=5)
     parser.add_argument("--out", default=str(REPO_ROOT / "evals" / "reports" / "latest.json"))
     parser.add_argument("--markdown", default=str(REPO_ROOT / "evals" / "reports" / "latest.md"))
-    parser.add_argument("--include-agent", action="store_true", help="Include Agent replay eval as report-only metrics.")
+    parser.add_argument("--include-agent", action="store_true", help="Include Agent replay eval metrics in the unified report.")
     parser.add_argument("--agent-golden", default=str(REPO_ROOT / "evals" / "golden" / "agent_tasks.jsonl"))
     parser.add_argument("--agent-predictions", default=str(REPO_ROOT / "evals" / "golden" / "agent_predictions.v2.2.8.sample.jsonl"))
     parser.add_argument("--agent-baseline", default=str(REPO_ROOT / "evals" / "baselines" / "agent-v2.2.8.json"))
     parser.add_argument("--no-agent-baseline", action="store_true")
     parser.add_argument("--json", action="store_true", help="Print the JSON report instead of the Markdown summary")
     parser.add_argument("--no-write", action="store_true", help="Do not write report files")
+    parser.add_argument("--strict", action="store_true", help="Hard gate: require included Agent Eval status to be PASS.")
     return parser
 
 
@@ -305,6 +311,8 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.strict and not args.include_agent:
+        parser.error("--strict requires --include-agent so Agent Eval participates in the hard gate")
     rag, tool_policy, injection, agent = run_all(args)
     report = build_suite_report(
         rag,
@@ -315,6 +323,7 @@ def main(argv: list[str] | None = None) -> int:
         sha=git_sha(),
         dirty=git_dirty(),
         paths=default_paths(args),
+        strict=bool(args.strict),
     )
 
     if not args.no_write:

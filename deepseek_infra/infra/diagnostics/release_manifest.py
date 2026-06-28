@@ -42,8 +42,19 @@ DEFAULT_EVIDENCE_PATHS = (
     "docs/evidence/a2a-external-peer.json",
     "evals/reports/latest.json",
     "evals/reports/agent-latest.json",
+    "evals/reports/baseline-compare-latest.json",
+    "evals/reports/security-latest.json",
     "docs/EVIDENCE_INDEX.md",
 )
+
+DEFAULT_QUALITY_GATES = {
+    "coverage": "80%",
+    "offlineEval": "PASS",
+    "agentEval": "PASS",
+    "injectionStrict": "PASS",
+    "baselineCompare": "PASS",
+    "securityCorpus": "PASS",
+}
 
 
 def build_manifest(
@@ -58,6 +69,7 @@ def build_manifest(
     artifact: Path,
     sha256: str,
     evidence: list[str] | None = None,
+    quality_gates: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     return {
         "schemaVersion": SCHEMA_VERSION,
@@ -66,6 +78,7 @@ def build_manifest(
         "builtAt": built_at or utc_now(),
         "python": python_version,
         "coverageGate": coverage_gate,
+        "qualityGates": dict(quality_gates) if quality_gates is not None else dict(DEFAULT_QUALITY_GATES),
         "evalReport": eval_report,
         "agentReport": agent_report,
         "evidence": list(evidence) if evidence is not None else list(DEFAULT_EVIDENCE_PATHS),

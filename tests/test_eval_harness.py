@@ -290,6 +290,29 @@ def test_eval_baseline_compare_pass_warning_and_fail_paths() -> None:
     fail = runner.compare_reports(baseline, fail_current)
     assert fail["status"] == "FAIL"
     assert [check for check in fail["checks"] if check["metric"] == "injection.bypassRate"][0]["status"] == "FAIL"
+    assert fail["schemaVersion"] == "offline-eval-compare.v1"
+    assert "generatedAt" in fail
+
+
+def test_eval_baseline_compare_can_include_agent_success_gate() -> None:
+    runner = _load_baseline_compare_runner()
+    baseline = {
+        "version": "2.2.6",
+        "gitSha": "base",
+        "rag": {"recallAt5": 1.0, "citationAccuracy": 0.8333},
+        "toolPolicy": {"passRate": 1.0},
+        "injection": {"bypassRate": 0.0, "falsePositiveRate": 0.0},
+    }
+    current = json.loads(json.dumps(baseline))
+    current["version"] = "2.4.0"
+    current["agent"] = {"agentSuccessRate": 0.94}
+    agent_baseline = {"version": "2.2.8", "agent": {"agentSuccessRate": 1.0}}
+
+    result = runner.compare_reports(baseline, current, agent_baseline=agent_baseline)
+
+    agent_check = [check for check in result["checks"] if check["metric"] == "agent.agentSuccessRate"][0]
+    assert result["status"] == "FAIL"
+    assert agent_check["status"] == "FAIL"
 
 
 def test_build_rag_report_aggregates_cases() -> None:

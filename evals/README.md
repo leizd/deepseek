@@ -1,8 +1,8 @@
-# AI Runtime Evaluation Harness
+﻿# AI Runtime Evaluation Harness
 
-适用版本：v2.3.4。
+适用版本：v2.4.0。
 
-这套 harness 对 DeepSeek Infra 的核心能力线做**自动化回归评测**（全部可离线执行，无需 API Key）。v2.2.7 已把 RAG / Tool Policy / Prompt Injection adversarial eval 整理成统一报告和 v2.2.6 baseline compare；v2.2.8 继续把 Agent Eval 从样例打分升级为稳定 JSONL 录制、归一化回放、`agent-latest` 报告和 report-only baseline 对比。Agent 指标低于建议阈值只 warning，结构错误才失败，硬门禁仍留到 v2.4。
+这套 harness 对 DeepSeek Infra 的核心能力线做**自动化回归评测**（全部可离线执行，无需 API Key）。v2.4.0 把 Agent Eval、baseline compare、Prompt Injection 和版本化安全语料统一升级为 CI 硬门禁：Agent 指标低于阈值、baseline 退化、injection gate 或 security corpus 未通过都会阻断 PR。
 
 | 指标族 | 含义 | 由谁产出 |
 | --- | --- | --- |
@@ -15,6 +15,7 @@
 | **Tool Policy Pass Rate** | 安全闸门对 SSRF / 路径越界 / 密钥外泄 / 越权等判定是否符合预期 | `run_tool_eval.py`（离线重放真实闸门） |
 | **Injection Defense Pass Rate** | 注入指令被检出 / 清洗、良性内容不误伤的比例 | `run_tool_eval.py` |
 | **Block / Bypass / False Positive Rate** | 小型对抗注入语料库的拦截率、绕过率、误伤率 | `run_injection_adversarial.py`（v2.3.0 起 CI 硬门禁） |
+| **Security Corpus Gates** | 版本化 prompt injection / tool attack / benign false-positive 语料 | `run_security_corpus.py`（v2.4.0 起 CI 硬门禁） |
 | **Latency Benchmark** | 平均 / P50 / P95 延迟 | 全部 runner |
 | **Cost Benchmark** | 平均 token 与 USD 成本（按模型定价或录制估算） | `run_agent_eval.py` |
 
@@ -29,6 +30,10 @@ evals/
     agent_predictions.v2.2.8.sample.jsonl       # v2.2.8 稳定录制 / 回放样例
     tool_policy_cases.jsonl                     # 安全闸门 / 注入防御标注用例
     injection_adversarial.jsonl                 # 对抗注入小语料
+    security/
+      prompt_injection.v2.4.jsonl
+      tool_policy_attacks.v2.4.jsonl
+      benign_false_positive.v2.4.jsonl
   schemas/
     agent_prediction.schema.json                # Agent prediction JSONL 结构规范
   runners/
@@ -38,14 +43,18 @@ evals/
     run_agent_eval.py
     run_tool_eval.py
     run_injection_adversarial.py
+    run_security_corpus.py
   baselines/
     v2.2.6.json                                 # RAG / Tool Policy / Injection 回归基线
-    agent-v2.2.8.json                           # Agent Eval report-only 基线
+    agent-v2.2.8.json                           # Agent Eval 基线
   reports/
     latest.json                                 # 统一离线报告（入库）
     latest.md                                   # PR 审查摘要（入库）
-    agent-latest.json                           # Agent Eval report-only 报告（入库）
+    agent-latest.json                           # Agent Eval 报告（入库）
     agent-latest.md                             # Agent Eval Markdown 摘要（入库）
+    baseline-compare-latest.json                # baseline compare 证据（入库）
+    security-latest.json                        # Security Corpus 证据（入库）
+    security-latest.md                          # Security Corpus 摘要（入库）
     <suite>-<timestamp>.json                    # 单项 runner 本地产物（gitignore）
 ```
 
@@ -54,18 +63,15 @@ evals/
 ## 运行
 
 ```bash
-# 统一离线评测套件：运行 RAG / Tool Policy / Prompt Injection adversarial eval，
+# 统一离线评测套件：运行 RAG / Tool Policy / Prompt Injection adversarial / Agent Eval，
 # 写出 evals/reports/latest.json 与 latest.md。
-python evals/runners/run_offline_eval_suite.py --out evals/reports/latest.json --markdown evals/reports/latest.md
+python evals/runners/run_offline_eval_suite.py --include-agent --strict --out evals/reports/latest.json --markdown evals/reports/latest.md
 
-# 可选把 Agent Eval 聚合进统一报告。Agent 仍是 report-only，不影响主线硬门禁。
-python evals/runners/run_offline_eval_suite.py --include-agent --out evals/reports/latest.json --markdown evals/reports/latest.md
+# 与 v2.2.6 / agent-v2.2.8 baseline 比较，输出 PASS / WARNING / FAIL。
+python evals/runners/compare_eval_baseline.py --strict --baseline evals/baselines/v2.2.6.json --current evals/reports/latest.json --agent-baseline evals/baselines/agent-v2.2.8.json --out evals/reports/baseline-compare-latest.json
 
-# 与 v2.2.6 baseline 比较，输出 PASS / WARNING / FAIL。
-python evals/runners/compare_eval_baseline.py --baseline evals/baselines/v2.2.6.json --current evals/reports/latest.json
-
-# Agent 录制回放：结构错误失败，指标低于建议阈值只 WARNING。
-python evals/runners/run_agent_eval.py --report-dir evals/reports --report-only
+# Agent 录制回放：结构错误、缺 prediction、指标低于阈值或 baseline warning 都会失败。
+python evals/runners/run_agent_eval.py --report-dir evals/reports --strict
 
 # RAG 召回 / 引用准确率：临时本地 RAG 索引，不动真实 .local-rag。
 PYTHONHASHSEED=0 python evals/runners/run_rag_eval.py
@@ -76,16 +82,20 @@ python evals/runners/run_tool_eval.py
 # 对抗注入小语料：v2.3.0 起 CI 用 --strict 硬门禁；本地默认仍 warning。
 python evals/runners/run_injection_adversarial.py --no-report
 python evals/runners/run_injection_adversarial.py --strict --no-report  # CI 硬门禁
+
+# v2.4 版本化安全语料：prompt injection / tool attack / benign false-positive。
+python evals/runners/run_security_corpus.py --strict --out evals/reports/security-latest.json --markdown evals/reports/security-latest.md
 ```
 
 常用参数：`--golden`、`--k`（RAG）、`--predictions`（Agent）、`--json`（机器可读）、`--no-report`（不落盘）、`--include-agent`（suite 可选聚合 Agent）。
 
 CI 口径：
 
-- PR 必跑 `python evals/runners/run_offline_eval_suite.py --out evals/reports/latest.json --markdown evals/reports/latest.md`，生成统一 JSON / Markdown 报告。
-- PR 必跑 `python evals/runners/compare_eval_baseline.py --baseline evals/baselines/v2.2.6.json --current evals/reports/latest.json`，无退化为 PASS，轻微退化为 WARNING，严重退化为 FAIL。
-- CI 跑 `python evals/runners/run_agent_eval.py --report-dir evals/reports --report-only`，生成 Agent replay 报告；指标 warning 不会阻断 CI。
-- CI 上传 `offline-eval-report` artifact，包含 `latest.json`、`latest.md`、`agent-latest.json` 与 `agent-latest.md`。
+- PR 必跑 `python evals/runners/run_offline_eval_suite.py --include-agent --strict --out evals/reports/latest.json --markdown evals/reports/latest.md`，生成统一 JSON / Markdown 报告。
+- PR 必跑 `python evals/runners/run_security_corpus.py --strict --out evals/reports/security-latest.json --markdown evals/reports/security-latest.md`，生成版本化安全语料报告。
+- PR 必跑 `python evals/runners/compare_eval_baseline.py --strict --baseline evals/baselines/v2.2.6.json --current evals/reports/latest.json --agent-baseline evals/baselines/agent-v2.2.8.json --out evals/reports/baseline-compare-latest.json`，WARNING / FAIL 都会阻断 CI。
+- CI 跑 `python evals/runners/run_agent_eval.py --report-dir evals/reports --strict`，生成 Agent replay 报告；指标 warning 会阻断 CI。
+- CI 上传 `offline-eval-report` artifact，包含 `latest`、`agent-latest`、`baseline-compare-latest` 与 `security-latest` 报告。
 - `run_injection_adversarial.py` 自 v2.3.0 起 CI 用 `--strict` 硬门禁：未达阈值返回 `exit 1` 阻断 PR；本地不加 `--strict` 仍只 warning 便于迭代。
 
 ## 输出示例
@@ -140,6 +150,8 @@ Soft Gate: PASS
 `run_tool_eval.py` 在判定不符时退出码为 1 并逐条列出错判用例，可直接当回归门禁；新增攻击样本只需往 `tool_policy_cases.jsonl` 追加一行。
 
 `run_injection_adversarial.py` 自 v2.2.6 起接入版本化阈值（`blockRate>=0.85`、`falsePositiveRate<=0.10`、`bypassRate<=0.15`）。v2.3.0 起 CI 用 `--strict` 把未达标升级为 `exit 1` 硬门禁，阻断 PR；`run_offline_eval_suite.py` 的 suite 状态也把 injection gate 未达标视为 FAIL。本地不加 `--strict` 仍只 warning 便于迭代。
+
+`run_security_corpus.py` 自 v2.4.0 起接入版本化安全语料库，输出 `blockRate`、`falsePositiveRate`、`bypassRate`、`toolPolicyPassRate`、`secretExfiltrationBlockRate`、`ssrfBlockRate` 与 `pathTraversalBlockRate`。CI 用 `--strict`，任何安全语料门禁未通过都会返回 `exit 1`。
 
 ## 录制真实 predictions
 

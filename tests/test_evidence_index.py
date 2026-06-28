@@ -19,6 +19,8 @@ def test_evidence_index_lists_eval_reports() -> None:
     index = Path("docs/EVIDENCE_INDEX.md").read_text(encoding="utf-8")
     assert "evals/reports/latest.json" in index
     assert "evals/reports/agent-latest.json" in index
+    assert "evals/reports/baseline-compare-latest.json" in index
+    assert "evals/reports/security-latest.json" in index
 
 
 def test_evidence_index_lists_gui_and_third_party_entries() -> None:

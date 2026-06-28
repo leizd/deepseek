@@ -9,7 +9,7 @@ bridge and A2A external peer evidence are present, that key docs do not contain
 encoding corruption (since v2.3.4), and (since v2.3.1) that GUI interop evidence
 for Claude Desktop / Cursor has been recorded in ``docs/COMPATIBILITY.md``.
 
-    python scripts/preflight_release.py --version 2.3.4
+    python scripts/preflight_release.py --version 2.4.0
 
 Exits 1 on any FAIL; WARNINGs do not fail. Version defaults to
 ``settings.app_version``.
@@ -189,6 +189,90 @@ def check_agent_report(root: Path, version: str) -> CheckResult:
     if reported == version:
         return CheckResult("agent_report", STATUS_PASS, f"agent-latest.json version is {version}", {"version": reported})
     return CheckResult("agent_report", STATUS_FAIL, f"agent-latest.json version is {reported!r}, expected {version!r}", {"version": reported, "expected": version})
+
+
+def _load_json_report(root: Path, rel: str) -> tuple[dict[str, Any] | None, str]:
+    path = root / rel
+    if not path.is_file():
+        return None, f"{rel} missing"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return None, f"cannot parse {rel}: {exc}"
+    if not isinstance(data, dict):
+        return None, f"{rel} must contain a JSON object"
+    return data, ""
+
+
+def _check_versioned_report(root: Path, rel: str, name: str, version: str) -> CheckResult:
+    data, error = _load_json_report(root, rel)
+    path = root / rel
+    if data is None:
+        return CheckResult(name, STATUS_FAIL, error, {"path": str(path)})
+    metadata_fail = _check_evidence_metadata(name, data, path)
+    if metadata_fail:
+        return metadata_fail
+    reported = str(data.get("version") or "")
+    if reported != version:
+        return CheckResult(name, STATUS_FAIL, f"{rel} version is {reported!r}, expected {version!r}", {"version": reported, "expected": version})
+    if data.get("status") != "PASS":
+        return CheckResult(name, STATUS_FAIL, f"{rel} status is {data.get('status')!r}, expected PASS", {"status": data.get("status")})
+    return CheckResult(name, STATUS_PASS, f"{rel} version/status evidence is PASS", {"path": str(path), "version": reported})
+
+
+def check_baseline_compare_report(root: Path, version: str) -> CheckResult:
+    return _check_versioned_report(root, "evals/reports/baseline-compare-latest.json", "baseline_compare_report", version)
+
+
+def check_security_corpus_report(root: Path, version: str) -> CheckResult:
+    return _check_versioned_report(root, "evals/reports/security-latest.json", "security_corpus_report", version)
+
+
+def _coverage_fail_under(root: Path) -> float:
+    text = _read(root / "pyproject.toml")
+    match = re.search(r"(?m)^\s*fail_under\s*=\s*(\d+(?:\.\d+)?)\s*$", text)
+    return float(match.group(1)) if match else 0.0
+
+
+def check_quality_gate_evidence(root: Path, version: str) -> CheckResult:
+    failures: list[str] = []
+    details: dict[str, Any] = {"version": version}
+    coverage_gate = _coverage_fail_under(root)
+    details["coverageFailUnder"] = coverage_gate
+    if coverage_gate < 80:
+        failures.append(f"coverage fail_under is {coverage_gate:g}, expected >= 80")
+    ci_text = _read(root / ".github" / "workflows" / "ci.yml")
+    if "pytest --cov --cov-fail-under=80" not in ci_text:
+        failures.append("CI pytest coverage gate is not --cov-fail-under=80")
+    report_specs = (
+        ("evals/reports/latest.json", "offlineEval"),
+        ("evals/reports/agent-latest.json", "agentEval"),
+        ("evals/reports/baseline-compare-latest.json", "baselineCompare"),
+        ("evals/reports/security-latest.json", "securityCorpus"),
+    )
+    for rel, label in report_specs:
+        data, error = _load_json_report(root, rel)
+        if data is None:
+            failures.append(error)
+            continue
+        status = data.get("status")
+        details[label] = status
+        if status != "PASS":
+            failures.append(f"{rel} status is {status!r}, expected PASS")
+        if str(data.get("version") or "") != version:
+            failures.append(f"{rel} version is {data.get('version')!r}, expected {version!r}")
+    latest, error = _load_json_report(root, "evals/reports/latest.json")
+    if latest is None:
+        failures.append(error)
+    else:
+        raw_injection = latest.get("injection")
+        injection: dict[str, Any] = raw_injection if isinstance(raw_injection, dict) else {}
+        details["injectionStrict"] = injection.get("status")
+        if injection.get("status") != "PASS" or injection.get("gateMode") != "hard":
+            failures.append("latest.json injection gate is not PASS/hard")
+    if failures:
+        return CheckResult("quality_gate_evidence", STATUS_FAIL, "; ".join(failures), details)
+    return CheckResult("quality_gate_evidence", STATUS_PASS, "v2.4 quality gate evidence is complete", details)
 
 
 def check_release_exclusions(root: Path) -> CheckResult:
@@ -406,6 +490,9 @@ def run_preflight(root: Path, version: str) -> list[CheckResult]:
         check_doc_links_exist(root),
         check_eval_report_version(root, version),
         check_agent_report(root, version),
+        check_baseline_compare_report(root, version),
+        check_security_corpus_report(root, version),
+        check_quality_gate_evidence(root, version),
         check_release_exclusions(root),
         check_headless_mcp_bridge_evidence(root, version),
         check_a2a_external_peer_evidence(root, version),

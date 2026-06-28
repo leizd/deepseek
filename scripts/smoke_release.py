@@ -49,10 +49,28 @@ def build_stages(args: argparse.Namespace) -> list[tuple[str, list[str]]]:
                 [
                     _py(),
                     str(REPO_ROOT / "evals" / "runners" / "run_offline_eval_suite.py"),
+                    "--include-agent",
+                    "--strict",
                     "--out",
                     args.out,
                     "--markdown",
                     args.markdown,
+                ],
+            )
+        )
+
+    if not args.skip_security:
+        stages.append(
+            (
+                "security_corpus",
+                [
+                    _py(),
+                    str(REPO_ROOT / "evals" / "runners" / "run_security_corpus.py"),
+                    "--strict",
+                    "--out",
+                    args.security_out,
+                    "--markdown",
+                    args.security_markdown,
                 ],
             )
         )
@@ -66,7 +84,27 @@ def build_stages(args: argparse.Namespace) -> list[tuple[str, list[str]]]:
                     str(REPO_ROOT / "evals" / "runners" / "run_agent_eval.py"),
                     "--report-dir",
                     args.report_dir,
-                    "--report-only",
+                    "--strict",
+                ],
+            )
+        )
+
+    if not args.skip_compare:
+        stages.append(
+            (
+                "baseline_compare",
+                [
+                    _py(),
+                    str(REPO_ROOT / "evals" / "runners" / "compare_eval_baseline.py"),
+                    "--strict",
+                    "--baseline",
+                    args.baseline,
+                    "--current",
+                    args.out,
+                    "--agent-baseline",
+                    args.agent_baseline,
+                    "--out",
+                    args.compare_out,
                 ],
             )
         )
@@ -126,9 +164,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--out", default=str(REPO_ROOT / "evals" / "reports" / "latest.json"))
     parser.add_argument("--markdown", default=str(REPO_ROOT / "evals" / "reports" / "latest.md"))
     parser.add_argument("--report-dir", default=str(REPO_ROOT / "evals" / "reports"))
+    parser.add_argument("--baseline", default=str(REPO_ROOT / "evals" / "baselines" / "v2.2.6.json"))
+    parser.add_argument("--agent-baseline", default=str(REPO_ROOT / "evals" / "baselines" / "agent-v2.2.8.json"))
+    parser.add_argument("--compare-out", default=str(REPO_ROOT / "evals" / "reports" / "baseline-compare-latest.json"))
+    parser.add_argument("--security-out", default=str(REPO_ROOT / "evals" / "reports" / "security-latest.json"))
+    parser.add_argument("--security-markdown", default=str(REPO_ROOT / "evals" / "reports" / "security-latest.md"))
     parser.add_argument("--skip-doctor", action="store_true")
     parser.add_argument("--skip-evals", action="store_true")
+    parser.add_argument("--skip-security", action="store_true")
     parser.add_argument("--skip-agent", action="store_true")
+    parser.add_argument("--skip-compare", action="store_true")
     parser.add_argument("--skip-mcp", action="store_true")
     parser.add_argument("--skip-a2a", action="store_true")
     parser.add_argument("--json", action="store_true", help="Emit a machine-readable JSON summary instead of running shells verbosely.")

@@ -22,7 +22,7 @@ def test_build_manifest_has_required_fields(tmp_path: Path) -> None:
         commit="abc1234",
         built_at="2026-06-27T00:00:00Z",
         python_version="3.12",
-        coverage_gate="75%",
+        coverage_gate="80%",
         eval_report="evals/reports/latest.json",
         agent_report="evals/reports/agent-latest.json",
         artifact=artifact,
@@ -33,13 +33,16 @@ def test_build_manifest_has_required_fields(tmp_path: Path) -> None:
     assert manifest["commit"] == "abc1234"
     assert manifest["builtAt"] == "2026-06-27T00:00:00Z"
     assert manifest["python"] == "3.12"
-    assert manifest["coverageGate"] == "75%"
+    assert manifest["coverageGate"] == "80%"
+    assert manifest["qualityGates"]["coverage"] == "80%"
+    assert manifest["qualityGates"]["agentEval"] == "PASS"
     assert manifest["artifact"] == "deepseek-infra-2.2.9.zip"
     assert manifest["sha256"] == "deadbeef"
     assert manifest["bytes"] == len(b"zip-bytes")
     assert "evidence" in manifest
     assert isinstance(manifest["evidence"], list)
     assert "docs/evidence/headless-mcp-bridge.json" in manifest["evidence"]
+    assert "evals/reports/security-latest.json" in manifest["evidence"]
     assert "docs/EVIDENCE_INDEX.md" in manifest["evidence"]
 
 
@@ -50,7 +53,7 @@ def test_build_manifest_uses_custom_evidence_when_provided(tmp_path: Path) -> No
         version="2.3.4",
         commit="abc1234",
         python_version="3.12",
-        coverage_gate="75%",
+        coverage_gate="80%",
         eval_report="evals/reports/latest.json",
         agent_report="evals/reports/agent-latest.json",
         artifact=artifact,
@@ -77,7 +80,7 @@ def test_write_manifest_roundtrip(tmp_path: Path) -> None:
         version="2.2.9",
         commit="abc",
         python_version="3.12",
-        coverage_gate="75%",
+        coverage_gate="80%",
         eval_report="evals/reports/latest.json",
         agent_report="evals/reports/agent-latest.json",
         artifact=artifact,

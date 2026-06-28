@@ -2,6 +2,31 @@
 
 本项目使用类似 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的分组方式维护变更记录。未发布内容记录在 `[Unreleased]`，正式发版时迁移到具体版本。
 
+## [2.4.0] - Evaluation & Security Hardening
+
+**主题：质量门禁与安全评测硬化。** 本版不继续扩大协议面，而是把 v2.3 已完成的互操作能力纳入更严格的质量工程闭环：coverage、Agent Eval、baseline regression、Prompt Injection、安全语料库和 release evidence 全部可持续验证。
+
+### Added
+
+- Add Agent Eval strict CI gate with Tool Call Accuracy >= 0.90, Agent Success Rate >= 0.85 and Prompt Regression Pass Rate >= 0.90.
+- Add strict baseline regression comparison for RAG, Tool Policy, Prompt Injection and Agent Eval.
+- Add versioned adversarial security corpora for prompt injection, tool policy attacks and benign false-positive cases.
+- Add `run_security_corpus.py` and committed `security-latest` report artifacts.
+- Add quality gate evidence to release manifest and preflight checks.
+
+### Changed
+
+- Raise coverage gate from 75% to 80% across `pyproject.toml`, CI and README badge.
+- Promote Agent Eval from report-only to required CI gate.
+- Require baseline comparison and security corpus reports to pass before release.
+- Update README, Implementation Status, Eval Reports, Agent Eval, Security Smoke, Threat Model, Evidence Index and Release Readiness docs for v2.4.0.
+
+### Security
+
+- Harden prompt injection and tool policy regression checks with versioned attack corpora.
+- Block release if injection bypass rate, false positive rate, tool policy pass rate or Agent success rate regress beyond v2.4 thresholds.
+- Add release evidence for security corpus metrics: block rate, false-positive rate, bypass rate, SSRF block rate, path traversal block rate and secret exfiltration block rate.
+
 ## [2.3.4] - Release Evidence Polish & Encoding Fix
 
 **主题：Release Evidence Polish / Encoding Fix。** 本版不继续扩大 MCP / A2A 协议面，而是修复 v2.3.3 文档编码残留，统一 evidence 文件格式，新增互操作证据索引页，并让 preflight 检查文档可读性与证据完整性。属于 v2.3 系列的验收闭环。

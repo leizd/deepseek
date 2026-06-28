@@ -26,7 +26,7 @@ def test_offline_mode_runs_doctor_evals_and_agent_only() -> None:
     args = mod.parse_args(["--offline"])
     stages = mod.build_stages(args)
     names = _names(stages)
-    assert names == ["doctor", "offline_eval_suite", "agent_eval"]
+    assert names == ["doctor", "offline_eval_suite", "security_corpus", "agent_eval", "baseline_compare"]
     doctor_cmd = stages[0][1]
     assert "--offline" in doctor_cmd
     assert "--with-server" not in doctor_cmd
@@ -39,15 +39,15 @@ def test_with_server_mode_includes_protocol_smokes() -> None:
     args = mod.parse_args(["--with-server", "--base-url", "http://127.0.0.1:9000", "--token", "tok"])
     stages = mod.build_stages(args)
     names = _names(stages)
-    assert names == ["doctor", "offline_eval_suite", "agent_eval", "mcp_smoke", "a2a_smoke"]
+    assert names == ["doctor", "offline_eval_suite", "security_corpus", "agent_eval", "baseline_compare", "mcp_smoke", "a2a_smoke"]
     doctor_cmd = stages[0][1]
     assert "--with-server" in doctor_cmd
     assert "--base-url" in doctor_cmd
-    mcp_cmd = " ".join(stages[3][1])
+    mcp_cmd = " ".join(stages[5][1])
     assert "--mcp-url" in mcp_cmd
     assert "http://127.0.0.1:9000/mcp" in mcp_cmd
     assert "tok" in mcp_cmd
-    a2a_cmd = " ".join(stages[4][1])
+    a2a_cmd = " ".join(stages[6][1])
     assert "--base-url" in a2a_cmd
     assert "http://127.0.0.1:9000" in a2a_cmd
 
@@ -57,19 +57,19 @@ def test_default_mode_is_offline() -> None:
     args = mod.parse_args([])
     assert args.offline is True
     assert args.with_server is False
-    assert _names(mod.build_stages(args)) == ["doctor", "offline_eval_suite", "agent_eval"]
+    assert _names(mod.build_stages(args)) == ["doctor", "offline_eval_suite", "security_corpus", "agent_eval", "baseline_compare"]
 
 
 def test_skip_flags_drop_stages() -> None:
     mod = _load_smoke_release()
     args = mod.parse_args(["--offline", "--skip-doctor", "--skip-agent"])
-    assert _names(mod.build_stages(args)) == ["offline_eval_suite"]
+    assert _names(mod.build_stages(args)) == ["offline_eval_suite", "security_corpus", "baseline_compare"]
 
 
 def test_with_server_skip_protocol_keeps_evals() -> None:
     mod = _load_smoke_release()
     args = mod.parse_args(["--with-server", "--skip-mcp", "--skip-a2a", "--skip-doctor"])
-    assert _names(mod.build_stages(args)) == ["offline_eval_suite", "agent_eval"]
+    assert _names(mod.build_stages(args)) == ["offline_eval_suite", "security_corpus", "agent_eval", "baseline_compare"]
 
 
 def test_json_mode_emits_plan_without_running(capsys: pytest.CaptureFixture[str]) -> None:
@@ -80,7 +80,7 @@ def test_json_mode_emits_plan_without_running(capsys: pytest.CaptureFixture[str]
     assert code == 0
     assert payload["mode"] == "with-server"
     stage_names = [stage["name"] for stage in payload["stages"]]
-    assert stage_names == ["doctor", "offline_eval_suite", "agent_eval", "mcp_smoke", "a2a_smoke"]
+    assert stage_names == ["doctor", "offline_eval_suite", "security_corpus", "agent_eval", "baseline_compare", "mcp_smoke", "a2a_smoke"]
     assert all(isinstance(stage["command"], list) for stage in payload["stages"])
 
 

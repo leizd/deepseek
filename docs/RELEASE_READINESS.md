@@ -1,42 +1,45 @@
-# Release Readiness
+﻿# Release Readiness
 
-适用版本：v2.3.4。
+适用版本：v2.4.0。
 
-v2.2.9 是 v2.2.x 的收官版，主题是**发布前体检、运行时诊断、版本一致性与产物可验证**——不再扩大协议面或评测面，而是为 v2.3 的真实互操作验证提供一个稳定、可自证交付的底座。本页把三件事串起来：发版前体检（preflight）、一键 smoke 编排、发布产物证明（manifest + checksum）。
+v2.4.0 的发布主题是 **Evaluation & Security Hardening**：不继续扩大协议面，而是把 coverage、offline eval、Agent Eval、baseline compare、Prompt Injection、安全语料库和 release evidence 做成可持续守住的质量门禁。本页把三件事串起来：发版前体检（preflight）、一键 smoke 编排、发布产物证明（manifest + checksum + quality gates）。
 
 ## 1. Release Preflight — 版本一致性体检
 
 发版前确认版本号在所有该出现的地方都同步，eval 报告是当前版本，且发布脚本仍排除本地缓存 / 日志 / 密钥：
 
 ```bash
-python scripts/preflight_release.py --version 2.3.4
+python scripts/preflight_release.py --version 2.4.0
 ```
 
 检查项：
 
-- README 版本徽章是 `2.3.4`。
-- `CHANGELOG.md` 顶部有 `## [2.3.4]` 条目。
-- `Dockerfile` 示例 tag 是 `deepseek-infra:2.3.4`。
-- `docs/IMPLEMENTATION_STATUS.md` 与 `evals/README.md` 的「适用版本」是 `v2.3.4`。
+- README 版本徽章是 `2.4.0`。
+- `CHANGELOG.md` 顶部有 `## [2.4.0]` 条目。
+- `Dockerfile` 示例 tag 是 `deepseek-infra:2.4.0`。
+- `docs/IMPLEMENTATION_STATUS.md` 与 `evals/README.md` 的「适用版本」是 `v2.4.0`。
 - `docs/AGENT_EVAL.md` / `docs/EVAL_REPORTS.md` / `docs/SECURITY_SMOKE.md` / `docs/integrations/headless-mcp-client.md` / `docs/integrations/a2a-external-peer.md` 存在。
 - `docs/EVIDENCE_INDEX.md` 存在且包含 Headless MCP bridge / A2A external peer / eval reports 索引。
-- `evals/reports/latest.json` 的 `version` 是 `2.3.4`，且包含 `commit` / `generatedAt` / `environment` / `status`。
-- `evals/reports/agent-latest.json` 可解析且 `version` 是 `2.3.4`，且包含统一 metadata。
-- `docs/evidence/headless-mcp-bridge.json` 可解析、版本为 `2.3.4`，包含统一 metadata，且关键 MCP bridge 步骤全为 PASS。
-- `docs/evidence/a2a-external-peer.json` 可解析、版本为 `2.3.4`，包含统一 metadata，且关键 A2A external peer checks 全为 PASS。
+- `evals/reports/latest.json` 的 `version` 是 `2.4.0`，且包含 `commit` / `generatedAt` / `environment` / `status`。
+- `evals/reports/agent-latest.json` 可解析且 `version` 是 `2.4.0`，且包含统一 metadata。
+- `evals/reports/baseline-compare-latest.json` 可解析且 `status=PASS`。
+- `evals/reports/security-latest.json` 可解析且 `status=PASS`。
+- `docs/evidence/headless-mcp-bridge.json` 可解析、版本为 `2.4.0`，包含统一 metadata，且关键 MCP bridge 步骤全为 PASS。
+- `docs/evidence/a2a-external-peer.json` 可解析、版本为 `2.4.0`，包含统一 metadata，且关键 A2A external peer checks 全为 PASS。
+- `quality_gate_evidence` 确认 coverage 80%、offline eval、Agent Eval、baseline compare、injection strict 和 security corpus 全部 PASS。
 - CHANGELOG / README / COMPATIBILITY / IMPLEMENTATION_STATUS / RELEASE_READINESS / EVIDENCE_INDEX / `docs/integrations/*.md` 不出现 `???`、`锟斤拷`、\ufffd 等乱码。
 - `scripts/release.py` 仍排除 `.traces` / `.local-rag` / `.auth-token` / `.env` / `server*.log`。
 
-退出码：`1` 表示有 `FAIL`；`WARNING`（如 eval 报告缺失）不失败。`--json` 输出机器可读摘要。
+退出码：`1` 表示有 `FAIL`；GUI / 第三方生态类 `WARNING` 不失败。`--json` 输出机器可读摘要。
 
 实现：[`scripts/preflight_release.py`](../scripts/preflight_release.py)；测试 [`tests/test_preflight_release.py`](../tests/test_preflight_release.py)。
 
 ## 2. Release Smoke Suite — 一键编排
 
-把 doctor、离线评测、Agent 评测、（可选）MCP / A2A smoke 串成一个命令：
+把 doctor、strict 离线评测、security corpus、Agent 评测、baseline compare、（可选）MCP / A2A smoke 串成一个命令：
 
 ```bash
-# 离线（CI 安全）：doctor + offline eval suite + Agent eval
+# 离线（CI 安全）：doctor + strict eval suite + security corpus + Agent eval + baseline compare
 python scripts/smoke_release.py --offline
 
 # 带服务：额外跑 MCP / A2A 兼容 smoke
@@ -46,12 +49,14 @@ python scripts/smoke_release.py --with-server --base-url http://127.0.0.1:8000 -
 `smoke_release.py` 只编排，不持有新逻辑。它按顺序跑：
 
 1. `scripts/doctor.py`（离线模式带 `--offline`，带服务模式带 `--with-server --base-url`）。
-2. `evals/runners/run_offline_eval_suite.py --out evals/reports/latest.json --markdown evals/reports/latest.md`。
-3. `evals/runners/run_agent_eval.py --report-dir evals/reports --report-only`。
-4. （`--with-server`）`scripts/smoke_mcp_compat.py`。
-5. （`--with-server`）`scripts/smoke_a2a_compat.py`。
+2. `evals/runners/run_offline_eval_suite.py --include-agent --strict --out evals/reports/latest.json --markdown evals/reports/latest.md`。
+3. `evals/runners/run_security_corpus.py --strict --out evals/reports/security-latest.json --markdown evals/reports/security-latest.md`。
+4. `evals/runners/run_agent_eval.py --report-dir evals/reports --strict`。
+5. `evals/runners/compare_eval_baseline.py --strict --baseline evals/baselines/v2.2.6.json --current evals/reports/latest.json --agent-baseline evals/baselines/agent-v2.2.8.json --out evals/reports/baseline-compare-latest.json`。
+6. （`--with-server`）`scripts/smoke_mcp_compat.py`。
+7. （`--with-server`）`scripts/smoke_a2a_compat.py`。
 
-任意阶段非零退出则整体退出 `1`。可用 `--skip-doctor` / `--skip-evals` / `--skip-agent` / `--skip-mcp` / `--skip-a2a` 裁剪。`--json` 只打印计划不执行。
+任意阶段非零退出则整体退出 `1`。可用 `--skip-doctor` / `--skip-evals` / `--skip-security` / `--skip-agent` / `--skip-compare` / `--skip-mcp` / `--skip-a2a` 裁剪。`--json` 只打印计划不执行。
 
 实现：[`scripts/smoke_release.py`](../scripts/smoke_release.py)；测试 [`tests/test_smoke_release.py`](../tests/test_smoke_release.py)。
 
@@ -60,9 +65,9 @@ python scripts/smoke_release.py --with-server --base-url http://127.0.0.1:8000 -
 每次跑 [`scripts/release.py`](../scripts/release.py) 不再只产出一个 zip，还会在 `dist/` 下产出三件套：
 
 ```
-dist/deepseek-infra-2.3.4.zip
-dist/deepseek-infra-2.3.4.zip.sha256
-dist/deepseek-infra-2.3.4.manifest.json
+dist/deepseek-infra-2.4.0.zip
+dist/deepseek-infra-2.4.0.zip.sha256
+dist/deepseek-infra-2.4.0.manifest.json
 ```
 
 `manifest.json` 记录发布的关键事实，可独立校验：
@@ -70,11 +75,19 @@ dist/deepseek-infra-2.3.4.manifest.json
 ```json
 {
   "schemaVersion": "release-manifest.v1",
-  "version": "2.3.4",
+  "version": "2.4.0",
   "commit": "abc1234",
   "builtAt": "2026-06-27T00:00:00Z",
   "python": "3.12",
-  "coverageGate": "75%",
+  "coverageGate": "80%",
+  "qualityGates": {
+    "coverage": "80%",
+    "offlineEval": "PASS",
+    "agentEval": "PASS",
+    "injectionStrict": "PASS",
+    "baselineCompare": "PASS",
+    "securityCorpus": "PASS"
+  },
   "evalReport": "evals/reports/latest.json",
   "agentReport": "evals/reports/agent-latest.json",
   "evidence": [
@@ -82,9 +95,11 @@ dist/deepseek-infra-2.3.4.manifest.json
     "docs/evidence/a2a-external-peer.json",
     "evals/reports/latest.json",
     "evals/reports/agent-latest.json",
+    "evals/reports/baseline-compare-latest.json",
+    "evals/reports/security-latest.json",
     "docs/EVIDENCE_INDEX.md"
   ],
-  "artifact": "deepseek-infra-2.3.4.zip",
+  "artifact": "deepseek-infra-2.4.0.zip",
   "sha256": "...",
   "bytes": 1234567
 }
@@ -103,7 +118,7 @@ dist/deepseek-infra-2.3.4.manifest.json
 ```yaml
 - run: python scripts/smoke_mcp_headless_bridge.py --out docs/evidence/headless-mcp-bridge.json
 - run: python scripts/smoke_a2a_external_peer.py --out docs/evidence/a2a-external-peer.json
-- run: python scripts/preflight_release.py --version 2.3.4
+- run: python scripts/preflight_release.py --version 2.4.0
 - run: python scripts/doctor.py --offline
 - run: python scripts/release.py --clean-workspace --dry-run
 ```
@@ -158,8 +173,10 @@ v2.3.4 新增 [`docs/EVIDENCE_INDEX.md`](../docs/EVIDENCE_INDEX.md) 作为所有
 ```bash
 python scripts/smoke_mcp_headless_bridge.py --out docs/evidence/headless-mcp-bridge.json
 python scripts/smoke_a2a_external_peer.py --out docs/evidence/a2a-external-peer.json
-python evals/runners/run_offline_eval_suite.py
-python evals/runners/run_agent_eval.py
+python evals/runners/run_offline_eval_suite.py --include-agent --strict --out evals/reports/latest.json --markdown evals/reports/latest.md
+python evals/runners/run_security_corpus.py --strict --out evals/reports/security-latest.json --markdown evals/reports/security-latest.md
+python evals/runners/run_agent_eval.py --report-dir evals/reports --strict
+python evals/runners/compare_eval_baseline.py --strict --baseline evals/baselines/v2.2.6.json --current evals/reports/latest.json --agent-baseline evals/baselines/agent-v2.2.8.json --out evals/reports/baseline-compare-latest.json
 ```
 
 ## 8. Docs Encoding Sanity（v2.3.4）
@@ -176,7 +193,25 @@ python evals/runners/run_agent_eval.py
 
 识别模式：连续 `???`、`锟斤拷`、Unicode replacement character `\ufffd`。发现即 FAIL，防止 v2.3.3 的 CHANGELOG 乱码问题再次出现。
 
-## 9. GUI Interop Evidence Checklist（v2.3.1）
+## 9. Quality Gate Evidence（v2.4.0）
+
+`preflight_release.py` 自 v2.4.0 起增加 `quality_gate_evidence` 硬检查。它聚合以下证据：
+
+- coverage gate：`pyproject.toml` 与 CI 均为 80%。
+- offline eval：`evals/reports/latest.json` `status=PASS`。
+- Agent Eval：`evals/reports/agent-latest.json` `status=PASS`。
+- baseline compare：`evals/reports/baseline-compare-latest.json` `status=PASS`。
+- injection strict：`latest.json` 的 `injection.status=PASS` 且 `gateMode=hard`。
+- security corpus：`evals/reports/security-latest.json` `status=PASS`。
+
+刷新命令：
+
+```bash
+python scripts/update_eval_report.py
+python scripts/preflight_release.py --version 2.4.0
+```
+
+## 10. GUI Interop Evidence Checklist（v2.3.1）
 
 `preflight_release.py` 自 v2.3.1 起增加 `gui_interop_evidence` 检查，扫描 `docs/COMPATIBILITY.md` 中 Claude Desktop / Cursor 行的状态标记：
 
@@ -205,8 +240,8 @@ python scripts/smoke_mcp_headless_bridge.py --out docs/evidence/headless-mcp-bri
 # 3. 刷新 A2A external peer evidence
 python scripts/smoke_a2a_external_peer.py --out docs/evidence/a2a-external-peer.json
 
-# 4. 版本一致性体检
-python scripts/preflight_release.py --version 2.3.4
+# 4. 版本一致性与质量证据体检
+python scripts/preflight_release.py --version 2.4.0
 
 # 5. 运行时体检
 python scripts/doctor.py --offline
@@ -214,8 +249,8 @@ python scripts/doctor.py --offline
 # 6. 一键 smoke（离线）
 python scripts/smoke_release.py --offline
 
-# 7. 打包并生成 manifest + checksum
-python scripts/release.py --clean-workspace --version 2.3.4
+# 7. 打包并生成 manifest + checksum + qualityGates
+python scripts/release.py --clean-workspace --version 2.4.0
 ```
 
-或直接用 `python scripts/smoke_release.py --offline`（已包含 doctor + evals + agent）。
+或直接用 `python scripts/smoke_release.py --offline`（已包含 doctor + strict evals + security corpus + agent + baseline compare）。

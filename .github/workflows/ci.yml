@@ -20,7 +20,7 @@ jobs:
       - run: python -m pip install -r requirements.txt -r requirements-dev.txt
       - run: ruff check .
       - run: mypy .
-      - run: pytest --cov --cov-fail-under=75
+      - run: pytest --cov --cov-fail-under=80
       - run: node --check static/vendor/katex/katex.min.js
       - run: node --check static/math_core.js
       - run: node --check static/seek_core.js
@@ -55,10 +55,11 @@ jobs:
           python-version: "3.12"
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -r requirements.txt -r requirements-dev.txt
-      - run: python evals/runners/run_offline_eval_suite.py --out evals/reports/latest.json --markdown evals/reports/latest.md
+      - run: python evals/runners/run_offline_eval_suite.py --include-agent --strict --out evals/reports/latest.json --markdown evals/reports/latest.md
       - run: python evals/runners/run_injection_adversarial.py --strict --no-report
-      - run: python evals/runners/compare_eval_baseline.py --baseline evals/baselines/v2.2.6.json --current evals/reports/latest.json
-      - run: python evals/runners/run_agent_eval.py --report-dir evals/reports --report-only
+      - run: python evals/runners/run_security_corpus.py --strict --out evals/reports/security-latest.json --markdown evals/reports/security-latest.md
+      - run: python evals/runners/compare_eval_baseline.py --strict --baseline evals/baselines/v2.2.6.json --current evals/reports/latest.json --agent-baseline evals/baselines/agent-v2.2.8.json --out evals/reports/baseline-compare-latest.json
+      - run: python evals/runners/run_agent_eval.py --report-dir evals/reports --strict
       - uses: actions/upload-artifact@v4
         with:
           name: offline-eval-report
@@ -67,6 +68,9 @@ jobs:
             evals/reports/latest.md
             evals/reports/agent-latest.json
             evals/reports/agent-latest.md
+            evals/reports/baseline-compare-latest.json
+            evals/reports/security-latest.json
+            evals/reports/security-latest.md
 
   docker:
     runs-on: ubuntu-latest
@@ -86,7 +90,7 @@ jobs:
       - run: python -m pip install -r requirements.txt -r requirements-dev.txt
       - run: python scripts/smoke_mcp_headless_bridge.py --out docs/evidence/headless-mcp-bridge.json
       - run: python scripts/smoke_a2a_external_peer.py --out docs/evidence/a2a-external-peer.json
-      - run: python scripts/preflight_release.py --version 2.3.4
+      - run: python scripts/preflight_release.py --version 2.4.0
       - run: python scripts/doctor.py --offline
       - run: python scripts/release.py --clean-workspace --dry-run
 

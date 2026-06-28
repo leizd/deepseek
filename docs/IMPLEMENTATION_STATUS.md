@@ -1,6 +1,6 @@
-# Implementation Status（实现状态矩阵）
+﻿# Implementation Status（实现状态矩阵）
 
-适用版本：v2.3.4。
+适用版本：v2.4.0。
 
 README 把 DeepSeek Infra 描述成一个 local-first agentic AI infrastructure platform。这一页回答一个更重要的问题：**每个模块到底落地到什么程度**——代码在哪、测试在哪、怎么亲手验证。所有链接都指向仓库内真实存在的文件；如果某格是 🟡 或 ❌，说明那部分还没做完，我们直接写出来，而不是让 README 替它画饼。
 
@@ -25,13 +25,13 @@ README 把 DeepSeek Infra 描述成一个 local-first agentic AI infrastructure 
 
 | 资产 | 位置 | 状态 |
 | --- | --- | --- |
-| Evaluation Harness（RAG / Agent / Tool 三条评测线） | [evals/](../evals/) · 评分核心 [infra/evaluation/harness.py](../deepseek_infra/infra/evaluation/harness.py) | ✅ 全部离线可跑；CI 生成统一报告与 baseline compare artifact，Agent replay 已生成 report-only artifact，硬门禁留到 v2.4 |
+| Evaluation Harness（RAG / Agent / Tool 三条评测线） | [evals/](../evals/) · 评分核心 [infra/evaluation/harness.py](../deepseek_infra/infra/evaluation/harness.py) | ✅ 全部离线可跑；CI 生成统一报告、Agent Eval strict、baseline compare artifact 与 security corpus report；v2.4 起全部纳入硬门禁 |
 | Benchmarks（延迟 / 缓存 / 检索 / DAG） | [benchmarks/](../benchmarks/) | ✅ 离线两项可直接复跑；在线两项需本地服务 + Key |
 | 一键 Demo | [examples/](../examples/) · [docs/DEMO.md](DEMO.md) | ✅ |
 | 部署资产（Docker / Compose / .env） | [Dockerfile](../Dockerfile) · [docker-compose.yml](../docker-compose.yml) · [docs/DEPLOYMENT.md](DEPLOYMENT.md) | ✅ CI 覆盖 `docker build` + `docker compose config` |
 | 安全工程（威胁模型 / CI 扫描） | [docs/THREAT_MODEL.md](THREAT_MODEL.md) · [ci.yml security job](../.github/workflows/ci.yml) | ✅ |
 | Compatibility Smoke Pack | [scripts/smoke_mcp_compat.py](../scripts/smoke_mcp_compat.py) · [scripts/smoke_a2a_compat.py](../scripts/smoke_a2a_compat.py) · [scripts/smoke_a2a_external_peer.py](../scripts/smoke_a2a_external_peer.py) · [examples/edge_router_smoke.py](../examples/edge_router_smoke.py) · [examples/external_mcp_server_partner.py](../examples/external_mcp_server_partner.py) · [examples/a2a_interop_peer.py](../examples/a2a_interop_peer.py) | ✅ 本地服务启动后可复跑；v2.3.0 新增官方 MCP SDK partner + A2A 独立进程 peer 实测；v2.3.3 新增 A2A external peer evidence；GUI / 第三方生态实机仍按矩阵诚实标注 |
-| Release Readiness（发版体检 / 产物证明） | [scripts/doctor.py](../scripts/doctor.py) · [scripts/preflight_release.py](../scripts/preflight_release.py) · [scripts/smoke_release.py](../scripts/smoke_release.py) · [docs/RUNTIME_DOCTOR.md](RUNTIME_DOCTOR.md) · [docs/RELEASE_READINESS.md](RELEASE_READINESS.md) | ✅ Runtime Doctor + Release Preflight + 一键 smoke 编排 + release manifest/sha256；CI `release-readiness` job 生成 MCP headless / A2A external evidence 后跑 preflight + doctor offline + release dry-run |
+| Release Readiness（发版体检 / 产物证明） | [scripts/doctor.py](../scripts/doctor.py) · [scripts/preflight_release.py](../scripts/preflight_release.py) · [scripts/smoke_release.py](../scripts/smoke_release.py) · [docs/RUNTIME_DOCTOR.md](RUNTIME_DOCTOR.md) · [docs/RELEASE_READINESS.md](RELEASE_READINESS.md) | ✅ Runtime Doctor + Release Preflight + 一键 smoke 编排 + release manifest/sha256/qualityGates；CI `release-readiness` job 生成 MCP headless / A2A external evidence 后跑 preflight + doctor offline + release dry-run |
 | UI 截图 / Trace 瀑布图 | docs/assets/ | ✅ `trace-waterfall.png` / `agent-dag-run.png` / `rag-citation.png` / `mcp-tool-call.png` 入库；独立 `/trace/{id}` 只读页面已上线 |
 
 ---
@@ -48,7 +48,7 @@ README 把 DeepSeek Infra 描述成一个 local-first agentic AI infrastructure 
 
 - **代码**：[multi_agent.py](../deepseek_infra/infra/agent_runtime/multi_agent.py)（planner → DAG 拓扑分层 → 同层并行 → critic 修订 → synthesizer）、[agent_runs.py](../deepseek_infra/infra/agent_runtime/agent_runs.py)（事件源持久化 / 断线重放 / 断点续跑）、[agent_state.py](../deepseek_infra/infra/agent_runtime/agent_state.py)（节点级状态机）。
 - **测试**：[test_multi_agent.py](../tests/test_multi_agent.py) · [test_agent_runs.py](../tests/test_agent_runs.py) · [test_agent_state.py](../tests/test_agent_state.py)。
-- **亲手验证**：[examples/run_agent_dag_demo.py](../examples/run_agent_dag_demo.py)（实时打印 DAG 事件流）；[benchmarks/bench_agent_dag.py](../benchmarks/bench_agent_dag.py)；[evals/runners/run_agent_eval.py](../evals/runners/run_agent_eval.py)（录制 predictions 离线打分并输出 report-only 报告）；[docs/AGENT_EVAL.md](AGENT_EVAL.md)（录制格式与回放说明）。
+- **亲手验证**：[examples/run_agent_dag_demo.py](../examples/run_agent_dag_demo.py)（实时打印 DAG 事件流）；[benchmarks/bench_agent_dag.py](../benchmarks/bench_agent_dag.py)；[evals/runners/run_agent_eval.py](../evals/runners/run_agent_eval.py)（录制 predictions 离线打分并用 `--strict` 作为 CI 硬门禁）；[docs/AGENT_EVAL.md](AGENT_EVAL.md)（录制格式与回放说明）。
 
 ### 3. Local RAG Data Layer — Working
 
@@ -94,5 +94,5 @@ README 把 DeepSeek Infra 描述成一个 local-first agentic AI infrastructure 
 
 - **代码**：[context_taint.py](../deepseek_infra/infra/gateway/context_taint.py)（逐段信任打标 / 三类指令扫描 / 隔离加固）+ [tool_policy.py](../deepseek_infra/infra/tool_runtime/tool_policy.py)（密钥外泄硬拦截、污染轮升级确认、v2.2.6 可解释 deny `reason`/`suggestion`）。
 - **测试**：[test_context_taint.py](../tests/test_context_taint.py)（含 v2.2.6 per-category `scan_text` 矩阵与「提交」误伤回归）+ [test_tool_policy.py](../tests/test_tool_policy.py)（含 deny reason/suggestion 与审计落盘断言）。
-- **亲手验证**：[evals/runners/run_tool_eval.py](../evals/runners/run_tool_eval.py) 输出 Prompt Injection Defense Pass Rate；[evals/runners/run_injection_adversarial.py](../evals/runners/run_injection_adversarial.py) 输出对抗小语料 block / false-positive / bypass rate 并对照版本化阈值做 soft gate（`SOFT GATE: PASS`）；运行中 `GET /api/taint` 看防火墙状态、`GET /api/tool-policy` 看最近 deny 审计（含 `reason`/`suggestion`）。最小复现命令集见 [SECURITY_SMOKE.md](SECURITY_SMOKE.md)。
-- **Experimental 的原因**：检测基于确定性 pattern 族（中英 + runner 侧 Base64 解码），对抗性变体已有门禁基准（阈值全绿）；v2.3.0 已把 `--strict` 接入 CI 必过项（`run_injection_adversarial.py --strict` + suite 硬门禁），但检测面仍以确定性 pattern 为主，尚未引入学习型检测。
+- **亲手验证**：[evals/runners/run_tool_eval.py](../evals/runners/run_tool_eval.py) 输出 Prompt Injection Defense Pass Rate；[evals/runners/run_injection_adversarial.py](../evals/runners/run_injection_adversarial.py) 输出对抗小语料 block / false-positive / bypass rate；[evals/runners/run_security_corpus.py](../evals/runners/run_security_corpus.py) 输出 v2.4 版本化安全语料报告。运行中 `GET /api/taint` 看防火墙状态、`GET /api/tool-policy` 看最近 deny 审计（含 `reason`/`suggestion`）。最小复现命令集见 [SECURITY_SMOKE.md](SECURITY_SMOKE.md)。
+- **Experimental 的原因**：检测基于确定性 pattern 族（中英 + runner 侧 Base64 解码），对抗性变体已有门禁基准（阈值全绿）；v2.3.0 已把 `--strict` 接入 CI 必过项，v2.4.0 又补了版本化 security corpus，但检测面仍以确定性 pattern 为主，尚未引入学习型检测。

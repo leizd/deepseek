@@ -54,3 +54,29 @@ def test_offline_eval_suite_can_include_agent_report_only_block() -> None:
     markdown = runner.render_markdown(report)
     assert "| Agent | Agent Success Rate | 0.5000 | WARNING |" in markdown
     assert "- Agent replay: 2 cases" in markdown
+
+
+def test_offline_eval_suite_strict_promotes_agent_warning_to_fail() -> None:
+    runner = _load_suite_runner()
+    rag = harness.EvalReport(suite="rag", cases=1, metrics={"ragRecallAtK": 1.0, "ragMrr": 1.0, "citationAccuracy": 1.0})
+    tool_policy = harness.EvalReport(
+        suite="tool-policy",
+        cases=1,
+        metrics={"toolPolicyPassRate": 1.0, "injectionDefensePassRate": 1.0},
+    )
+    injection = harness.EvalReport(
+        suite="injection-adversarial",
+        cases=1,
+        metrics={"blockRate": 1.0, "falsePositiveRate": 0.0, "bypassRate": 0.0},
+        benchmarks={"softGate": {"passed": True, "thresholds": {}}},
+    )
+    agent = {
+        "status": "WARNING",
+        "warnings": ["agentSuccessRate below required threshold 0.85"],
+        "agent": {"cases": 1, "toolCallAccuracy": 1.0, "agentSuccessRate": 0.0, "promptRegressionPassRate": 0.0},
+    }
+
+    report = runner.build_suite_report(rag, tool_policy, injection, agent, strict=True)
+
+    assert report["status"] == "FAIL"
+    assert report["agent"]["reportOnly"] is False

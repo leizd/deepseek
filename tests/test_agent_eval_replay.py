@@ -73,3 +73,15 @@ def test_agent_eval_baseline_compare_is_report_only_warning() -> None:
 
     assert compare["status"] == "WARNING"
     assert [check for check in compare["checks"] if check["metric"] == "toolCallAccuracy"][0]["status"] == "WARNING"
+
+
+def test_agent_eval_strict_fails_on_missing_prediction(tmp_path: Path) -> None:
+    runner = _load_agent_runner()
+    golden = tmp_path / "golden.jsonl"
+    predictions = tmp_path / "predictions.jsonl"
+    golden.write_text('{"id":"agent_a","task":"search","expected_tools":["web_search"],"expected_keywords":["source"]}\n', encoding="utf-8")
+    predictions.write_text("", encoding="utf-8")
+
+    rc = runner.main(["--golden", str(golden), "--predictions", str(predictions), "--report-dir", str(tmp_path), "--strict"])
+
+    assert rc == 1

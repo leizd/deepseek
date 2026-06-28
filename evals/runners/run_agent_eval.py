@@ -7,8 +7,9 @@ normalizes volatile fields away, then scores Tool Call Accuracy, Agent Success
 Rate, Prompt Regression, latency and token/USD cost with the pure evaluation
 harness.
 
-Metric regressions are report-only in v2.2.8. The runner exits 1 for structural
-problems such as invalid JSONL, malformed prediction rows, or missing golden ids.
+Metric regressions are warnings by default for local iteration. In v2.4.0,
+``--strict`` promotes those warnings to a hard CI gate: required metric
+thresholds, baseline regression, and missing predictions must all pass.
 """
 
 from __future__ import annotations
@@ -30,9 +31,9 @@ from deepseek_infra.core.config import APP_VERSION  # noqa: E402
 from deepseek_infra.infra.evaluation import agent_recording, harness  # noqa: E402
 
 SCHEMA_VERSION = "agent-eval-report.v1"
-TOOL_ACCURACY_WARNING_THRESHOLD = 0.80
-AGENT_SUCCESS_WARNING_THRESHOLD = 0.80
-PROMPT_REGRESSION_WARNING_THRESHOLD = 0.80
+TOOL_ACCURACY_THRESHOLD = 0.90
+AGENT_SUCCESS_THRESHOLD = 0.85
+PROMPT_REGRESSION_THRESHOLD = 0.90
 
 
 def utc_now() -> str:
@@ -86,12 +87,12 @@ def evaluate(golden: list[dict[str, Any]], predictions: list[dict[str, Any]]) ->
 def agent_warnings(report: harness.EvalReport) -> list[str]:
     metrics = report.metrics
     warnings: list[str] = []
-    if float(metrics.get("toolCallAccuracy") or 0.0) < TOOL_ACCURACY_WARNING_THRESHOLD:
-        warnings.append("toolCallAccuracy below recommended threshold")
-    if float(metrics.get("agentSuccessRate") or 0.0) < AGENT_SUCCESS_WARNING_THRESHOLD:
-        warnings.append("agentSuccessRate below recommended threshold")
-    if float(metrics.get("promptRegressionPassRate") or 0.0) < PROMPT_REGRESSION_WARNING_THRESHOLD:
-        warnings.append("promptRegressionPassRate below recommended threshold")
+    if float(metrics.get("toolCallAccuracy") or 0.0) < TOOL_ACCURACY_THRESHOLD:
+        warnings.append(f"toolCallAccuracy below required threshold {TOOL_ACCURACY_THRESHOLD:.2f}")
+    if float(metrics.get("agentSuccessRate") or 0.0) < AGENT_SUCCESS_THRESHOLD:
+        warnings.append(f"agentSuccessRate below required threshold {AGENT_SUCCESS_THRESHOLD:.2f}")
+    if float(metrics.get("promptRegressionPassRate") or 0.0) < PROMPT_REGRESSION_THRESHOLD:
+        warnings.append(f"promptRegressionPassRate below required threshold {PROMPT_REGRESSION_THRESHOLD:.2f}")
     missing = [str(row.get("id")) for row in report.details if not row.get("hasPrediction")]
     if missing:
         warnings.append(f"missing predictions: {', '.join(missing)}")
@@ -223,6 +224,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-baseline", action="store_true")
     parser.add_argument("--no-report", action="store_true", help="Skip writing agent-latest JSON/Markdown reports.")
     parser.add_argument("--report-only", action="store_true", help="Keep metric regressions as warnings; structural errors still fail.")
+    parser.add_argument("--strict", action="store_true", help="Hard gate: exit 1 unless Agent Eval status is PASS.")
     parser.add_argument("--json", action="store_true", help="Print the machine-readable report instead of Markdown.")
     return parser
 
@@ -247,6 +249,8 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
         print(render_markdown(payload))
+    if args.strict and not args.report_only and payload["status"] != "PASS":
+        return 1
     return 0
 
 

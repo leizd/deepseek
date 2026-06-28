@@ -1,8 +1,8 @@
 # Offline Eval Report
 
-- Version: 2.3.4
-- Git SHA: 544df86 (dirty)
-- Generated: 2026-06-27T12:16:27Z
+- Version: 2.4.0
+- Git SHA: 8847c86 (dirty)
+- Generated: 2026-06-28T01:55:40Z
 - Overall: PASS
 
 | Suite | Metric | Value | Status |
@@ -29,5 +29,5 @@
 ## Regression Compare
 
 ```bash
-python evals/runners/compare_eval_baseline.py --baseline evals/baselines/v2.2.6.json --current evals/reports/latest.json
+python evals/runners/compare_eval_baseline.py --strict --baseline evals/baselines/v2.2.6.json --current evals/reports/latest.json --agent-baseline evals/baselines/agent-v2.2.8.json --out evals/reports/baseline-compare-latest.json
 ```

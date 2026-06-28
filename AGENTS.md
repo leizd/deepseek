@@ -18,7 +18,7 @@ Executable config (CI, `pyproject.toml`, requirements) is the source of truth; t
 python -m pip install -r requirements.txt -r requirements-dev.txt
 ruff check .
 mypy .
-pytest --cov --cov-fail-under=75
+pytest --cov --cov-fail-under=80
 # JS syntax (only these files are checked):
 node --check static/vendor/katex/katex.min.js static/math_core.js static/seek_core.js static/app.js \
       static/modules/network.js static/modules/markdown.js static/modules/settings.js static/modules/panels.js \
@@ -33,7 +33,7 @@ node --check static/vendor/katex/katex.min.js static/math_core.js static/seek_co
 
 - **`ruff` config is intentionally minimal**: `line-length=140`, rules `E4,E7,E9,F` only (in `pyproject.toml`). Don't assume broader lint rules are enforced; don't add style rules without checking.
 - **`mypy .`** runs on the whole repo; `ignore_missing_imports=true` is set, so third-party stub misses are not errors. `warn_unused_ignores=true` — don't leave stale `# type: ignore`.
-- **Coverage gate is 75%** (raised from 70% in v2.2.6), `source = ["deepseek_infra"]`. `--cov-fail-under=75` fails the run; lower locally with `pytest --no-cov` when iterating.
+- **Coverage gate is 80%** (raised from 75% in v2.4.0), `source = ["deepseek_infra"]`. `--cov-fail-under=80` fails the run; lower locally with `pytest --no-cov` when iterating.
 - **`pytest` uses `--strict-markers`** (from `pyproject.toml`). Registered markers: `integration` (spins up a real HTTP server on an ephemeral `127.0.0.1` port) and `slow` (>1s). Both run in CI's default `pytest` invocation.
 
 ### Offline eval gates (no API key)
@@ -42,10 +42,12 @@ node --check static/vendor/katex/katex.min.js static/math_core.js static/seek_co
 PYTHONHASHSEED=0 python evals/runners/run_rag_eval.py   # hash seed is REQUIRED for reproducible BM25 ties
 python evals/runners/run_tool_eval.py                    # exits 1 on any policy misjudgment — hard CI gate
 python evals/runners/run_injection_adversarial.py --strict --no-report  # v2.3.0: hard CI gate (exits 1 on unmet thresholds)
+python evals/runners/run_security_corpus.py --strict      # v2.4.0: versioned security corpus hard CI gate
+python evals/runners/run_agent_eval.py --strict           # v2.4.0: Agent Eval hard CI gate
+python evals/runners/compare_eval_baseline.py --strict --baseline evals/baselines/v2.2.6.json --current evals/reports/latest.json --agent-baseline evals/baselines/agent-v2.2.8.json
 ```
 - Scoring core is the pure, I/O-free `deepseek_infra/infra/evaluation/harness.py` (unit-tested in `tests/test_eval_harness.py`). Runners only orchestrate.
-- `run_agent_eval.py` is offline but **not** a CI gate yet.
-- **Injection hard gate (v2.3.0)**: `run_injection_adversarial.py --strict` enforces versioned thresholds (`blockRate>=0.85`, `falsePositiveRate<=0.10`, `bypassRate<=0.15`) as a *hard* CI gate — unmet thresholds exit 1 and block the PR. `run_offline_eval_suite.py` also treats an unmet injection gate as suite FAIL. Without `--strict` the runner still warns and exits 0 for local iteration. `run_tool_eval.py` remains the other hard gate (exits 1 on any policy misjudgment).
+- **Injection / Agent / security hard gates (v2.4.0)**: `run_injection_adversarial.py --strict` enforces versioned thresholds (`blockRate>=0.85`, `falsePositiveRate<=0.10`, `bypassRate<=0.15`); `run_agent_eval.py --strict` enforces Tool Call Accuracy >= 0.90, Agent Success Rate >= 0.85 and Prompt Regression Pass Rate >= 0.90; `run_security_corpus.py --strict` enforces versioned attack / benign corpus metrics; `compare_eval_baseline.py --strict` blocks RAG / Tool / Injection / Agent regressions. Without `--strict`, compatible runners still warn for local iteration.
 
 ### Security scan (CI `security` job)
 

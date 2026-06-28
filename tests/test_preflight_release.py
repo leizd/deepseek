@@ -21,6 +21,10 @@ def _skeleton(tmp_path: Path, version: str, *, release_exclusions: bool = True) 
     (root / "README.md").write_text(f"![版本](https://img.shields.io/badge/version-{version}-blue)\n", encoding="utf-8")
     (root / "CHANGELOG.md").write_text(f"## [{version}] - Release Readiness\n\nbody\n", encoding="utf-8")
     (root / "Dockerfile").write_text(f"docker build -t deepseek-infra:{version} .\n", encoding="utf-8")
+    (root / "pyproject.toml").write_text("[tool.coverage.report]\nfail_under = 80\n", encoding="utf-8")
+    workflows = root / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    (workflows / "ci.yml").write_text("      - run: pytest --cov --cov-fail-under=80\n", encoding="utf-8")
     (root / "docs").mkdir()
     (root / "docs" / "IMPLEMENTATION_STATUS.md").write_text(f"适用版本：v{version}。\n", encoding="utf-8")
     (root / "docs" / "AGENT_EVAL.md").write_text("agent eval\n", encoding="utf-8")
@@ -50,6 +54,7 @@ def _skeleton(tmp_path: Path, version: str, *, release_exclusions: bool = True) 
                 "generatedAt": "2026-06-27T00:00:00Z",
                 "environment": {"os": "Linux", "python": "3.12", "ci": True},
                 "status": "PASS",
+                "injection": {"status": "PASS", "gateMode": "hard"},
             }
         ),
         encoding="utf-8",
@@ -66,6 +71,19 @@ def _skeleton(tmp_path: Path, version: str, *, release_exclusions: bool = True) 
         ),
         encoding="utf-8",
     )
+    for name in ("baseline-compare-latest.json", "security-latest.json"):
+        (reports / name).write_text(
+            json.dumps(
+                {
+                    "version": version,
+                    "commit": "abc1234",
+                    "generatedAt": "2026-06-27T00:00:00Z",
+                    "environment": {"os": "Linux", "python": "3.12", "ci": True},
+                    "status": "PASS",
+                }
+            ),
+            encoding="utf-8",
+        )
     scripts = root / "scripts"
     scripts.mkdir()
     if release_exclusions:
@@ -377,3 +395,20 @@ def test_preflight_fails_when_agent_report_missing_metadata(tmp_path: Path) -> N
     )
     result = next(r for r in preflight.run_preflight(root, "2.3.4") if r.name == "evidence_metadata:agent_report")
     assert result.status == "fail"
+
+
+def test_preflight_fails_when_security_corpus_report_is_missing(tmp_path: Path) -> None:
+    preflight = _load_preflight()
+    root = _skeleton(tmp_path, "2.4.0")
+    (root / "evals" / "reports" / "security-latest.json").unlink()
+    result = next(r for r in preflight.run_preflight(root, "2.4.0") if r.name == "security_corpus_report")
+    assert result.status == "fail"
+
+
+def test_preflight_fails_when_quality_gate_evidence_regresses(tmp_path: Path) -> None:
+    preflight = _load_preflight()
+    root = _skeleton(tmp_path, "2.4.0")
+    (root / "pyproject.toml").write_text("[tool.coverage.report]\nfail_under = 75\n", encoding="utf-8")
+    result = next(r for r in preflight.run_preflight(root, "2.4.0") if r.name == "quality_gate_evidence")
+    assert result.status == "fail"
+    assert "coverage fail_under" in result.detail

@@ -1,10 +1,10 @@
-# 威胁模型（Threat Model）
+﻿# 威胁模型（Threat Model）
 
-适用版本：v2.3.4。
+适用版本：v2.4.0。
 
 定位与信任假设见 [docs/SECURITY.md](SECURITY.md)：个人、本地优先的运行时，运行后端的机器可信，默认只监听 `127.0.0.1`。这一页回答更尖锐的问题：**当模型上下文里混入攻击者可控的内容（网页、文件、工具结果），或本机服务被局域网内他人触达时，每一类威胁由哪段代码挡住、由哪个测试钉住、还剩什么残余风险。**
 
-每条缓解都是仓库里真实存在的实现；想亲手验证，离线跑 `python evals/runners/run_tool_eval.py`（26 个攻防用例，错判即退出码 1）。
+每条缓解都是仓库里真实存在的实现；想亲手验证，离线跑 `python evals/runners/run_tool_eval.py`（26 个攻防用例，错判即退出码 1）和 `python evals/runners/run_security_corpus.py --strict`（v2.4 版本化攻击 / 良性语料）。
 
 ## 威胁清单
 
@@ -17,7 +17,7 @@
   - 工具结果注入清洗（外部文本字段红action，URL / id / score 保留）：[tool_policy.py](../deepseek_infra/infra/tool_runtime/tool_policy.py) `sanitize_tool_result`；
   - **污染轮升级**：本轮检出注入后，`fetch_url` / `forget_memory` / `suggest_memory` / `create_reminder` 转为待人工确认（`taint_escalated_confirmation`）。
 - **测试**：[test_context_taint.py](../tests/test_context_taint.py)（13 项）、[test_tool_policy.py](../tests/test_tool_policy.py) 注入清洗用例、`run_tool_eval.py` sanitize / taint 用例。
-- **残余风险**：pattern 族针对明确指令式注入；语义改写类注入无法完全消除（业界同样未解）。对抗性基准在 Roadmap v2.4。
+- **残余风险**：pattern 族针对明确指令式注入；语义改写类注入无法完全消除（业界同样未解）。v2.4.0 已把版本化对抗语料纳入 CI hard gate，后续仍需持续扩充语料覆盖。
 
 ### T2 · 恶意上传文件（超大文件、压缩炸弹、文件内注入指令）
 
@@ -88,6 +88,7 @@
 | 验证 | 命令 |
 | --- | --- |
 | 攻防回归（26 用例，离线） | `python evals/runners/run_tool_eval.py` |
+| v2.4 版本化安全语料 | `python evals/runners/run_security_corpus.py --strict` |
 | 全量单测（含上述安全测试文件） | `python -m pytest` |
 | 依赖 CVE / 静态安全 / 凭证扫描 | CI `security` job（`pip-audit` · `bandit` · `detect-secrets`） |
 | 运行中防火墙状态 | `GET /api/taint` · `GET /api/tool-policy` |
