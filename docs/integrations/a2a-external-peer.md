@@ -1,6 +1,6 @@
 # A2A External Peer Smoke
 
-适用版本：DeepSeek Infra v2.4.4。
+适用版本：DeepSeek Infra v2.4.5。
 
 本页说明如何在无 GUI、无 API key 的环境中复现 A2A external peer 兼容性证据。这里的 external peer 指独立进程或外部进程暴露的 A2A server；它不等同于真实第三方生态实现。
 
@@ -57,7 +57,7 @@ docs/evidence/a2a-external-peer.json
 ```json
 {
   "schemaVersion": "a2a-external-peer-evidence.v1",
-  "version": "2.4.4",
+  "version": "2.4.5",
   "commit": "abc1234",
   "generatedAt": "2026-06-28T00:00:00Z",
   "environment": {
@@ -91,7 +91,7 @@ docs/evidence/a2a-external-peer.json
 第三方生态实现使用分层标注：
 
 - `docs/evidence/a2a-external-peer.json`：最低交付标准，必须 PASS。
-- `docs/evidence/a2a-third-party-peer.json` / `.md`：v2.4.4 起的第三方生态展示标准，缺失时 preflight 只 WARNING；存在时必须 `peerType=third-party` 且八类 checks 全 PASS。
+- `docs/evidence/a2a-third-party-peer.json` / `.md`：v2.4.5 起的第三方生态展示标准，缺失时 preflight 只 WARNING；存在时必须 `peerType=third-party` 且八类 checks 全 PASS。
 
 第三方或第三方风格 A2A-compatible peer 可用时，运行：
 

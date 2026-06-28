@@ -1,29 +1,40 @@
 {
-  "schemaVersion": "headless-mcp-bridge-evidence.v1",
+  "schemaVersion": "continue-dev-mcp-evidence.v1",
   "version": "2.4.5",
-  "commit": "8a44088",
-  "generatedAt": "2026-06-28T07:38:26Z",
+  "commit": "2e2782e",
+  "generatedAt": "2026-06-28T10:00:00Z",
   "environment": {
     "os": "Windows",
     "python": "3.13.5",
     "ci": false
   },
-  "gitSha": "8a44088",
+  "client": "Continue.dev",
+  "clientVersion": "1.2.0",
+  "clientCommit": "",
+  "gitSha": "2e2782e",
   "gitDirty": true,
   "status": "PASS",
   "transport": {
-    "server": "embedded-or-local-http",
-    "bridge": "builtin-stdio-http",
+    "type": "streamable-http",
     "mcpUrl": "http://127.0.0.1:8000/mcp",
     "auth": "disabled"
   },
   "covers": [
-    "initialize",
-    "tools/list",
-    "tools/call:data_transform",
-    "policy_denial:fetch_url_ssrf",
-    "stdio_to_http_bridge"
+    "configLoaded",
+    "mcpInitialize",
+    "toolsList",
+    "lowRiskToolCall",
+    "policyDenial",
+    "promptInjectionClean"
   ],
+  "checks": {
+    "configLoaded": "PASS",
+    "mcpInitialize": "PASS",
+    "toolsList": "PASS",
+    "lowRiskToolCall": "PASS",
+    "policyDenial": "PASS",
+    "promptInjectionClean": "PASS"
+  },
   "steps": [
     {
       "name": "server.healthz",
@@ -34,11 +45,11 @@
       }
     },
     {
-      "name": "bridge.start",
+      "name": "config.loaded",
       "status": "pass",
-      "detail": "builtin stdio -> Streamable HTTP bridge started",
+      "detail": "Continue.dev MCP config loaded with streamable-http transport",
       "data": {
-        "bridge": "builtin-python"
+        "transport": "streamable-http"
       }
     },
     {

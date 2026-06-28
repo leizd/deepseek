@@ -1,6 +1,6 @@
 # Implementation Status（实现状态矩阵）
 
-适用版本：v2.4.4。
+适用版本：v2.4.5。
 
 README 把 DeepSeek Infra 描述成一个 local-first agentic AI infrastructure platform。这一页回答一个更重要的问题：**每个模块到底落地到什么程度**——代码在哪、测试在哪、怎么亲手验证。所有链接都指向仓库内真实存在的文件；如果某格是 🟡 或 ❌，说明那部分还没做完，我们直接写出来，而不是让 README 替它画饼。
 
@@ -30,7 +30,7 @@ README 把 DeepSeek Infra 描述成一个 local-first agentic AI infrastructure 
 | 一键 Demo | [examples/](../examples/) · [docs/DEMO.md](DEMO.md) | ✅ |
 | 部署资产（Docker / Compose / .env） | [Dockerfile](../Dockerfile) · [docker-compose.yml](../docker-compose.yml) · [docs/DEPLOYMENT.md](DEPLOYMENT.md) | ✅ CI 覆盖 `docker build` + `docker compose config` |
 | 安全工程（威胁模型 / CI 扫描） | [docs/THREAT_MODEL.md](THREAT_MODEL.md) · [ci.yml security job](../.github/workflows/ci.yml) | ✅ |
-| Compatibility Smoke Pack | [scripts/smoke_mcp_compat.py](../scripts/smoke_mcp_compat.py) · [scripts/smoke_a2a_compat.py](../scripts/smoke_a2a_compat.py) · [scripts/smoke_a2a_external_peer.py](../scripts/smoke_a2a_external_peer.py) · [examples/edge_router_smoke.py](../examples/edge_router_smoke.py) · [examples/external_mcp_server_partner.py](../examples/external_mcp_server_partner.py) · [examples/a2a_interop_peer.py](../examples/a2a_interop_peer.py) | ✅ 本地服务启动后可复跑；v2.3.0 新增官方 MCP SDK partner + A2A 独立进程 peer 实测；v2.3.3 新增 A2A external peer evidence；v2.4.3 新增 Edge Router structured smoke evidence；v2.4.4 新增 A2A third-party peer structured evidence |
+| Compatibility Smoke Pack | [scripts/smoke_mcp_compat.py](../scripts/smoke_mcp_compat.py) · [scripts/smoke_a2a_compat.py](../scripts/smoke_a2a_compat.py) · [scripts/smoke_a2a_external_peer.py](../scripts/smoke_a2a_external_peer.py) · [examples/edge_router_smoke.py](../examples/edge_router_smoke.py) · [examples/external_mcp_server_partner.py](../examples/external_mcp_server_partner.py) · [examples/a2a_interop_peer.py](../examples/a2a_interop_peer.py) | ✅ 本地服务启动后可复跑；v2.3.0 新增官方 MCP SDK partner + A2A 独立进程 peer 实测；v2.3.3 新增 A2A external peer evidence；v2.4.3 新增 Edge Router structured smoke evidence；v2.4.5 新增 A2A third-party peer structured evidence |
 | Release Readiness（发版体检 / 产物证明） | [scripts/doctor.py](../scripts/doctor.py) · [scripts/preflight_release.py](../scripts/preflight_release.py) · [scripts/smoke_release.py](../scripts/smoke_release.py) · [docs/RUNTIME_DOCTOR.md](RUNTIME_DOCTOR.md) · [docs/RELEASE_READINESS.md](RELEASE_READINESS.md) | ✅ Runtime Doctor + Release Preflight + 一键 smoke 编排 + release manifest/sha256/qualityGates；CI `release-readiness` job 生成 MCP headless / A2A external evidence 后跑 preflight + doctor offline + release dry-run；本地提交 third-party A2A / Edge evidence 后按严格 PASS checks 校验 |
 | UI 截图 / Trace 瀑布图 | docs/assets/ | ✅ `trace-waterfall.png` / `agent-dag-run.png` / `rag-citation.png` / `mcp-tool-call.png` 入库；独立 `/trace/{id}` 只读页面已上线 |
 

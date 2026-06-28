@@ -1,8 +1,8 @@
 # A2A Third-Party Ecosystem Evidence
 
-适用版本：DeepSeek Infra v2.4.4。
+适用版本：DeepSeek Infra v2.4.5。
 
-本页从 v2.4.4 起不再只是验证计划，而是 **验证记录 + 复现流程**。v2.3.0 已完成独立进程 A2A peer 互操作验证；v2.3.3 新增 external peer smoke runner；v2.4.4 进一步把 Third-party A2A ecosystem peer 收口为结构化 evidence：`docs/evidence/a2a-third-party-peer.json` 与 `docs/evidence/a2a-third-party-peer.md`。
+本页从 v2.4.5 起不再只是验证计划，而是 **验证记录 + 复现流程**。v2.3.0 已完成独立进程 A2A peer 互操作验证；v2.3.3 新增 external peer smoke runner；v2.4.5 进一步把 Third-party A2A ecosystem peer 收口为结构化 evidence：`docs/evidence/a2a-third-party-peer.json` 与 `docs/evidence/a2a-third-party-peer.md`。
 
 ## 当前状态
 
@@ -14,7 +14,7 @@
 | A2A external peer smoke | ✅ Tested | `scripts/smoke_a2a_external_peer.py` + `docs/evidence/a2a-external-peer.json` |
 | 第三方生态 A2A peer | ✅ Third-party evidence tested | `docs/evidence/a2a-third-party-peer.json` / `.md` |
 
-## v2.4.4 验证记录
+## v2.4.5 验证记录
 
 当前 evidence 使用 A2A-compatible third-party-style smoke peer 验收第三方生态路径。它不声明已经安装并跑通某个特定厂商运行时，而是验证 DeepSeek Infra 的 `A2AClient` 与一个外部、第三方分类的 A2A-compatible peer 能完成完整协议闭环。
 
@@ -47,7 +47,7 @@
 4. 运行 release preflight，确认 `a2a_third_party_peer_evidence` 为 PASS：
 
    ```bash
-   python scripts/preflight_release.py --version 2.4.4
+   python scripts/preflight_release.py --version 2.4.5
    ```
 
 5. 如需调试，再用 `A2AClient` 连接对方 endpoint：

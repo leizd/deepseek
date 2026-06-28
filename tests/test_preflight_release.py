@@ -43,6 +43,7 @@ def _skeleton(tmp_path: Path, version: str, *, release_exclusions: bool = True) 
     _write_a2a_evidence(evidence_dir / "a2a-external-peer.json", version)
     _write_a2a_evidence(evidence_dir / "a2a-third-party-peer.json", version, peer_type="third-party")
     _write_edge_router_evidence(evidence_dir / "edge-router-smoke.json", version)
+    _write_continue_dev_evidence(evidence_dir / "continue-dev-mcp.json", version)
     (root / "evals").mkdir()
     (root / "evals" / "README.md").write_text(f"适用版本：v{version}。\n", encoding="utf-8")
     reports = root / "evals" / "reports"
@@ -159,6 +160,32 @@ def _write_edge_router_evidence(path: Path, version: str, *, status: str = "PASS
         "generatedAt": "2026-06-27T00:00:00Z",
         "environment": {"os": "Linux", "python": "3.12", "ci": True},
         "status": status,
+        "checks": checks,
+    }
+    if omit_metadata:
+        payload.pop(omit_metadata, None)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _write_continue_dev_evidence(path: Path, version: str, *, status: str = "PASS", omit_check: str = "", omit_metadata: str = "") -> None:
+    checks = {
+        "configLoaded": "PASS",
+        "mcpInitialize": "PASS",
+        "toolsList": "PASS",
+        "lowRiskToolCall": "PASS",
+        "policyDenial": "PASS",
+        "promptInjectionClean": "PASS",
+    }
+    if omit_check:
+        checks.pop(omit_check, None)
+    payload: dict[str, Any] = {
+        "version": version,
+        "commit": "abc1234",
+        "generatedAt": "2026-06-27T00:00:00Z",
+        "environment": {"os": "Linux", "python": "3.12", "ci": True},
+        "status": status,
+        "client": "Continue.dev",
+        "clientVersion": "1.2.0",
         "checks": checks,
     }
     if omit_metadata:
@@ -323,36 +350,36 @@ def test_preflight_warns_on_missing_a2a_third_party_peer_evidence(tmp_path: Path
 
 def test_preflight_fails_on_a2a_third_party_peer_non_pass_status(tmp_path: Path) -> None:
     preflight = _load_preflight()
-    root = _skeleton(tmp_path, "2.4.4")
-    _write_a2a_evidence(root / "docs" / "evidence" / "a2a-third-party-peer.json", "2.4.4", status="FAIL", peer_type="third-party")
-    result = next(r for r in preflight.run_preflight(root, "2.4.4") if r.name == "a2a_third_party_peer_evidence")
+    root = _skeleton(tmp_path, "2.4.5")
+    _write_a2a_evidence(root / "docs" / "evidence" / "a2a-third-party-peer.json", "2.4.5", status="FAIL", peer_type="third-party")
+    result = next(r for r in preflight.run_preflight(root, "2.4.5") if r.name == "a2a_third_party_peer_evidence")
     assert result.status == "fail"
     assert "expected PASS" in result.detail
 
 
 def test_preflight_fails_on_a2a_third_party_peer_missing_required_check(tmp_path: Path) -> None:
     preflight = _load_preflight()
-    root = _skeleton(tmp_path, "2.4.4")
-    _write_a2a_evidence(root / "docs" / "evidence" / "a2a-third-party-peer.json", "2.4.4", omit_check="sseFinalEvent", peer_type="third-party")
-    result = next(r for r in preflight.run_preflight(root, "2.4.4") if r.name == "a2a_third_party_peer_evidence")
+    root = _skeleton(tmp_path, "2.4.5")
+    _write_a2a_evidence(root / "docs" / "evidence" / "a2a-third-party-peer.json", "2.4.5", omit_check="sseFinalEvent", peer_type="third-party")
+    result = next(r for r in preflight.run_preflight(root, "2.4.5") if r.name == "a2a_third_party_peer_evidence")
     assert result.status == "fail"
     assert "sseFinalEvent" in result.detail
 
 
 def test_preflight_fails_on_a2a_third_party_peer_missing_metadata(tmp_path: Path) -> None:
     preflight = _load_preflight()
-    root = _skeleton(tmp_path, "2.4.4")
-    _write_a2a_evidence(root / "docs" / "evidence" / "a2a-third-party-peer.json", "2.4.4", peer_type="third-party", omit_metadata="environment")
-    result = next(r for r in preflight.run_preflight(root, "2.4.4") if r.name == "evidence_metadata:a2a_third_party_peer")
+    root = _skeleton(tmp_path, "2.4.5")
+    _write_a2a_evidence(root / "docs" / "evidence" / "a2a-third-party-peer.json", "2.4.5", peer_type="third-party", omit_metadata="environment")
+    result = next(r for r in preflight.run_preflight(root, "2.4.5") if r.name == "evidence_metadata:a2a_third_party_peer")
     assert result.status == "fail"
     assert "environment" in result.detail
 
 
 def test_preflight_fails_on_a2a_third_party_peer_wrong_type(tmp_path: Path) -> None:
     preflight = _load_preflight()
-    root = _skeleton(tmp_path, "2.4.4")
-    _write_a2a_evidence(root / "docs" / "evidence" / "a2a-third-party-peer.json", "2.4.4", peer_type="adapter")
-    result = next(r for r in preflight.run_preflight(root, "2.4.4") if r.name == "a2a_third_party_peer_evidence")
+    root = _skeleton(tmp_path, "2.4.5")
+    _write_a2a_evidence(root / "docs" / "evidence" / "a2a-third-party-peer.json", "2.4.5", peer_type="adapter")
+    result = next(r for r in preflight.run_preflight(root, "2.4.5") if r.name == "a2a_third_party_peer_evidence")
     assert result.status == "fail"
     assert "peerType" in result.detail
 
@@ -507,3 +534,46 @@ def test_preflight_fails_when_quality_gate_evidence_regresses(tmp_path: Path) ->
     result = next(r for r in preflight.run_preflight(root, "2.4.2") if r.name == "quality_gate_evidence")
     assert result.status == "fail"
     assert "coverage fail_under" in result.detail
+
+
+def test_preflight_warns_on_missing_continue_dev_mcp_evidence(tmp_path: Path) -> None:
+    preflight = _load_preflight()
+    root = _skeleton(tmp_path, "2.4.5")
+    (root / "docs" / "evidence" / "continue-dev-mcp.json").unlink()
+    result = next(r for r in preflight.run_preflight(root, "2.4.5") if r.name == "continue_dev_mcp_evidence")
+    assert result.status == "warn"
+    assert preflight.main(["--root", str(root), "--version", "2.4.5"]) == 0
+
+
+def test_preflight_fails_on_continue_dev_mcp_non_pass_status(tmp_path: Path) -> None:
+    preflight = _load_preflight()
+    root = _skeleton(tmp_path, "2.4.5")
+    _write_continue_dev_evidence(root / "docs" / "evidence" / "continue-dev-mcp.json", "2.4.5", status="FAIL")
+    result = next(r for r in preflight.run_preflight(root, "2.4.5") if r.name == "continue_dev_mcp_evidence")
+    assert result.status == "fail"
+    assert "expected PASS" in result.detail
+
+
+def test_preflight_fails_on_continue_dev_mcp_missing_required_check(tmp_path: Path) -> None:
+    preflight = _load_preflight()
+    root = _skeleton(tmp_path, "2.4.5")
+    _write_continue_dev_evidence(root / "docs" / "evidence" / "continue-dev-mcp.json", "2.4.5", omit_check="policyDenial")
+    result = next(r for r in preflight.run_preflight(root, "2.4.5") if r.name == "continue_dev_mcp_evidence")
+    assert result.status == "fail"
+    assert "policyDenial" in result.detail
+
+
+def test_preflight_fails_on_continue_dev_mcp_missing_metadata(tmp_path: Path) -> None:
+    preflight = _load_preflight()
+    root = _skeleton(tmp_path, "2.4.5")
+    _write_continue_dev_evidence(root / "docs" / "evidence" / "continue-dev-mcp.json", "2.4.5", omit_metadata="environment")
+    result = next(r for r in preflight.run_preflight(root, "2.4.5") if r.name == "evidence_metadata:continue_dev_mcp")
+    assert result.status == "fail"
+    assert "environment" in result.detail
+
+
+def test_preflight_passes_on_continue_dev_mcp_evidence_complete(tmp_path: Path) -> None:
+    preflight = _load_preflight()
+    root = _skeleton(tmp_path, "2.4.5")
+    result = next(r for r in preflight.run_preflight(root, "2.4.5") if r.name == "continue_dev_mcp_evidence")
+    assert result.status == "pass"
