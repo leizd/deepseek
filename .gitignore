@@ -21,13 +21,17 @@
 .projects/
 .reminders/
 
-# Eval harness: generated reports (keep the dir + .gitkeep)
+# Eval harness: generated reports (keep the dir + .gitkeep + committed release artifacts)
 evals/reports/*
 !evals/reports/.gitkeep
 !evals/reports/latest.json
 !evals/reports/latest.md
 !evals/reports/agent-latest.json
 !evals/reports/agent-latest.md
+!evals/reports/baseline-compare-latest.json
+!evals/reports/baseline-compare-latest.md
+!evals/reports/security-latest.json
+!evals/reports/security-latest.md
 
 .coverage
 .mypy_cache/

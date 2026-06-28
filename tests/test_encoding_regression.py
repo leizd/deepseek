@@ -3196,7 +3196,7 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn('versionName "2.4.0"', build_gradle)
         self.assertIn("versionCode 240", build_gradle)
         self.assertIn("deepseek-infra:2.4.0", dockerfile)
-        self.assertIn("## [2.4.0] - Evaluation & Security Hardening", changelog)
+        self.assertIn("## [2.4.0] - 质量门禁与安全评测硬化", changelog)
         self.assertIn("## [2.3.4] - Release Evidence Polish & Encoding Fix", changelog)
         self.assertIn("### v2.4.0: Evaluation & Security Hardening", readme)
         self.assertIn("### v2.3.4: Release Evidence Polish & Encoding Fix", readme)

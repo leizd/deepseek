@@ -2,30 +2,30 @@
 
 本项目使用类似 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的分组方式维护变更记录。未发布内容记录在 `[Unreleased]`，正式发版时迁移到具体版本。
 
-## [2.4.0] - Evaluation & Security Hardening
+## [2.4.0] - 质量门禁与安全评测硬化
 
 **主题：质量门禁与安全评测硬化。** 本版不继续扩大协议面，而是把 v2.3 已完成的互操作能力纳入更严格的质量工程闭环：coverage、Agent Eval、baseline regression、Prompt Injection、安全语料库和 release evidence 全部可持续验证。
 
-### Added
+### 新增
 
-- Add Agent Eval strict CI gate with Tool Call Accuracy >= 0.90, Agent Success Rate >= 0.85 and Prompt Regression Pass Rate >= 0.90.
-- Add strict baseline regression comparison for RAG, Tool Policy, Prompt Injection and Agent Eval.
-- Add versioned adversarial security corpora for prompt injection, tool policy attacks and benign false-positive cases.
-- Add `run_security_corpus.py` and committed `security-latest` report artifacts.
-- Add quality gate evidence to release manifest and preflight checks.
+- **Agent Eval 严格 CI 门禁**：新增工具调用准确率（Tool Call Accuracy）>= 0.90、Agent 成功率（Agent Success Rate）>= 0.85、Prompt 回归通过率（Prompt Regression Pass Rate）>= 0.90 的硬性要求。
+- **严格基线回归对比**：为 RAG、Tool Policy、Prompt Injection 和 Agent Eval 新增与历史基线的回归对比门禁。
+- **版本化对抗安全语料库**：新增针对 prompt injection、tool policy 攻击及良性误报（benign false-positive）的版本化语料。
+- **`run_security_corpus.py` 与报告产物**：新增安全语料评测运行器，并提交 `security-latest` 报告产物。
+- **质量门禁证据化**：在 release manifest 与 preflight 检查中新增质量门禁证据校验。
 
-### Changed
+### 更改
 
-- Raise coverage gate from 75% to 80% across `pyproject.toml`, CI and README badge.
-- Promote Agent Eval from report-only to required CI gate.
-- Require baseline comparison and security corpus reports to pass before release.
-- Update README, Implementation Status, Eval Reports, Agent Eval, Security Smoke, Threat Model, Evidence Index and Release Readiness docs for v2.4.0.
+- **覆盖率门禁提升**：`pyproject.toml`、CI 与 README badge 的覆盖率门禁从 75% 提升至 80%。
+- **Agent Eval 升级**：Agent Eval 从仅生成报告提升为必需通过的 CI 门禁。
+- **发布前置条件收紧**：发布前必须通过 baseline 对比与安全语料库报告检查。
+- **文档更新**：同步更新 README、Implementation Status、Eval Reports、Agent Eval、Security Smoke、Threat Model、Evidence Index 与 Release Readiness 文档至 v2.4.0。
 
-### Security
+### 安全
 
-- Harden prompt injection and tool policy regression checks with versioned attack corpora.
-- Block release if injection bypass rate, false positive rate, tool policy pass rate or Agent success rate regress beyond v2.4 thresholds.
-- Add release evidence for security corpus metrics: block rate, false-positive rate, bypass rate, SSRF block rate, path traversal block rate and secret exfiltration block rate.
+- **Prompt Injection 与 Tool Policy 回归加固**：利用版本化攻击语料库强化回归检查。
+- **发布阻断条件**：当 injection bypass rate、false positive rate、tool policy pass rate 或 Agent success rate 低于 v2.4 阈值时，阻塞发布。
+- **安全语料指标证据化**：在 release evidence 中记录 block rate、false-positive rate、bypass rate、SSRF block rate、path traversal block rate 与 secret exfiltration block rate 等安全指标。
 
 ## [2.3.4] - Release Evidence Polish & Encoding Fix
 
