@@ -1,21 +1,21 @@
 {
   "schemaVersion": "edge-router-smoke-evidence.v1",
-  "version": "2.4.3",
-  "commit": "2165ef2",
-  "generatedAt": "2026-06-28T06:33:57Z",
+  "version": "2.4.4",
+  "commit": "8a44088",
+  "generatedAt": "2026-06-28T07:39:20Z",
   "environment": {
     "os": "Windows",
     "python": "3.13.5",
     "ci": false,
     "ollamaEnabled": "1",
-    "ollamaBaseUrl": "http://127.0.0.1:18134",
+    "ollamaBaseUrl": "http://127.0.0.1:59295",
     "ollamaProviderNote": "Ollama-compatible local smoke backend",
-    "edgeInferenceEnabled": ""
+    "edgeInferenceEnabled": "0"
   },
-  "gitSha": "2165ef2",
+  "gitSha": "8a44088",
   "gitDirty": true,
   "status": "PASS",
-  "baseUrl": "http://127.0.0.1:8017",
+  "baseUrl": "http://127.0.0.1:8000",
   "auth": "token",
   "checks": {
     "ollamaModelsListed": "PASS",

@@ -1,9 +1,9 @@
 # Edge Router Smoke Evidence
 
-- Version: 2.4.3
-- Generated: 2026-06-28T06:33:57Z
+- Version: 2.4.4
+- Generated: 2026-06-28T07:39:20Z
 - Status: PASS
-- Base URL: `http://127.0.0.1:8017`
+- Base URL: `http://127.0.0.1:8000`
 
 ## Environment
 
@@ -13,9 +13,9 @@
 | python | `3.13.5` |
 | ci | `False` |
 | ollamaEnabled | `1` |
-| ollamaBaseUrl | `http://127.0.0.1:18134` |
+| ollamaBaseUrl | `http://127.0.0.1:59295` |
 | ollamaProviderNote | `Ollama-compatible local smoke backend` |
-| edgeInferenceEnabled | `` |
+| edgeInferenceEnabled | `0` |
 
 | Check | Status |
 | --- | --- |

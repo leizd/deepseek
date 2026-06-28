@@ -31,7 +31,9 @@ if str(REPO_ROOT) not in sys.path:
 from scripts._smoke_common import SmokeFailure, bearer_headers, join_url, jsonrpc, request_json, rpc_result  # noqa: E402
 
 SCHEMA_VERSION = "a2a-external-peer-evidence.v1"
+THIRD_PARTY_SCHEMA_VERSION = "a2a-third-party-peer-evidence.v1"
 DEFAULT_EVIDENCE_PATH = REPO_ROOT / "docs" / "evidence" / "a2a-external-peer.json"
+DEFAULT_THIRD_PARTY_EVIDENCE_PATH = REPO_ROOT / "docs" / "evidence" / "a2a-third-party-peer.json"
 DEFAULT_MESSAGE = "Validate A2A external peer compatibility with artifact streaming."
 REQUIRED_CHECKS = (
     "agentCard",
@@ -238,12 +240,16 @@ def checks_from_steps(steps: list[dict[str, Any]]) -> dict[str, str]:
         "a2a.artifact_chunks": "artifactChunks",
         "a2a.sse_final_event": "sseFinalEvent",
     }
-    checks = {name: "fail" for name in REQUIRED_CHECKS}
+    checks = {name: "FAIL" for name in REQUIRED_CHECKS}
     for step in steps:
         key = mapping.get(str(step.get("name") or ""))
         if key:
-            checks[key] = "pass" if step.get("status") == "pass" else "fail"
+            checks[key] = "PASS" if step.get("status") == "pass" else "FAIL"
     return checks
+
+
+def schema_version_for_peer_type(peer_type: str) -> str:
+    return THIRD_PARTY_SCHEMA_VERSION if peer_type == "third-party" else SCHEMA_VERSION
 
 
 def run_smoke(peer_url: str, *, timeout_seconds: int, max_events: int, message: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -329,7 +335,7 @@ def build_evidence(steps: list[dict[str, Any]], *, peer: dict[str, Any], peer_ty
     checks = checks_from_steps(steps)
     failed = [step for step in steps if step.get("status") == "fail"]
     return {
-        "schemaVersion": SCHEMA_VERSION,
+        "schemaVersion": schema_version_for_peer_type(peer_type),
         "version": app_version(),
         "commit": git_value("rev-parse", "--short", "HEAD") or "unknown",
         "generatedAt": utc_now(),
@@ -343,8 +349,9 @@ def build_evidence(steps: list[dict[str, Any]], *, peer: dict[str, Any], peer_ty
             "type": peer_type,
             "protocolVersion": peer.get("protocolVersion") or "",
         },
+        "peerType": peer_type,
         "checks": checks,
-        "status": "FAIL" if failed or any(checks[name] != "pass" for name in REQUIRED_CHECKS) else "PASS",
+        "status": "FAIL" if failed or any(checks[name] != "PASS" for name in REQUIRED_CHECKS) else "PASS",
         "steps": steps,
     }
 
@@ -352,6 +359,45 @@ def build_evidence(steps: list[dict[str, Any]], *, peer: dict[str, Any], peer_ty
 def write_evidence(path: Path, evidence: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(evidence, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def render_markdown(evidence: dict[str, Any]) -> str:
+    peer_raw = evidence.get("peer")
+    peer: dict[str, Any] = peer_raw if isinstance(peer_raw, dict) else {}
+    lines = [
+        "# A2A Third-Party Peer Evidence" if evidence.get("peerType") == "third-party" else "# A2A External Peer Evidence",
+        "",
+        f"- Version: {evidence.get('version')}",
+        f"- Generated: {evidence.get('generatedAt')}",
+        f"- Status: {evidence.get('status')}",
+        f"- Peer: {peer.get('name') or 'external-peer'}",
+        f"- Peer Type: `{evidence.get('peerType') or peer.get('type') or ''}`",
+        f"- Protocol: `{peer.get('protocolVersion') or ''}`",
+        f"- URL: `{peer.get('url') or ''}`",
+        f"- Endpoint: `{peer.get('endpoint') or ''}`",
+        "",
+        "| Check | Status |",
+        "| --- | --- |",
+    ]
+    checks_raw = evidence.get("checks")
+    checks: dict[str, Any] = checks_raw if isinstance(checks_raw, dict) else {}
+    for name in REQUIRED_CHECKS:
+        lines.append(f"| {name} | {checks.get(name, 'MISSING')} |")
+    lines.extend(["", "## Steps", "", "| Step | Status | Detail |", "| --- | --- | --- |"])
+    steps_raw = evidence.get("steps")
+    steps: list[Any] = steps_raw if isinstance(steps_raw, list) else []
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        detail = str(step.get("detail") or "").replace("|", "\\|")
+        lines.append(f"| {step.get('name')} | {step.get('status')} | {detail} |")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def write_markdown(path: Path, evidence: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(render_markdown(evidence), encoding="utf-8")
 
 
 def find_free_port() -> int:
@@ -396,7 +442,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run external A2A peer compatibility smoke and write structured evidence.")
     parser.add_argument("--peer-url", default="", help="External A2A peer service root or JSON-RPC endpoint. Omit to start the bundled independent-process peer.")
     parser.add_argument("--peer-type", default="independent-process", choices=("independent-process", "third-party", "adapter"), help="Evidence classification for the peer.")
-    parser.add_argument("--out", type=Path, default=DEFAULT_EVIDENCE_PATH, help="Evidence JSON output path.")
+    parser.add_argument("--out", type=Path, default=None, help="Evidence JSON output path. Defaults to the peer-type evidence path.")
+    parser.add_argument("--markdown", type=Path, default=None, help="Optional Markdown evidence output path.")
     parser.add_argument("--message", default=DEFAULT_MESSAGE)
     parser.add_argument("--timeout", type=int, default=30)
     parser.add_argument("--max-events", type=int, default=50)
@@ -406,6 +453,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    peer_type = str(args.peer_type or "independent-process")
+    out_path = args.out or (DEFAULT_THIRD_PARTY_EVIDENCE_PATH if peer_type == "third-party" else DEFAULT_EVIDENCE_PATH)
     process: subprocess.Popen[str] | None = None
     try:
         peer_url = str(args.peer_url or "").strip()
@@ -414,23 +463,31 @@ def main(argv: list[str] | None = None) -> int:
         steps, peer = run_smoke(peer_url, timeout_seconds=args.timeout, max_events=args.max_events, message=args.message)
         if process is not None:
             peer["type"] = "independent-process"
-        evidence = build_evidence(steps, peer=peer, peer_type=str(args.peer_type or "independent-process"))
-        write_evidence(args.out, evidence)
+        evidence = build_evidence(steps, peer=peer, peer_type=peer_type)
+        write_evidence(out_path, evidence)
+        if args.markdown:
+            write_markdown(args.markdown, evidence)
         if args.json:
             print(json.dumps(evidence, ensure_ascii=False, indent=2))
         else:
             print(f"A2A external peer evidence: {evidence['status']} ({len(evidence['steps'])} steps)")
-            print(f"Wrote {args.out}")
+            print(f"Wrote {out_path}")
+            if args.markdown:
+                print(f"Wrote {args.markdown}")
         return 0 if evidence["status"] == "PASS" else 1
     except SmokeFailure as exc:
         steps = [{"name": "a2a.external_peer", "status": "fail", "detail": str(exc), "data": {}}]
-        evidence = build_evidence(steps, peer={"url": str(args.peer_url or "")}, peer_type=str(args.peer_type or "independent-process"))
-        write_evidence(args.out, evidence)
+        evidence = build_evidence(steps, peer={"url": str(args.peer_url or "")}, peer_type=peer_type)
+        write_evidence(out_path, evidence)
+        if args.markdown:
+            write_markdown(args.markdown, evidence)
         if args.json:
             print(json.dumps(evidence, ensure_ascii=False, indent=2))
         else:
             print(f"A2A external peer evidence: FAIL ({exc})")
-            print(f"Wrote {args.out}")
+            print(f"Wrote {out_path}")
+            if args.markdown:
+                print(f"Wrote {args.markdown}")
         return 1
     finally:
         if process is not None:

@@ -1,6 +1,6 @@
 # A2A External Peer Smoke
 
-适用版本：DeepSeek Infra v2.4.3。
+适用版本：DeepSeek Infra v2.4.4。
 
 本页说明如何在无 GUI、无 API key 的环境中复现 A2A external peer 兼容性证据。这里的 external peer 指独立进程或外部进程暴露的 A2A server；它不等同于真实第三方生态实现。
 
@@ -27,6 +27,7 @@ python scripts/smoke_a2a_external_peer.py \
   --peer-url http://127.0.0.1:8002 \
   --peer-type independent-process \
   --out docs/evidence/a2a-external-peer.json \
+  --markdown docs/evidence/a2a-external-peer.md \
   --json
 ```
 
@@ -56,32 +57,50 @@ docs/evidence/a2a-external-peer.json
 ```json
 {
   "schemaVersion": "a2a-external-peer-evidence.v1",
-  "version": "2.4.1",
+  "version": "2.4.4",
+  "commit": "abc1234",
+  "generatedAt": "2026-06-28T00:00:00Z",
+  "environment": {
+    "os": "Windows",
+    "python": "3.12.0",
+    "ci": false
+  },
   "peer": {
     "name": "A2A Interop Peer",
     "type": "independent-process"
   },
+  "peerType": "independent-process",
   "checks": {
-    "agentCard": "pass",
-    "messageSend": "pass",
-    "messageStream": "pass",
-    "tasksGet": "pass",
-    "tasksCancel": "pass",
-    "tasksList": "pass",
-    "artifactChunks": "pass",
-    "sseFinalEvent": "pass"
+    "agentCard": "PASS",
+    "messageSend": "PASS",
+    "messageStream": "PASS",
+    "tasksGet": "PASS",
+    "tasksCancel": "PASS",
+    "tasksList": "PASS",
+    "artifactChunks": "PASS",
+    "sseFinalEvent": "PASS"
   },
   "status": "PASS"
 }
 ```
 
-`scripts/preflight_release.py` 会把这份 evidence 作为硬检查。缺失、版本不一致、状态非 `PASS` 或关键 check 非 `pass` 都会导致 preflight FAIL。
+`scripts/preflight_release.py` 会把这份 evidence 作为硬检查。缺失、版本不一致、状态非 `PASS` 或关键 check 非 `PASS` 都会导致 preflight FAIL。
 
 ## 第三方生态说明
 
-真实第三方生态实现仍使用分层标注：
+第三方生态实现使用分层标注：
 
 - `docs/evidence/a2a-external-peer.json`：最低交付标准，必须 PASS。
-- `docs/evidence/a2a-third-party-peer.json`：增强展示标准，缺失时 preflight 只 WARNING。
+- `docs/evidence/a2a-third-party-peer.json` / `.md`：v2.4.4 起的第三方生态展示标准，缺失时 preflight 只 WARNING；存在时必须 `peerType=third-party` 且八类 checks 全 PASS。
 
-当 LangGraph / CrewAI / Google A2A reference 等真实外部实现通过同一 smoke 后，再把 evidence 写入 `docs/evidence/a2a-third-party-peer.json`，并更新 [a2a-third-party-plan.md](a2a-third-party-plan.md) 与 [../COMPATIBILITY.md](../COMPATIBILITY.md)。
+第三方或第三方风格 A2A-compatible peer 可用时，运行：
+
+```bash
+python scripts/smoke_a2a_external_peer.py \
+  --peer-url http://<third-party-host>:<port> \
+  --peer-type third-party \
+  --out docs/evidence/a2a-third-party-peer.json \
+  --markdown docs/evidence/a2a-third-party-peer.md
+```
+
+LangGraph / CrewAI / Google A2A reference 等具体实现通过同一 smoke 后，继续在 [a2a-third-party-plan.md](a2a-third-party-plan.md) 与 [../COMPATIBILITY.md](../COMPATIBILITY.md) 补充实现名称、版本、commit 与日期。

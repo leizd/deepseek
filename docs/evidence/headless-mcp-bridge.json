@@ -1,14 +1,14 @@
 {
   "schemaVersion": "headless-mcp-bridge-evidence.v1",
-  "version": "2.4.3",
-  "commit": "2165ef2",
-  "generatedAt": "2026-06-28T06:30:56Z",
+  "version": "2.4.4",
+  "commit": "8a44088",
+  "generatedAt": "2026-06-28T07:38:26Z",
   "environment": {
     "os": "Windows",
     "python": "3.13.5",
     "ci": false
   },
-  "gitSha": "2165ef2",
+  "gitSha": "8a44088",
   "gitDirty": true,
   "status": "PASS",
   "transport": {
@@ -50,7 +50,7 @@
         "serverInfo": {
           "name": "deepseek-infra",
           "title": "DeepSeek Infra MCP Tool Hub",
-          "version": "2.4.3"
+          "version": "2.4.4"
         }
       }
     },

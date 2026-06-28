@@ -312,13 +312,49 @@ def test_preflight_fails_on_incomplete_a2a_external_peer_evidence(tmp_path: Path
     assert "artifactChunks" in result.detail
 
 
-def test_preflight_warns_on_missing_a2a_third_party_evidence(tmp_path: Path) -> None:
+def test_preflight_warns_on_missing_a2a_third_party_peer_evidence(tmp_path: Path) -> None:
     preflight = _load_preflight()
     root = _skeleton(tmp_path, "2.3.3")
     (root / "docs" / "evidence" / "a2a-third-party-peer.json").unlink()
-    result = next(r for r in preflight.run_preflight(root, "2.3.3") if r.name == "a2a_third_party_evidence")
+    result = next(r for r in preflight.run_preflight(root, "2.3.3") if r.name == "a2a_third_party_peer_evidence")
     assert result.status == "warn"
     assert preflight.main(["--root", str(root), "--version", "2.3.3"]) == 0
+
+
+def test_preflight_fails_on_a2a_third_party_peer_non_pass_status(tmp_path: Path) -> None:
+    preflight = _load_preflight()
+    root = _skeleton(tmp_path, "2.4.4")
+    _write_a2a_evidence(root / "docs" / "evidence" / "a2a-third-party-peer.json", "2.4.4", status="FAIL", peer_type="third-party")
+    result = next(r for r in preflight.run_preflight(root, "2.4.4") if r.name == "a2a_third_party_peer_evidence")
+    assert result.status == "fail"
+    assert "expected PASS" in result.detail
+
+
+def test_preflight_fails_on_a2a_third_party_peer_missing_required_check(tmp_path: Path) -> None:
+    preflight = _load_preflight()
+    root = _skeleton(tmp_path, "2.4.4")
+    _write_a2a_evidence(root / "docs" / "evidence" / "a2a-third-party-peer.json", "2.4.4", omit_check="sseFinalEvent", peer_type="third-party")
+    result = next(r for r in preflight.run_preflight(root, "2.4.4") if r.name == "a2a_third_party_peer_evidence")
+    assert result.status == "fail"
+    assert "sseFinalEvent" in result.detail
+
+
+def test_preflight_fails_on_a2a_third_party_peer_missing_metadata(tmp_path: Path) -> None:
+    preflight = _load_preflight()
+    root = _skeleton(tmp_path, "2.4.4")
+    _write_a2a_evidence(root / "docs" / "evidence" / "a2a-third-party-peer.json", "2.4.4", peer_type="third-party", omit_metadata="environment")
+    result = next(r for r in preflight.run_preflight(root, "2.4.4") if r.name == "evidence_metadata:a2a_third_party_peer")
+    assert result.status == "fail"
+    assert "environment" in result.detail
+
+
+def test_preflight_fails_on_a2a_third_party_peer_wrong_type(tmp_path: Path) -> None:
+    preflight = _load_preflight()
+    root = _skeleton(tmp_path, "2.4.4")
+    _write_a2a_evidence(root / "docs" / "evidence" / "a2a-third-party-peer.json", "2.4.4", peer_type="adapter")
+    result = next(r for r in preflight.run_preflight(root, "2.4.4") if r.name == "a2a_third_party_peer_evidence")
+    assert result.status == "fail"
+    assert "peerType" in result.detail
 
 
 def test_preflight_warns_on_missing_edge_router_smoke_evidence(tmp_path: Path) -> None:
