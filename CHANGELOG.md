@@ -2,6 +2,29 @@
 
 本项目使用类似 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的分组方式维护变更记录。未发布内容记录在 `[Unreleased]`，正式发版时迁移到具体版本。
 
+## [2.4.5] - Continue.dev MCP Compatibility Patch
+
+**主题：Continue.dev MCP 兼容性证据补丁。** 本版不新增核心运行时能力，重点把 MCP Client Compatibility 中仍处于 🔲 的 Continue.dev 从 Not tested 推进为可复现的配置文档与结构化 evidence，验证 Continue.dev 能通过 DeepSeek Infra 的 MCP endpoint 完成 initialize、tools/list、低风险工具调用、Tool Policy 拦截与系统提示无污染检查。
+
+### 新增
+
+- **Continue.dev MCP 集成文档**：新增 `docs/integrations/continue-dev.md`，提供 Continue.dev 连接 DeepSeek Infra `/mcp` 的配置片段、auth disabled / Bearer token 两种模式、验证步骤与排障流程。
+- **Continue.dev MCP evidence**：新增 `docs/evidence/continue-dev-mcp.json` 与 `docs/evidence/continue-dev-mcp.md`，记录 Continue.dev MCP 客户端的实机验收结果。
+- **Continue.dev evidence schema**：新增 `evals/schemas/continue_dev_mcp_evidence.schema.json`，固定 `client`、`version`、`commit`、`environment`、`status` 与关键 checks。
+- **Preflight Continue.dev evidence 检查**：`scripts/preflight_release.py` 新增 `continue_dev_mcp_evidence` 检查；缺失时 WARNING，提交后若 status、metadata 或关键 checks 不完整则 FAIL。
+
+### 更改
+
+- **版本号全仓同步**：README badge、`deepseek_infra/core/config.py` 的 `app_version`、Dockerfile tag、Android `versionName` / `versionCode`、`.github/workflows/ci.yml` 的 preflight 版本、所有文档「适用版本」与 eval / agent / baseline / security 报告版本全部更新到 2.4.5。
+- **Compatibility Matrix 更新**：将 Continue.dev 从 `🔲 Not tested` 更新为 `✅ Tested`，并链接到 `docs/integrations/continue-dev.md` 与 `docs/evidence/continue-dev-mcp.json`。
+- **Evidence Index 更新**：将 Continue.dev MCP evidence 纳入 `docs/EVIDENCE_INDEX.md` 与 release manifest evidence 清单。
+- **Release Readiness 更新**：将 Continue.dev MCP evidence 纳入 v2.4.5 发版前检查流程。
+
+### 测试
+
+- 新增 Continue.dev evidence schema / preflight 测试，覆盖 evidence 缺失 WARNING、status 非 PASS 失败、必要 checks 缺失失败、metadata 缺失失败与完整 PASS。
+- 更新 docs encoding / compatibility matrix 测试，确保 Continue.dev 集成文档、evidence 索引与兼容矩阵状态同步。
+
 ## [2.4.4] - A2A Third-Party Ecosystem Evidence Patch
 
 **主题：A2A 第三方生态互操作证据补丁。** 本版不新增核心运行时能力，重点把 v2.3.x / v2.4.x 中仍处于 🟡 的 Third-party A2A ecosystem peer 从 adapter path documented 推进为结构化 third-party evidence，验证 DeepSeek Infra 的 A2AClient 能连接外部 A2A-compatible peer 并完成 Agent Card、message/send、message/stream、tasks/get、tasks/cancel、tasks/list、artifact chunks 与 SSE final event 全流程。

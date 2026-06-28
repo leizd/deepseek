@@ -1,8 +1,8 @@
 # Compatibility Matrix（兼容性矩阵）
 
-适用版本：v2.4.4。
+适用版本：v2.4.5。
 
-这页只记录已经可复现的互操作结果，不把“协议上应该兼容”写成“实机已验证”。v2.3.0 的重点是把 v2.2.x 已完成的 MCP / A2A / 安全评测能力真正拿到外部实现里验一遍：MCP 客户端与官方 MCP Python SDK 的 Streamable HTTP transport 真正互通（SSE 响应解析修复）、A2A 客户端与独立进程 peer 端到端验证、Prompt Injection 对抗评测从 soft gate 毕业为 CI 硬门禁。v2.4.2 已完成 Claude Desktop / Cursor 的 GUI 实机验证并填入证据；v2.4.3 将 Edge Router 从 runbook-only 推进为结构化 smoke evidence；v2.4.4 将 Third-party A2A ecosystem peer 推进为 third-party-style structured evidence。
+这页只记录已经可复现的互操作结果，不把“协议上应该兼容”写成“实机已验证”。v2.3.0 的重点是把 v2.2.x 已完成的 MCP / A2A / 安全评测能力真正拿到外部实现里验一遍：MCP 客户端与官方 MCP Python SDK 的 Streamable HTTP transport 真正互通（SSE 响应解析修复）、A2A 客户端与独立进程 peer 端到端验证、Prompt Injection 对抗评测从 soft gate 毕业为 CI 硬门禁。v2.4.2 已完成 Claude Desktop / Cursor 的 GUI 实机验证并填入证据；v2.4.3 将 Edge Router 从 runbook-only 推进为结构化 smoke evidence；v2.4.5 将 Third-party A2A ecosystem peer 推进为 third-party-style structured evidence；v2.4.5 将 Continue.dev 从 Not tested 推进为结构化 MCP evidence。
 
 ## Compatibility Smoke Pack
 
@@ -62,7 +62,7 @@ python scripts/smoke_mcp_compat.py --token <local-token> --external-server-url h
 | `curl` JSON-RPC | ✅ Tested | `POST /mcp` | 适合排查 token、协议响应和工具目录。 |
 | Claude Desktop | ✅ GUI tested | [integrations/claude-desktop.md](integrations/claude-desktop.md) | Claude Desktop 0.9.0, commit `54228c4`, Windows 11, 2026-06-28：tools/list + `data_transform` + `fetch_url` SSRF blocked + 系统提示无污染 |
 | Cursor | ✅ GUI tested | [integrations/cursor.md](integrations/cursor.md) | Cursor 0.48.0, commit `54228c4`, Windows 11, 2026-06-28：tools/list + `data_transform` + `fetch_url` SSRF blocked + 系统提示无污染 |
-| Continue.dev | 🔲 Not tested | - | 待补配置和实机验证。 |
+| Continue.dev | ✅ Tested | [integrations/continue-dev.md](integrations/continue-dev.md) + [evidence/continue-dev-mcp.json](evidence/continue-dev-mcp.json) | Continue.dev 1.2.0, commit `2e2782e`, Windows 11, 2026-06-28：tools/list + `data_transform` + `fetch_url` SSRF blocked + 系统提示无污染 |
 
 ## MCP External Server Bridge
 
