@@ -16,12 +16,16 @@ import deepseek_infra.infra.rag.local_rag as local_rag
 import deepseek_infra.infra.observability.observability as observability
 import deepseek_infra.infra.data.projects as projects
 import deepseek_infra.infra.data.reminders as reminders
+import deepseek_infra.infra.tool_runtime.generated_files as generated_files
 import deepseek_infra.infra.tool_runtime.search as search
 import deepseek_infra.infra.gateway.budget_manager as budget_manager
 import deepseek_infra.infra.gateway.resiliency as resiliency
 import deepseek_infra.infra.gateway.scheduler as scheduler
 import deepseek_infra.infra.gateway.semantic_cache as semantic_cache
 import deepseek_infra.infra.tool_runtime.tools as tools
+import deepseek_infra.infra.workspace.artifacts as workspace_artifacts
+import deepseek_infra.infra.workspace.exports as workspace_exports
+import deepseek_infra.infra.workspace.saved_items as workspace_saved_items
 
 
 @pytest.fixture
@@ -31,6 +35,7 @@ def tmp_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Pa
     agent_runs_dir = tmp_path / ".agent-runs"
     memory_dir = tmp_path / ".memory"
     search_cache_dir = tmp_path / ".search-cache"
+    generated_dir = tmp_path / ".generated"
     reminders_dir = tmp_path / ".reminders"
     projects_dir = tmp_path / ".projects"
     local_rag_dir = tmp_path / ".local-rag"
@@ -45,6 +50,7 @@ def tmp_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Pa
     monkeypatch.setattr(config, "MEMORY_DIR", memory_dir)
     monkeypatch.setattr(config, "MEMORY_FILE", memory_dir / "memories.json")
     monkeypatch.setattr(config, "SEARCH_CACHE_DIR", search_cache_dir)
+    monkeypatch.setattr(config, "GENERATED_DIR", generated_dir)
     monkeypatch.setattr(config, "REMINDERS_DIR", reminders_dir)
     monkeypatch.setattr(config, "REMINDERS_FILE", reminders_dir / "reminders.json")
     monkeypatch.setattr(config, "PROJECTS_DIR", projects_dir)
@@ -64,6 +70,7 @@ def tmp_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Pa
     monkeypatch.setattr(memory, "MEMORY_DIR", memory_dir)
     monkeypatch.setattr(memory, "MEMORY_FILE", memory_dir / "memories.json")
     monkeypatch.setattr(search, "SEARCH_CACHE_DIR", search_cache_dir)
+    monkeypatch.setattr(generated_files, "GENERATED_DIR", generated_dir)
     monkeypatch.setattr(reminders, "REMINDERS_DIR", reminders_dir)
     monkeypatch.setattr(reminders, "REMINDERS_FILE", reminders_dir / "reminders.json")
     monkeypatch.setattr(projects, "PROJECTS_DIR", projects_dir)
@@ -91,6 +98,9 @@ def tmp_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Pa
     monkeypatch.setattr(tools, "FILE_CACHE_DIR", file_cache_dir)
     monkeypatch.setattr(tools, "SEARCH_CACHE_DIR", search_cache_dir)
     monkeypatch.setattr(tools, "PROJECTS_DIR", projects_dir)
+    monkeypatch.setattr(workspace_artifacts.legacy_projects, "PROJECTS_DIR", projects_dir)
+    monkeypatch.setattr(workspace_saved_items.legacy_projects, "PROJECTS_DIR", projects_dir)
+    monkeypatch.setattr(workspace_exports.legacy_projects, "PROJECTS_DIR", projects_dir)
 
     files._load_cached_file_cached.cache_clear()
     yield tmp_path

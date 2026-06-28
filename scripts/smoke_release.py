@@ -42,6 +42,10 @@ def build_stages(args: argparse.Namespace) -> list[tuple[str, list[str]]]:
             doctor_cmd += ["--with-server", "--base-url", args.base_url]
         stages.append(("doctor", doctor_cmd))
 
+    if not args.skip_workspace:
+        workspace_cmd = [_py(), str(REPO_ROOT / "scripts" / "smoke_workspace.py"), "--offline", "--out", args.workspace_out]
+        stages.append(("workspace_core", workspace_cmd))
+
     if not args.skip_evals:
         stages.append(
             (
@@ -169,7 +173,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--compare-out", default=str(REPO_ROOT / "evals" / "reports" / "baseline-compare-latest.json"))
     parser.add_argument("--security-out", default=str(REPO_ROOT / "evals" / "reports" / "security-latest.json"))
     parser.add_argument("--security-markdown", default=str(REPO_ROOT / "evals" / "reports" / "security-latest.md"))
+    parser.add_argument("--workspace-out", default=str(REPO_ROOT / "docs" / "evidence" / "workspace-v2.5.0.json"))
     parser.add_argument("--skip-doctor", action="store_true")
+    parser.add_argument("--skip-workspace", action="store_true")
     parser.add_argument("--skip-evals", action="store_true")
     parser.add_argument("--skip-security", action="store_true")
     parser.add_argument("--skip-agent", action="store_true")

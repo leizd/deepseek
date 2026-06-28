@@ -10,7 +10,7 @@ and Edge Router evidence is strict when submitted, that key docs do not contain
 encoding corruption (since v2.3.4), and (since v2.3.1) that GUI interop evidence
 for Claude Desktop / Cursor has been recorded in ``docs/COMPATIBILITY.md``.
 
-    python scripts/preflight_release.py --version 2.4.6
+    python scripts/preflight_release.py --version 2.5.0
 
 Exits 1 on any FAIL; WARNINGs do not fail. Version defaults to
 ``settings.app_version``.
@@ -273,7 +273,7 @@ def check_quality_gate_evidence(root: Path, version: str) -> CheckResult:
             failures.append("latest.json injection gate is not PASS/hard")
     if failures:
         return CheckResult("quality_gate_evidence", STATUS_FAIL, "; ".join(failures), details)
-    return CheckResult("quality_gate_evidence", STATUS_PASS, "v2.4 quality gate evidence is complete", details)
+    return CheckResult("quality_gate_evidence", STATUS_PASS, "quality gate evidence is complete", details)
 
 
 def check_release_exclusions(root: Path) -> CheckResult:
@@ -613,6 +613,63 @@ def check_openai_compatible_sdk_evidence(root: Path, version: str) -> CheckResul
     )
 
 
+def check_workspace_core_evidence(root: Path, version: str) -> CheckResult:
+    path = root / "docs" / "evidence" / "workspace-v2.5.0.json"
+    if not path.is_file():
+        return CheckResult(
+            "workspace_core_evidence",
+            STATUS_FAIL,
+            "Workspace Core evidence missing; run scripts/smoke_workspace.py --offline",
+            {"path": str(path)},
+        )
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return CheckResult("workspace_core_evidence", STATUS_FAIL, f"cannot parse Workspace Core evidence: {exc}", {"path": str(path)})
+    metadata_fail = _check_evidence_metadata("workspace_core", data, path)
+    if metadata_fail:
+        return metadata_fail
+    reported = str(data.get("version") or "")
+    if reported != version:
+        return CheckResult(
+            "workspace_core_evidence",
+            STATUS_FAIL,
+            f"Workspace Core evidence version is {reported!r}, expected {version!r}",
+            {"version": reported, "expected": version},
+        )
+    if data.get("status") != "PASS":
+        return CheckResult(
+            "workspace_core_evidence",
+            STATUS_FAIL,
+            f"Workspace Core evidence status is {data.get('status')!r}, expected PASS",
+            {"status": data.get("status")},
+        )
+    checks = data.get("checks")
+    check_status = {str(k): str(v).upper() for k, v in checks.items()} if isinstance(checks, dict) else {}
+    required = (
+        "projectCreate",
+        "savedItemCreate",
+        "artifactList",
+        "conversationExport",
+        "projectExportZip",
+        "secretRedaction",
+    )
+    missing_or_failed = [name for name in required if check_status.get(name) != "PASS"]
+    if missing_or_failed:
+        return CheckResult(
+            "workspace_core_evidence",
+            STATUS_FAIL,
+            f"Workspace Core evidence missing PASS checks: {', '.join(missing_or_failed)}",
+            {"missingOrFailed": missing_or_failed},
+        )
+    return CheckResult(
+        "workspace_core_evidence",
+        STATUS_PASS,
+        "Workspace Core evidence recorded",
+        {"path": str(path), "checks": list(required)},
+    )
+
+
 def check_gui_interop_evidence(root: Path) -> CheckResult:
     """Verify Claude Desktop / Cursor GUI evidence is recorded in COMPATIBILITY.md.
 
@@ -694,6 +751,7 @@ def run_preflight(root: Path, version: str) -> list[CheckResult]:
         check_edge_router_smoke_evidence(root, version),
         check_continue_dev_mcp_evidence(root, version),
         check_openai_compatible_sdk_evidence(root, version),
+        check_workspace_core_evidence(root, version),
         check_gui_interop_evidence(root),
     ]
 
