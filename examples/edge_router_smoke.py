@@ -89,14 +89,19 @@ def checks_from_steps(steps: list[dict[str, Any]]) -> dict[str, str]:
         "edgeStatusEndpoint": "PASS" if edge_step.get("status") in {"pass", "warn"} else "FAIL",
         "fallbackReady": "PASS" if edge_available or local_call_passed else ("FAIL" if edge_step.get("status") == "fail" else "WARNING"),
     }
-    cascade_step = by_name.get("cascade.status") or {}
-    cascade_chat_step = by_name.get("cascade.chat") or {}
+    cascade_step_raw = by_name.get("cascade.status")
+    cascade_chat_raw = by_name.get("cascade.chat")
+    cascade_step: dict[str, Any] = cascade_step_raw if isinstance(cascade_step_raw, dict) else {}
+    cascade_chat_step: dict[str, Any] = cascade_chat_raw if isinstance(cascade_chat_raw, dict) else {}
     if cascade_step:
-        cascade_data = cascade_step.get("data") if isinstance(cascade_step.get("data"), dict) else {}
+        cascade_data_raw = cascade_step.get("data")
+        cascade_data: dict[str, Any] = cascade_data_raw if isinstance(cascade_data_raw, dict) else {}
         cascade_enabled = bool(cascade_data.get("cascadeEnabled"))
         draft_provider = str(cascade_data.get("draftProvider") or "")
-        cascade_chat_data = cascade_chat_step.get("data") if isinstance(cascade_chat_step.get("data"), dict) else {}
-        model_cascade = cascade_chat_data.get("modelCascade", {}) if isinstance(cascade_chat_data.get("modelCascade"), dict) else {}
+        cascade_chat_data_raw = cascade_chat_step.get("data")
+        cascade_chat_data: dict[str, Any] = cascade_chat_data_raw if isinstance(cascade_chat_data_raw, dict) else {}
+        mc_raw = cascade_chat_data.get("modelCascade")
+        model_cascade: dict[str, Any] = mc_raw if isinstance(mc_raw, dict) else {}
         has_cascade_diag = bool(model_cascade)
         checks.update({
             "cascadeEnabled": "PASS" if cascade_enabled else "WARNING",
