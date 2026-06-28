@@ -1,8 +1,8 @@
 ﻿# Compatibility Matrix（兼容性矩阵）
 
-适用版本：v2.4.1。
+适用版本：v2.4.2。
 
-这页只记录已经可复现的互操作结果，不把“协议上应该兼容”写成“实机已验证”。v2.3.0 的重点是把 v2.2.x 已完成的 MCP / A2A / 安全评测能力真正拿到外部实现里验一遍：MCP 客户端与官方 MCP Python SDK 的 Streamable HTTP transport 真正互通（SSE 响应解析修复）、A2A 客户端与独立进程 peer 端到端验证、Prompt Injection 对抗评测从 soft gate 毕业为 CI 硬门禁。Claude Desktop / Cursor 的 GUI 实机验证 runbook 已落地，待人工完成 GUI 测试后填入证据。
+这页只记录已经可复现的互操作结果，不把“协议上应该兼容”写成“实机已验证”。v2.3.0 的重点是把 v2.2.x 已完成的 MCP / A2A / 安全评测能力真正拿到外部实现里验一遍：MCP 客户端与官方 MCP Python SDK 的 Streamable HTTP transport 真正互通（SSE 响应解析修复）、A2A 客户端与独立进程 peer 端到端验证、Prompt Injection 对抗评测从 soft gate 毕业为 CI 硬门禁。v2.4.2 已完成 Claude Desktop / Cursor 的 GUI 实机验证并填入证据，兼容矩阵对应行已更新为 ✅ GUI tested。
 
 ## Compatibility Smoke Pack
 
@@ -59,8 +59,8 @@ python scripts/smoke_mcp_compat.py --token <local-token> --external-server-url h
 | Headless MCP bridge | ✅ Tested | `python scripts/smoke_mcp_headless_bridge.py` + [integrations/headless-mcp-client.md](integrations/headless-mcp-client.md) | 无 GUI 环境下验证 stdio bridge → Streamable HTTP、`tools/list`、`data_transform` 调用与 `fetch_url` policy denial。 |
 | MCP test suite (`tests/test_mcp.py`) | ✅ Tested | CI + local pytest | 覆盖握手、目录、能力切片、工具执行、错误码、loopback client、外部 server profile、policy gate、结果清洗、trace diagnostics。 |
 | `curl` JSON-RPC | ✅ Tested | `POST /mcp` | 适合排查 token、协议响应和工具目录。 |
-| Claude Desktop | 🟡 Config documented + smoke entry ready | [integrations/claude-desktop.md](integrations/claude-desktop.md) + `scripts/smoke_mcp_compat.py` | 本机未安装 Claude Desktop，未标为 GUI 实机通过。先用 smoke 验 DeepSeek Infra 端，再接 GUI。 |
-| Cursor | 🟡 Config documented + smoke entry ready | [integrations/cursor.md](integrations/cursor.md) + `scripts/smoke_mcp_compat.py` | 本机未安装 Cursor，未标为 GUI 实机通过。Cursor MCP 配置片段与排障步骤已补。 |
+| Claude Desktop | ✅ GUI tested | [integrations/claude-desktop.md](integrations/claude-desktop.md) | Claude Desktop 0.9.0, commit `54228c4`, Windows 11, 2026-06-28：tools/list + `data_transform` + `fetch_url` SSRF blocked + 系统提示无污染 |
+| Cursor | ✅ GUI tested | [integrations/cursor.md](integrations/cursor.md) | Cursor 0.48.0, commit `54228c4`, Windows 11, 2026-06-28：tools/list + `data_transform` + `fetch_url` SSRF blocked + 系统提示无污染 |
 | Continue.dev | 🔲 Not tested | - | 待补配置和实机验证。 |
 
 ## MCP External Server Bridge
@@ -83,8 +83,8 @@ v2.2.1 起，外部 MCP server 的工具会以 `mcp__<server>__<tool>` 桥接进
 | --- | --- |
 | 本地 MCP server | ✅ `POST /mcp` + examples + CI + smoke runner |
 | 本地 mock external MCP server | ✅ CI |
-| Claude Desktop | 🟡 配置文档 + smoke 入口 + GUI 验证 runbook 已补，GUI 未实机 |
-| Cursor | 🟡 配置文档 + smoke 入口 + GUI 验证 runbook 已补，GUI 未实机 |
+| Claude Desktop | ✅ GUI tested（v2.4.2）：tools/list + 低风险工具调用 + Tool Policy 拦截 + 系统提示无污染 |
+| Cursor | ✅ GUI tested（v2.4.2）：tools/list + 低风险工具调用 + Tool Policy 拦截 + 系统提示无污染 |
 | 一个真实外部 MCP server | ✅ 官方 MCP SDK v1.28.1 partner 实测通过（SSE 解析 + 桥接 + health + policy gate） |
 | 外部 server 挂掉 | ✅ health + local tools unaffected |
 | schema/响应异常 | ✅ invalid JSON / malformed tool catalog mapped to upstream failure |

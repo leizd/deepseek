@@ -1,6 +1,6 @@
 ﻿# Implementation Status（实现状态矩阵）
 
-适用版本：v2.4.1。
+适用版本：v2.4.2。
 
 README 把 DeepSeek Infra 描述成一个 local-first agentic AI infrastructure platform。这一页回答一个更重要的问题：**每个模块到底落地到什么程度**——代码在哪、测试在哪、怎么亲手验证。所有链接都指向仓库内真实存在的文件；如果某格是 🟡 或 ❌，说明那部分还没做完，我们直接写出来，而不是让 README 替它画饼。
 
@@ -81,7 +81,7 @@ README 把 DeepSeek Infra 描述成一个 local-first agentic AI infrastructure 
 - **代码**：[server.py](../deepseek_infra/infra/mcp/server.py)（JSON-RPC 2.0：initialize / tools / resources / prompts）、[registry.py](../deepseek_infra/infra/mcp/registry.py)（17 工具 → MCP tools + 风险注解）、[permissions.py](../deepseek_infra/infra/mcp/permissions.py) + [adapters.py](../deepseek_infra/infra/mcp/adapters.py)（每个 tools/call 走 Tool Policy 闸门）、[client.py](../deepseek_infra/infra/mcp/client.py)（出方向 MCP client：timeout / retry / stats）、[bridge.py](../deepseek_infra/infra/mcp/bridge.py)（外部工具 profile / health / circuit breaker）、[executor.py](../deepseek_infra/infra/mcp/executor.py)（policy-gated external call + audit + trace）。
 - **测试**：[test_mcp.py](../tests/test_mcp.py)（握手 / 目录 / 能力切片 / 真实执行 / 错误码族 / 回环 client / 外部工具 profile / policy gate / 外部 server 不可用 / 远端 `isError=true` / retry stats / circuit breaker / trace diagnostics）。
 - **亲手验证**：[examples/mcp_tool_demo.py](../examples/mcp_tool_demo.py)；`python scripts/smoke_mcp_compat.py --token <token>` 验证握手、目录、工具调用、policy gate 和外部 health API；`GET /api/mcp/external/tools` 查看外部 server health；[COMPATIBILITY.md](COMPATIBILITY.md) 和 [integrations/](integrations/) 提供 Claude Desktop / Cursor 配置与官方 MCP SDK partner 实测记录。
-- **MVP 边界**：本地 MCP server、mock external server、失败场景、危险参数拦截和观测链路已可验证；v2.3.0 新增官方 MCP Python SDK Streamable HTTP partner 实测（SSE 响应解析修复）。Claude Desktop / Cursor GUI 实机仍待人工完成后更新兼容矩阵。
+- **MVP 边界**：本地 MCP server、mock external server、失败场景、危险参数拦截和观测链路已可验证；v2.3.0 新增官方 MCP Python SDK Streamable HTTP partner 实测（SSE 响应解析修复）。Claude Desktop / Cursor GUI 实机已在 v2.4.2 验证并更新兼容矩阵。
 
 ### 8. A2A Agent Mesh — MVP
 

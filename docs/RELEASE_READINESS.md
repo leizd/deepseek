@@ -1,32 +1,32 @@
 ﻿# Release Readiness
 
-适用版本：v2.4.1。
+适用版本：v2.4.2。
 
-v2.4.1 的发布主题是 **Release Evidence Patch / 发版证据补丁**：不新增协议或运行时功能，而是把 v2.4.0 已建立的质量门禁 evidence 补齐、入库、可追溯。本页把三件事串起来：发版前体检（preflight）、一键 smoke 编排、发布产物证明（manifest + checksum + quality gates）。
+v2.4.2 的发布主题是 **GUI Interop Evidence Patch / GUI 互操作证据补丁**：不新增协议或运行时功能，而是把 v2.3.x 起预留的 Claude Desktop / Cursor GUI 实机证据补齐，并同步刷新所有版本号与 eval / security / baseline release evidence。本页把三件事串起来：发版前体检（preflight）、一键 smoke 编排、发布产物证明（manifest + checksum + quality gates）。
 
 ## 1. Release Preflight — 版本一致性体检
 
 发版前确认版本号在所有该出现的地方都同步，eval 报告是当前版本，且发布脚本仍排除本地缓存 / 日志 / 密钥：
 
 ```bash
-python scripts/preflight_release.py --version 2.4.1
+python scripts/preflight_release.py --version 2.4.2
 ```
 
 检查项：
 
-- README 版本徽章是 `2.4.1`。
-- `CHANGELOG.md` 顶部有 `## [2.4.1]` 条目。
-- `Dockerfile` 示例 tag 是 `deepseek-infra:2.4.1`。
-- `docs/IMPLEMENTATION_STATUS.md` 与 `evals/README.md` 的「适用版本」是 `v2.4.1`。
+- README 版本徽章是 `2.4.2`。
+- `CHANGELOG.md` 顶部有 `## [2.4.2]` 条目。
+- `Dockerfile` 示例 tag 是 `deepseek-infra:2.4.2`。
+- `docs/IMPLEMENTATION_STATUS.md` 与 `evals/README.md` 的「适用版本」是 `v2.4.2`。
 - `docs/AGENT_EVAL.md` / `docs/EVAL_REPORTS.md` / `docs/SECURITY_SMOKE.md` / `docs/integrations/headless-mcp-client.md` / `docs/integrations/a2a-external-peer.md` 存在。
 - `docs/EVIDENCE_INDEX.md` 存在且包含 Headless MCP bridge / A2A external peer / eval reports 索引。
-- `evals/reports/latest.json` 的 `version` 是 `2.4.1`，且包含 `commit` / `generatedAt` / `environment` / `status`。
-- `evals/reports/agent-latest.json` 可解析且 `version` 是 `2.4.1`，且包含统一 metadata。
+- `evals/reports/latest.json` 的 `version` 是 `2.4.2`，且包含 `commit` / `generatedAt` / `environment` / `status`。
+- `evals/reports/agent-latest.json` 可解析且 `version` 是 `2.4.2`，且包含统一 metadata。
 - `evals/reports/baseline-compare-latest.json` 可解析且 `status=PASS`。
 - `evals/reports/security-latest.json` 可解析且 `status=PASS`。
-- `docs/evidence/headless-mcp-bridge.json` 可解析、版本为 `2.4.1`，包含统一 metadata，且关键 MCP bridge 步骤全为 PASS。
-- `docs/evidence/a2a-external-peer.json` 可解析、版本为 `2.4.1`，包含统一 metadata，且关键 A2A external peer checks 全为 PASS。
-- `quality_gate_evidence` 确认 coverage 80%、offline eval、Agent Eval、baseline compare、injection strict 和 security corpus 全部 PASS。
+- `docs/evidence/headless-mcp-bridge.json` 可解析、版本为 `2.4.2`，包含统一 metadata，且关键 MCP bridge 步骤全为 PASS。
+- `docs/evidence/a2a-external-peer.json` 可解析、版本为 `2.4.2`，包含统一 metadata，且关键 A2A external peer checks 全为 PASS。
+- `quality_gate_evidence` 确认 coverage 80%、offline eval、Agent Eval、baseline compare、injection strict、security corpus 与 GUI interop 全部 PASS。
 - CHANGELOG / README / COMPATIBILITY / IMPLEMENTATION_STATUS / RELEASE_READINESS / EVIDENCE_INDEX / `docs/integrations/*.md` 不出现 `???`、`锟斤拷`、\ufffd 等乱码。
 - `scripts/release.py` 仍排除 `.traces` / `.local-rag` / `.auth-token` / `.env` / `server*.log`。
 
@@ -65,9 +65,9 @@ python scripts/smoke_release.py --with-server --base-url http://127.0.0.1:8000 -
 每次跑 [`scripts/release.py`](../scripts/release.py) 不再只产出一个 zip，还会在 `dist/` 下产出三件套：
 
 ```
-dist/deepseek-infra-2.4.1.zip
-dist/deepseek-infra-2.4.1.zip.sha256
-dist/deepseek-infra-2.4.1.manifest.json
+dist/deepseek-infra-2.4.2.zip
+dist/deepseek-infra-2.4.2.zip.sha256
+dist/deepseek-infra-2.4.2.manifest.json
 ```
 
 `manifest.json` 记录发布的关键事实，可独立校验：
@@ -75,7 +75,7 @@ dist/deepseek-infra-2.4.1.manifest.json
 ```json
 {
   "schemaVersion": "release-manifest.v1",
-  "version": "2.4.1",
+  "version": "2.4.2",
   "commit": "abc1234",
   "builtAt": "2026-06-27T00:00:00Z",
   "python": "3.12",
@@ -99,7 +99,7 @@ dist/deepseek-infra-2.4.1.manifest.json
     "evals/reports/security-latest.json",
     "docs/EVIDENCE_INDEX.md"
   ],
-  "artifact": "deepseek-infra-2.4.1.zip",
+  "artifact": "deepseek-infra-2.4.2.zip",
   "sha256": "...",
   "bytes": 1234567
 }
@@ -118,7 +118,7 @@ dist/deepseek-infra-2.4.1.manifest.json
 ```yaml
 - run: python scripts/smoke_mcp_headless_bridge.py --out docs/evidence/headless-mcp-bridge.json
 - run: python scripts/smoke_a2a_external_peer.py --out docs/evidence/a2a-external-peer.json
-- run: python scripts/preflight_release.py --version 2.4.1
+- run: python scripts/preflight_release.py --version 2.4.2
 - run: python scripts/doctor.py --offline
 - run: python scripts/release.py --clean-workspace --dry-run
 ```
@@ -193,9 +193,9 @@ python evals/runners/compare_eval_baseline.py --strict --baseline evals/baseline
 
 识别模式：连续 `???`、`锟斤拷`、Unicode replacement character `\ufffd`。发现即 FAIL，防止 v2.3.3 的 CHANGELOG 乱码问题再次出现。
 
-## 9. Quality Gate Evidence（v2.4.1）
+## 9. Quality Gate Evidence（v2.4.2）
 
-`preflight_release.py` 自 v2.4.1 起增加 `quality_gate_evidence` 硬检查。它聚合以下证据：
+`preflight_release.py` 自 v2.4.2 起增加 `quality_gate_evidence` 硬检查。它聚合以下证据：
 
 - coverage gate：`pyproject.toml` 与 CI 均为 80%。
 - offline eval：`evals/reports/latest.json` `status=PASS`。
@@ -208,7 +208,7 @@ python evals/runners/compare_eval_baseline.py --strict --baseline evals/baseline
 
 ```bash
 python scripts/update_eval_report.py
-python scripts/preflight_release.py --version 2.4.1
+python scripts/preflight_release.py --version 2.4.2
 ```
 
 ## 10. GUI Interop Evidence Checklist（v2.3.1）
@@ -241,7 +241,7 @@ python scripts/smoke_mcp_headless_bridge.py --out docs/evidence/headless-mcp-bri
 python scripts/smoke_a2a_external_peer.py --out docs/evidence/a2a-external-peer.json
 
 # 4. 版本一致性与质量证据体检
-python scripts/preflight_release.py --version 2.4.1
+python scripts/preflight_release.py --version 2.4.2
 
 # 5. 运行时体检
 python scripts/doctor.py --offline
@@ -250,7 +250,7 @@ python scripts/doctor.py --offline
 python scripts/smoke_release.py --offline
 
 # 7. 打包并生成 manifest + checksum + qualityGates
-python scripts/release.py --clean-workspace --version 2.4.1
+python scripts/release.py --clean-workspace --version 2.4.2
 ```
 
 或直接用 `python scripts/smoke_release.py --offline`（已包含 doctor + strict evals + security corpus + agent + baseline compare）。
