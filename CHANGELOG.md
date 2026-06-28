@@ -2,6 +2,26 @@
 
 本项目使用类似 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的分组方式维护变更记录。未发布内容记录在 `[Unreleased]`，正式发版时迁移到具体版本。
 
+## [2.5.3] - ONNX Semantic Cache Evidence Patch
+
+**主题：语义缓存 ONNX evidence 补丁。** 本版把语义缓存的"hash vs ONNX"决策从一句话推进为结构化 evidence，新增 `--compare` 对照模式和 preflight 检查，不强制依赖 ONNX 模型文件。
+
+### 新增
+
+- **Semantic cache compare mode**：`benchmarks/bench_semantic_cache.py` 新增 `--compare` 标志，自动跑 hash + ONNX 两路 benchmark 并产出结构化 evidence JSON + Markdown，`--out` / `--markdown` 指定输出路径。
+- **语义缓存 ONNX evidence**：新增 `docs/evidence/semantic-cache-onnx-v2.5.3.json` 与 `.md`，记录 hash / ONNX 两路 exactHitRate、paraphraseHitRate、unrelatedFalseHitRate 与决策结论。
+- **Preflight 语义缓存 ONNX 检查**：`scripts/preflight_release.py` 新增 `semantic_cache_onnx_evidence` 检查；缺失时 WARNING，提交后若 exactHitRate < 1.0、unrelatedFalseHitRate > 0.0 或 metadata 不完整则 FAIL。
+
+### 更改
+
+- **版本号全仓同步**：README badge、`app_version`、Dockerfile tag、Android `versionName` / `versionCode`、CI preflight 版本、所有文档「适用版本」与 evidence 报告版本全部更新到 2.5.3。
+- **Benchmarks README 更新**：版本更新到 2.5.3，新增 `--compare` 命令示例与 evidence 产出路径，明确 hash embedding 是零依赖默认档。
+- **Evidence Index / Release Readiness 更新**：纳入 semantic cache ONNX evidence。
+
+### 测试
+
+- 新增 `test_preflight_warns_on_missing_semantic_cache_onnx_evidence`、`test_preflight_fails_on_semantic_cache_onnx_non_pass_status`、`test_preflight_fails_on_semantic_cache_onnx_missing_metadata`、`test_preflight_passes_on_semantic_cache_onnx_evidence_complete` 共 4 个 preflight 单测。
+
 ## [2.5.2] - Edge/Ollama Cascade Draft Layer
 
 **主题：Edge/Ollama Cascade 草稿层。** 本版让本地 Ollama / GGUF 模型真正进入 cascade 草稿层：便宜本地草稿 → 质量门控 → 不合格再升级 DeepSeek 云端精算。

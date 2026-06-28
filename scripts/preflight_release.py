@@ -10,7 +10,7 @@ and Edge Router evidence is strict when submitted, that key docs do not contain
 encoding corruption (since v2.3.4), and (since v2.3.1) that GUI interop evidence
 for Claude Desktop / Cursor has been recorded in ``docs/COMPATIBILITY.md``.
 
-    python scripts/preflight_release.py --version 2.5.2
+    python scripts/preflight_release.py --version 2.5.3
 
 Exits 1 on any FAIL; WARNINGs do not fail. Version defaults to
 ``settings.app_version``.
@@ -614,7 +614,7 @@ def check_openai_compatible_sdk_evidence(root: Path, version: str) -> CheckResul
 
 
 def check_workspace_core_evidence(root: Path, version: str) -> CheckResult:
-    path = root / "docs" / "evidence" / "workspace-v2.5.2.json"
+    path = root / "docs" / "evidence" / "workspace-v2.5.3.json"
     if not path.is_file():
         return CheckResult(
             "workspace_core_evidence",
@@ -667,6 +667,57 @@ def check_workspace_core_evidence(root: Path, version: str) -> CheckResult:
         STATUS_PASS,
         "Workspace Core evidence recorded",
         {"path": str(path), "checks": list(required)},
+    )
+
+
+def check_semantic_cache_onnx_evidence(root: Path, version: str) -> CheckResult:
+    path = root / "docs" / "evidence" / "semantic-cache-onnx-v2.5.3.json"
+    if not path.is_file():
+        return CheckResult(
+            "semantic_cache_onnx_evidence",
+            STATUS_WARN,
+            "Semantic Cache ONNX evidence missing; run benchmarks/bench_semantic_cache.py --compare --out docs/evidence/semantic-cache-onnx-v2.5.3.json --markdown docs/evidence/semantic-cache-onnx-v2.5.3.md",
+            {"path": str(path)},
+        )
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return CheckResult("semantic_cache_onnx_evidence", STATUS_FAIL, f"cannot parse Semantic Cache ONNX evidence: {exc}", {"path": str(path)})
+    metadata_fail = _check_evidence_metadata("semantic_cache_onnx", data, path)
+    if metadata_fail:
+        return metadata_fail
+    reported = str(data.get("version") or "")
+    if reported != version:
+        return CheckResult(
+            "semantic_cache_onnx_evidence",
+            STATUS_FAIL,
+            f"Semantic Cache ONNX evidence version is {reported!r}, expected {version!r}",
+            {"version": reported, "expected": version},
+        )
+    if data.get("status") != "PASS":
+        return CheckResult(
+            "semantic_cache_onnx_evidence",
+            STATUS_FAIL,
+            f"Semantic Cache ONNX evidence status is {data.get('status')!r}, expected PASS",
+            {"status": data.get("status")},
+        )
+    hash_data = data.get("hash")
+    if isinstance(hash_data, dict):
+        if float(hash_data.get("exactHitRate", 0)) < 1.0:
+            return CheckResult("semantic_cache_onnx_evidence", STATUS_FAIL, "hash exactHitRate < 1.0", {"hash": hash_data})
+        if float(hash_data.get("unrelatedFalseHitRate", 0)) > 0.0:
+            return CheckResult("semantic_cache_onnx_evidence", STATUS_FAIL, "hash unrelatedFalseHitRate > 0.0", {"hash": hash_data})
+    onnx_data = data.get("onnx")
+    if isinstance(onnx_data, dict):
+        if float(onnx_data.get("exactHitRate", 0)) < 1.0:
+            return CheckResult("semantic_cache_onnx_evidence", STATUS_FAIL, "onnx exactHitRate < 1.0", {"onnx": onnx_data})
+        if float(onnx_data.get("unrelatedFalseHitRate", 0)) > 0.0:
+            return CheckResult("semantic_cache_onnx_evidence", STATUS_FAIL, "onnx unrelatedFalseHitRate > 0.0", {"onnx": onnx_data})
+    return CheckResult(
+        "semantic_cache_onnx_evidence",
+        STATUS_PASS,
+        "Semantic Cache ONNX evidence recorded",
+        {"path": str(path), "onnxAvailable": data.get("onnxAvailable")},
     )
 
 
@@ -751,6 +802,7 @@ def run_preflight(root: Path, version: str) -> list[CheckResult]:
         check_edge_router_smoke_evidence(root, version),
         check_continue_dev_mcp_evidence(root, version),
         check_openai_compatible_sdk_evidence(root, version),
+        check_semantic_cache_onnx_evidence(root, version),
         check_workspace_core_evidence(root, version),
         check_gui_interop_evidence(root),
     ]
