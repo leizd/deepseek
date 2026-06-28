@@ -137,10 +137,15 @@ def main() -> int:
     parser.add_argument("--tokenizer", default="", help="Tokenizer JSON path, required for --provider onnx")
     parser.add_argument("--dimensions", type=int, default=0, help="Override embedding dimensions for the benchmark")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--compare", action="store_true", help="Run hash vs ONNX side-by-side comparison")
+    parser.add_argument("--out", default="", help="Write JSON evidence to path")
+    parser.add_argument("--markdown", default="", help="Write Markdown evidence to path")
     args = parser.parse_args()
 
+    if args.compare:
+        return _run_compare(args)
+
     cache_dir = Path(tempfile.mkdtemp(prefix="semcache-bench-"))
-    # 与 tests/conftest 相同的隔离手法：模块级路径指到临时目录并强制启用。
     semantic_cache.SEMANTIC_CACHE_ENABLED = True
     semantic_cache.SEMANTIC_CACHE_DIR = cache_dir
     semantic_cache.SEMANTIC_CACHE_DB = cache_dir / "cache.sqlite3"
@@ -158,21 +163,182 @@ def main() -> int:
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2))
         return 0
-    store = report["storeLatencyMs"]
-    lookup = report["lookupLatencyMs"]
+    _print_report(report)
+    return 0
+
+
+def _run_compare(args: argparse.Namespace) -> int:
+    items = max(len(TOPICS), args.items)
+    hash_report: dict[str, Any] = {}
+    onnx_report: dict[str, Any] = {}
+    onnx_available = False
+
+    cache_dir = Path(tempfile.mkdtemp(prefix="semcache-bench-hash-"))
+    semantic_cache.SEMANTIC_CACHE_ENABLED = True
+    semantic_cache.SEMANTIC_CACHE_DIR = cache_dir
+    semantic_cache.SEMANTIC_CACHE_DB = cache_dir / "cache.sqlite3"
+    configure_embedding_provider("hash")
+    try:
+        hash_report = run_benchmark(items)
+    finally:
+        shutil.rmtree(cache_dir, ignore_errors=True)
+
+    onnx_model = args.onnx_model or local_rag.LOCAL_RAG_ONNX_MODEL_PATH
+    onnx_tokenizer = args.tokenizer or local_rag.LOCAL_RAG_TOKENIZER_PATH
+    if onnx_model and onnx_tokenizer and Path(onnx_model).is_file() and Path(onnx_tokenizer).is_file():
+        onnx_dimensions = args.dimensions or local_rag.LOCAL_RAG_EMBEDDING_DIMENSIONS
+        cache_dir2 = Path(tempfile.mkdtemp(prefix="semcache-bench-onnx-"))
+        semantic_cache.SEMANTIC_CACHE_DIR = cache_dir2
+        semantic_cache.SEMANTIC_CACHE_DB = cache_dir2 / "cache.sqlite3"
+        configure_embedding_provider("onnx", onnx_model=onnx_model, tokenizer=onnx_tokenizer, dimensions=onnx_dimensions)
+        try:
+            onnx_report = run_benchmark(items)
+        except Exception as exc:
+            onnx_report = {"error": str(exc)}
+        finally:
+            shutil.rmtree(cache_dir2, ignore_errors=True)
+        onnx_available = True
+
+    evidence = _build_compare_evidence(hash_report, onnx_report, onnx_available)
+    if args.out:
+        Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.out).write_text(json.dumps(evidence, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"[out] {args.out}")
+    if args.markdown:
+        _write_compare_markdown(evidence, args.markdown)
+        print(f"[markdown] {args.markdown}")
+    if args.json:
+        print(json.dumps(evidence, ensure_ascii=False, indent=2))
+    if not args.json and not args.out:
+        print("=== Hash benchmark ===")
+        _print_report(hash_report)
+        if onnx_available:
+            print("\n=== ONNX benchmark ===")
+            _print_report(onnx_report)
+    return 0
+
+
+def _build_compare_evidence(hash_report: dict[str, Any], onnx_report: dict[str, Any], onnx_available: bool) -> dict[str, Any]:
+    from datetime import datetime, timezone
+    import platform
+
+    evidence: dict[str, Any] = {
+        "schemaVersion": "semantic-cache-onnx-evidence.v1",
+        "version": _app_version(),
+        "suite": "semantic-cache-onnx",
+        "generatedAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "environment": {"os": platform.system(), "python": platform.python_version(), "ci": False},
+        "status": "PASS",
+        "onnxAvailable": onnx_available,
+    }
+    if hash_report:
+        evidence["hash"] = {
+            "exactHitRate": hash_report.get("exactHitRate", 0),
+            "paraphraseHitRate": hash_report.get("paraphraseHitRate", 0),
+            "unrelatedFalseHitRate": hash_report.get("unrelatedFalseHitRate", 0),
+            "provider": hash_report.get("embeddingProvider", "hash"),
+            "dimensions": hash_report.get("embeddingDimensions", 64),
+        }
+    if onnx_available and onnx_report:
+        evidence["onnx"] = {
+            "exactHitRate": onnx_report.get("exactHitRate", 0),
+            "paraphraseHitRate": onnx_report.get("paraphraseHitRate", 0),
+            "unrelatedFalseHitRate": onnx_report.get("unrelatedFalseHitRate", 0),
+            "provider": onnx_report.get("embeddingProvider", "onnx"),
+            "dimensions": onnx_report.get("embeddingDimensions", 0),
+        }
+
+    if onnx_available and onnx_report:
+        onnx_para = evidence["onnx"]["paraphraseHitRate"]
+        evidence["decision"] = "ONNX available; paraphrase hit rate is {}x hash baseline".format(round(onnx_para / max(0.01, evidence["hash"]["paraphraseHitRate"]), 1)) if evidence["hash"]["paraphraseHitRate"] > 0 else "ONNX available; hash baseline paraphrase rate is 0"
+    else:
+        evidence["decision"] = "ONNX remains optional; hash embedding is zero-dependency default"
+
+    any_fail = False
+    if evidence["hash"]["exactHitRate"] < 1.0:
+        any_fail = True
+    if evidence["hash"]["unrelatedFalseHitRate"] > 0.0:
+        any_fail = True
+    if onnx_available and onnx_report:
+        if evidence["onnx"]["exactHitRate"] < 1.0:
+            any_fail = True
+        if evidence["onnx"]["unrelatedFalseHitRate"] > 0.0:
+            any_fail = True
+    if any_fail:
+        evidence["status"] = "FAIL"
+
+    return evidence
+
+
+def _app_version() -> str:
+    from deepseek_infra.core.config import APP_VERSION
+    return APP_VERSION
+
+
+def _write_compare_markdown(evidence: dict[str, Any], path: str) -> None:
+    lines = [
+        "# Semantic Cache ONNX Evidence",
+        "",
+        f"- Version: {evidence.get('version')}",
+        f"- Status: {evidence.get('status')}",
+        f"- Generated: {evidence.get('generatedAt')}",
+        f"- ONNX Available: {evidence.get('onnxAvailable')}",
+        "",
+        "## Hash Embedding (zero-dependency default)",
+        "",
+    ]
+    h = evidence.get("hash", {})
+    lines.extend([
+        "| Metric | Value |",
+        "| --- | --- |",
+        f"| Exact Hit Rate | {h.get('exactHitRate', 'N/A')} |",
+        f"| Paraphrase Hit Rate | {h.get('paraphraseHitRate', 'N/A')} |",
+        f"| Unrelated False Hit Rate | {h.get('unrelatedFalseHitRate', 'N/A')} |",
+        f"| Provider | {h.get('provider', 'N/A')} |",
+        f"| Dimensions | {h.get('dimensions', 'N/A')} |",
+        "",
+        "## ONNX Embedding (optional neural embedding)",
+        "",
+    ])
+    o = evidence.get("onnx", {})
+    if o:
+        lines.extend([
+            "| Metric | Value |",
+            "| --- | --- |",
+            f"| Exact Hit Rate | {o.get('exactHitRate', 'N/A')} |",
+            f"| Paraphrase Hit Rate | {o.get('paraphraseHitRate', 'N/A')} |",
+            f"| Unrelated False Hit Rate | {o.get('unrelatedFalseHitRate', 'N/A')} |",
+            f"| Provider | {o.get('provider', 'N/A')} |",
+            f"| Dimensions | {o.get('dimensions', 'N/A')} |",
+        ])
+    else:
+        lines.append("ONNX provider not available; install `requirements-rag.txt` and provide model/tokenizer.")
+    lines.extend([
+        "",
+        "## Decision",
+        "",
+        str(evidence.get("decision", "")),
+        "",
+    ])
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    Path(path).write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _print_report(report: dict[str, Any]) -> None:
+    store = report.get("storeLatencyMs") or {}
+    lookup = report.get("lookupLatencyMs") or {}
     print("=== Benchmark · Semantic cache (offline) ===")
     print(
-        f"Items stored: {report['items']} · requested={report['requestedProvider']} "
-        f"· active={report['embeddingProvider']}({report['embeddingDimensions']}d) · threshold={report['threshold']}"
+        f"Items stored: {report.get('items')} · requested={report.get('requestedProvider')} "
+        f"· active={report.get('embeddingProvider')}({report.get('embeddingDimensions')}d) · threshold={report.get('threshold')}"
     )
     if report.get("lastError"):
         print(f"Embedding note: {report['lastError']}")
-    print(f"Store latency:  avg {store['avgMs']:.1f} ms · P50 {store['p50Ms']:.1f} ms · P95 {store['p95Ms']:.1f} ms")
-    print(f"Lookup latency: avg {lookup['avgMs']:.1f} ms · P50 {lookup['p50Ms']:.1f} ms · P95 {lookup['p95Ms']:.1f} ms")
-    print(f"Exact-repeat hit rate: {report['exactHitRate']:.2f}（应为 1.00）")
-    print(f"Paraphrase hit rate: {report['paraphraseHitRate']:.2f}（avg similarity {report['paraphraseAvgSimilarity']:.2f}；零依赖 hash embedding 下偏保守是预期）")
-    print(f"Unrelated false-hit rate: {report['unrelatedFalseHitRate']:.2f}（应为 0.00）")
-    return 0
+    print(f"Store latency:  avg {store.get('avgMs', 0):.1f} ms · P50 {store.get('p50Ms', 0):.1f} ms · P95 {store.get('p95Ms', 0):.1f} ms")
+    print(f"Lookup latency: avg {lookup.get('avgMs', 0):.1f} ms · P50 {lookup.get('p50Ms', 0):.1f} ms · P95 {lookup.get('p95Ms', 0):.1f} ms")
+    print(f"Exact-repeat hit rate: {report.get('exactHitRate', 0):.2f}（应为 1.00）")
+    print(f"Paraphrase hit rate: {report.get('paraphraseHitRate', 0):.2f}")
+    print(f"Unrelated false-hit rate: {report.get('unrelatedFalseHitRate', 0):.2f}（应为 0.00）")
 
 
 if __name__ == "__main__":
