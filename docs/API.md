@@ -1,6 +1,6 @@
 # HTTP API
 
-适用版本：v2.4.6。
+适用版本：v2.5.0。
 
 默认情况下，所有 `/api/*` 路由都需要本地 token 鉴权。客户端可以发送 `Authorization: Bearer <token>`，也可以使用打开 `/?token=<token>` 后写入的 `auth_token` Cookie。未设置 `AUTH_TOKEN` 时，服务端会把自动生成的 token 保存到本地 `.auth-token`，重启后继续复用。
 
@@ -646,7 +646,7 @@ GET /api/share-target?id=<share-id>
 
 ## POST `/api/projects`
 
-管理本地持久项目空间。项目数据保存在 `.projects/{projectId}/project.json`，项目文档索引保存在 `.projects/{projectId}/files/`，不会被临时 `.file-cache` 清理任务删除。
+管理本地持久项目空间。项目数据保存在 `.projects/{projectId}/project.json`，项目文档索引保存在 `.projects/{projectId}/files/`，不会被临时 `.file-cache` 清理任务删除。该接口是兼容旧前端的 action API；v2.5.0 起新开发优先使用下面的 `/api/workspace/*` REST 风格接口。
 
 请求体使用 `action` 字段：
 
@@ -654,6 +654,8 @@ GET /api/share-target?id=<share-id>
 | --- | --- |
 | `list` | 返回项目列表。 |
 | `create` | 创建项目，需要 `name`。 |
+| `get` | 读取项目详情，需要 `id` 或 `projectId`。 |
+| `rename` | 重命名项目或更新 `description`，需要 `id` 或 `projectId`。 |
 | `delete` | 删除项目及其文档库，需要 `id`。 |
 
 响应示例：
@@ -661,6 +663,137 @@ GET /api/share-target?id=<share-id>
 ```json
 {"projects": [{"id": "proj-abc123", "name": "考研资料", "documents": []}]}
 ```
+
+## Workspace Core API
+
+v2.5.0 新增 Workspace Core，将项目、保存项、产物和导出统一成工作台对象。完整设计见 [WORKSPACE.md](WORKSPACE.md)。
+
+所有 `/api/workspace/*` 请求都走普通本地 API 鉴权。
+
+### Project 2.0
+
+`GET /api/workspace/projects` 返回项目列表，含 `projectId`、`description`、ISO 时间和 `stats`：
+
+```json
+{
+  "ok": true,
+  "projects": [
+    {
+      "projectId": "proj-abc123",
+      "name": "考研408复习",
+      "description": "复习计划",
+      "stats": {"files": 12, "savedItems": 35, "artifacts": 8, "conversations": 4, "memories": 2}
+    }
+  ]
+}
+```
+
+`POST /api/workspace/projects` 创建项目：
+
+```json
+{"name": "考研408复习", "description": "复习计划"}
+```
+
+`GET /api/workspace/projects/{projectId}` 返回项目详情，包含 `files` / `documents`、`conversations`、`memories`、`savedItems` 与 `artifacts`。`PATCH /api/workspace/projects/{projectId}` 可更新 `name` 与 `description`；`DELETE /api/workspace/projects/{projectId}` 删除该项目目录，不删除全局 `.generated/`、`.memory/` 或其它项目。
+
+项目对话快照：
+
+- `GET /api/workspace/projects/{projectId}/conversations`
+- `POST /api/workspace/projects/{projectId}/conversations`
+
+对话写入示例：
+
+```json
+{
+  "conversationId": "conv-1",
+  "title": "408 review",
+  "messages": [
+    {"id": "m1", "role": "user", "content": "解释调度算法"},
+    {"id": "m2", "role": "assistant", "content": "RR 适合分时系统..."}
+  ]
+}
+```
+
+### Saved Items
+
+保存项接口：
+
+- `GET /api/workspace/projects/{projectId}/saved-items`
+- `GET /api/workspace/projects/{projectId}/saved-items?type=chat_snippet&tags=408,OS`
+- `POST /api/workspace/projects/{projectId}/saved-items`
+- `PATCH /api/workspace/projects/{projectId}/saved-items/{savedId}`
+- `DELETE /api/workspace/projects/{projectId}/saved-items/{savedId}`
+
+创建示例：
+
+```json
+{
+  "type": "chat_snippet",
+  "title": "OS 调度总结",
+  "content": "RR 适合分时系统...",
+  "sourceRef": {"conversationId": "conv-1", "messageId": "m2"},
+  "tags": ["408", "OS"],
+  "purpose": "export_fragment"
+}
+```
+
+`type` 支持 `chat_snippet`、`assistant_answer`、`file_quote`、`rag_citation`、`artifact`、`webpage`、`media`、`trace`、`eval_result`。`purpose` 支持 `reference`、`memory_candidate`、`export_fragment`。
+
+### Artifact Hub
+
+产物接口：
+
+- `GET /api/workspace/projects/{projectId}/artifacts`
+- `POST /api/workspace/projects/{projectId}/artifacts`
+- `PATCH /api/workspace/projects/{projectId}/artifacts/{artifactId}`
+- `DELETE /api/workspace/projects/{projectId}/artifacts/{artifactId}`
+- `GET /api/workspace/artifacts/{artifactId}/preview?projectId=<projectId>`
+- `GET /api/workspace/artifacts/{artifactId}/download?projectId=<projectId>`
+
+注册示例：
+
+```json
+{
+  "type": "markdown",
+  "title": "复习提纲",
+  "path": ".generated/summary.md",
+  "source": {"conversationId": "conv-1", "messageId": "m3"}
+}
+```
+
+`PATCH` 传 `title` 可重命名；传 `path` 会新增一个版本并更新当前下载路径。文本类产物预览会脱敏 API key、Bearer token 和 query token。
+
+### Export
+
+创建导出：
+
+```http
+POST /api/workspace/exports
+```
+
+```json
+{"kind": "project", "projectId": "proj-abc123", "format": "zip"}
+```
+
+`kind` 支持 `conversation`、`project`、`saved_items`、`artifacts`、`evidence`；`format` 支持 `markdown`、`html`、`json`、`zip`。
+
+响应：
+
+```json
+{
+  "ok": true,
+  "export": {
+    "exportId": "export_abc123",
+    "projectId": "proj-abc123",
+    "kind": "project",
+    "format": "zip",
+    "filename": "project-project-export.zip",
+    "downloadUrl": "/api/workspace/exports/export_abc123/download?projectId=proj-abc123"
+  }
+}
+```
+
+项目 ZIP 包固定包含 `metadata.json`、`project.md`、`conversations/`、`saved-items/saved-items.json`、`artifacts/`、`files/source-files/` 与 `traces/`。导出会脱敏 API key / auth token / password / secret 类字段。
 
 ## POST `/api/project-files?projectId=<id>`
 

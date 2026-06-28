@@ -1,6 +1,6 @@
 # OpenAI-Compatible SDKs Smoke Evidence
 
-- Version: 2.4.6
+- Version: 2.5.0
 - Commit: 8a44088
 - Status: PASS
 - Generated: 2026-06-28T10:00:00Z

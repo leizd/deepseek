@@ -2,6 +2,29 @@
 
 本项目使用类似 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的分组方式维护变更记录。未发布内容记录在 `[Unreleased]`，正式发版时迁移到具体版本。
 
+## [2.5.0] - Workspace Core
+
+**主题：Workspace Core / 本地 AI 工作台对象模型。** 本版本正式从 Infra 质量门禁线切到产品工作台地基，把项目空间、保存项、产物中心和导出能力统一成 Project 2.0。
+
+### 新增
+
+- **Workspace Core 后端模块**：新增 `deepseek_infra/infra/workspace/`，包含 Project 2.0 facade、Saved Items、Artifact Hub、Export builders 与 schema/redaction helpers。
+- **Saved Items 系统**：支持聊天片段、助手回答、文件引用、RAG citation、网页摘录、媒体说明、产物、Trace / Eval 结果，并支持 `reference`、`memory_candidate`、`export_fragment` 三类用途。
+- **Artifact Hub**：项目产物支持列表、预览、下载、重命名、版本记录、来源追踪与新增版本入口，覆盖 pptx/docx/pdf/svg/markdown/csv/json/html/txt。
+- **Workspace Export**：对话、项目、保存项集合、产物包与证据包支持 Markdown / HTML / JSON / ZIP；项目 ZIP 固定包含 metadata、conversations、saved-items、artifacts、source-files 与 traces。
+- **Workspace Evidence**：新增 `scripts/smoke_workspace.py --offline`，生成 `docs/evidence/workspace-v2.5.0.json`，覆盖项目创建、保存项、产物、对话导出、项目 ZIP 与 secret redaction。
+
+### 更改
+
+- **Project 2.0 API**：新增 `/api/workspace/projects`、`/saved-items`、`/artifacts`、`/exports` 系列端点；旧 `POST /api/projects` 继续保留兼容，并补齐 `get` / `rename` action。
+- **Release gate**：`preflight_release.py` 新增 `workspace_core_evidence` 硬检查；`smoke_release.py --offline` 默认串入 Workspace Core smoke；release manifest 默认 evidence 清单新增 `docs/evidence/workspace-v2.5.0.json`，`qualityGates` 新增 `workspaceCore=PASS`。
+- **文档与版本同步**：README、API、Implementation Status、Evidence Index、Release Readiness 与版本徽章更新到 2.5.0，并新增 `docs/WORKSPACE.md`。
+
+### 测试
+
+- 新增 `tests/test_workspace.py`、`tests/test_smoke_workspace.py`，覆盖 Workspace Core 数据模型、导出包结构、脱敏和项目删除边界。
+- 扩展 release preflight、smoke release 与 manifest 测试，固定 Workspace Core evidence 和 `workspaceCore` gate。
+
 ## [2.4.6] - OpenAI-Compatible SDK Evidence Patch
 
 **主题：OpenAI-compatible SDK 兼容性证据补丁。** 本版不新增核心运行时能力，重点把 OpenAI API Compatibility 中仍处于 🔲 的 Other OpenAI-compatible SDKs 从 Not tested 推进为结构化 SDK smoke evidence，验证 DeepSeek Infra 的 `/v1` OpenAI-compatible endpoint 能被 LangChain、LiteLLM、LlamaIndex 等常见 SDK 复用。
