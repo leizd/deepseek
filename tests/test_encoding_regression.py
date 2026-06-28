@@ -3287,7 +3287,6 @@ class EncodingRegressionTests(unittest.TestCase):
         readme = Path("README.md").read_text(encoding="utf-8")
         changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
         compatibility = Path("docs/COMPATIBILITY.md").read_text(encoding="utf-8")
-        implementation = Path("docs/IMPLEMENTATION_STATUS.md").read_text(encoding="utf-8")
         readiness = Path("docs/RELEASE_READINESS.md").read_text(encoding="utf-8")
         evidence_index = Path("docs/EVIDENCE_INDEX.md").read_text(encoding="utf-8")
         continue_dev_doc = Path("docs/integrations/continue-dev.md").read_text(encoding="utf-8")
