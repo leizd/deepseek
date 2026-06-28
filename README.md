@@ -1,6 +1,6 @@
 # DeepSeek Infra
 
-![版本](https://img.shields.io/badge/version-2.4.0-blue)
+![版本](https://img.shields.io/badge/version-2.4.1-blue)
 ![Python](https://img.shields.io/badge/python-3.10%2B-green)
 ![Coverage Gate](https://img.shields.io/badge/coverage%20gate-80%25-brightgreen)
 ![许可证](https://img.shields.io/badge/license-MIT-black)
@@ -190,7 +190,7 @@ curl http://127.0.0.1:8000/v1/models -H "Authorization: Bearer <本地访问 tok
 
 与之配套的**质量评测**在 [evals/](evals/)（全部离线可跑）：`python evals/runners/run_offline_eval_suite.py --include-agent --strict` 会统一留下 [latest eval report](evals/reports/latest.md)，当前 baseline 为 RAG Recall@5 1.000 / Citation Accuracy 0.8333、26 个固定攻防用例的 **Tool Policy Pass Rate 1.000 / Prompt Injection Defense Pass 1.000**，以及对抗注入小语料的 `block_rate` / `false_positive_rate` / `bypass_rate` 硬门禁；`run_agent_eval.py --strict` 额外生成 [Agent Eval report](evals/reports/agent-latest.md)，低于 Tool Call Accuracy 0.90 / Agent Success Rate 0.85 / Prompt Regression Pass Rate 0.90 会阻断 CI。`run_security_corpus.py --strict` 生成 [Security Corpus report](evals/reports/security-latest.md)，覆盖 prompt injection、tool policy attack、benign false-positive、SSRF、路径越界与密钥外泄语料。详见 [evals/README.md](evals/README.md)、[docs/EVAL_REPORTS.md](docs/EVAL_REPORTS.md) 与 [docs/AGENT_EVAL.md](docs/AGENT_EVAL.md)。本地安全能力复现最小命令集见 [docs/SECURITY_SMOKE.md](docs/SECURITY_SMOKE.md)。
 
-**发版前一键体检（v2.4.0）**：先 `python scripts/doctor.py --offline` 做运行时体检（Python / 依赖 / .env / 数据目录权限 / static / 端口 / token，PASS / WARNING / FAIL），再 `python scripts/smoke_mcp_headless_bridge.py` 生成无 GUI 的 MCP stdio bridge 证据，并用 `python scripts/smoke_a2a_external_peer.py` 生成 A2A external peer 证据，随后 `python scripts/preflight_release.py --version 2.4.0` 校验版本徽章 / CHANGELOG / Docker tag / 文档与 eval 报告版本同步，并检查 coverage 80%、offline eval、Agent Eval、baseline compare、injection strict 与 security corpus 的质量证据，最后 `python scripts/smoke_release.py --offline` 一键编排 doctor + strict eval + security corpus + Agent Eval + baseline compare（`--with-server --base-url ... --token ...` 额外跑 MCP / A2A smoke）。发布产物会同时生成 `.sha256` 与带 `qualityGates` 的 `.manifest.json` 作为 release evidence。详见 [docs/RUNTIME_DOCTOR.md](docs/RUNTIME_DOCTOR.md) 与 [docs/RELEASE_READINESS.md](docs/RELEASE_READINESS.md)。
+**发版前一键体检（v2.4.1）**：先 `python scripts/doctor.py --offline` 做运行时体检（Python / 依赖 / .env / 数据目录权限 / static / 端口 / token，PASS / WARNING / FAIL），再 `python scripts/smoke_mcp_headless_bridge.py` 生成无 GUI 的 MCP stdio bridge 证据，并用 `python scripts/smoke_a2a_external_peer.py` 生成 A2A external peer 证据，随后 `python scripts/preflight_release.py --version 2.4.1` 校验版本徽章 / CHANGELOG / Docker tag / 文档与 eval 报告版本同步，并检查 coverage 80%、offline eval、Agent Eval、baseline compare、injection strict 与 security corpus 的质量证据，最后 `python scripts/smoke_release.py --offline` 一键编排 doctor + strict eval + security corpus + Agent Eval + baseline compare（`--with-server --base-url ... --token ...` 额外跑 MCP / A2A smoke）。发布产物会同时生成 `.sha256` 与带 `qualityGates` 的 `.manifest.json` 作为 release evidence。详见 [docs/RUNTIME_DOCTOR.md](docs/RUNTIME_DOCTOR.md) 与 [docs/RELEASE_READINESS.md](docs/RELEASE_READINESS.md)。
 
 ## 快速开始
 
@@ -469,6 +469,12 @@ python scripts/release.py --clean-workspace
 - [x] Baseline regression 硬门禁：`compare_eval_baseline.py --strict` 覆盖 RAG / Citation / Tool Policy / Injection / Agent Success Rate
 - [x] 版本化安全语料库：`evals/golden/security/*.v2.4.jsonl` + `run_security_corpus.py --strict`
 - [x] Quality Gate Evidence：`evals/reports/baseline-compare-latest.json`、`security-latest.json`、preflight `quality_gate_evidence`、release manifest `qualityGates`
+
+### v2.4.1: Release Evidence Patch
+- [x] 提交 `evals/reports/baseline-compare-latest.json` 作为 release evidence，记录 RAG / Citation / Tool Policy / Injection / Agent 相对 v2.2.6 基线的回归对比
+- [x] 提交 `evals/reports/security-latest.json` / `security-latest.md`，安全语料指标全部 PASS（blockRate=1.0、bypassRate=0.0、falsePositiveRate=0.0）
+- [x] 修复 `.gitignore` 对 `evals/reports/*` 的忽略过宽问题，whitelist baseline compare 与 security corpus 的 latest 报告
+- [x] 统一 v2.4.0 CHANGELOG 中文分组与叙事风格，补齐 v2.4 系列 preflight 证据链
 
 ## 文档
 

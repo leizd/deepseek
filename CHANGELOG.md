@@ -2,6 +2,30 @@
 
 本项目使用类似 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的分组方式维护变更记录。未发布内容记录在 `[Unreleased]`，正式发版时迁移到具体版本。
 
+## [2.4.1] - Release Evidence Patch
+
+**主题：发版证据补丁。** 本版不新增协议或运行时功能，重点补齐 v2.4.0 质量门禁与安全评测的 release evidence，使 baseline regression、安全语料评测和 preflight 检查形成可复现、可提交、可追溯的闭环。
+
+### 新增
+
+- **Baseline regression evidence**：提交 `evals/reports/baseline-compare-latest.json`，记录 RAG、Citation、Tool Policy、Prompt Injection 与 Agent Eval 相对基线的回归对比结果。
+- **Security corpus evidence**：提交 `evals/reports/security-latest.json` 与 `evals/reports/security-latest.md`，记录 prompt injection、tool policy attack、secret exfiltration、SSRF、path traversal 等安全语料评测结果。
+- **Release evidence 白名单**：允许 baseline compare 与 security corpus 的 latest 报告作为正式 release artifacts 入库。
+
+### 更改
+
+- **更新日志中文化**：统一 v2.4.0 CHANGELOG 的分组标题与条目语言风格，保持项目文档中文叙事一致。
+- **发版证据链收口**：补齐 v2.4 质量门禁所需的机器可读报告，让 preflight 能完整校验 coverage、offline eval、agent eval、baseline compare 与 security corpus 状态。
+
+### 修复
+
+- **修复 eval reports 忽略规则过宽**：避免 `evals/reports/*` 把必须提交的 release evidence 一并忽略。
+- **修复 2.4.0 证据链不完整问题**：确保 baseline compare 与 security corpus 报告可以随版本提交并被 release manifest / preflight 使用。
+
+### 安全
+
+- **安全语料评测证据化**：记录 block rate、false-positive rate、bypass rate、tool policy pass rate、secret exfiltration block rate、SSRF block rate 与 path traversal block rate 等关键指标。
+
 ## [2.4.0] - 质量门禁与安全评测硬化
 
 **主题：质量门禁与安全评测硬化。** 本版不继续扩大协议面，而是把 v2.3 已完成的互操作能力纳入更严格的质量工程闭环：coverage、Agent Eval、baseline regression、Prompt Injection、安全语料库和 release evidence 全部可持续验证。

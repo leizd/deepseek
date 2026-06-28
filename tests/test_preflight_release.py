@@ -399,16 +399,16 @@ def test_preflight_fails_when_agent_report_missing_metadata(tmp_path: Path) -> N
 
 def test_preflight_fails_when_security_corpus_report_is_missing(tmp_path: Path) -> None:
     preflight = _load_preflight()
-    root = _skeleton(tmp_path, "2.4.0")
+    root = _skeleton(tmp_path, "2.4.1")
     (root / "evals" / "reports" / "security-latest.json").unlink()
-    result = next(r for r in preflight.run_preflight(root, "2.4.0") if r.name == "security_corpus_report")
+    result = next(r for r in preflight.run_preflight(root, "2.4.1") if r.name == "security_corpus_report")
     assert result.status == "fail"
 
 
 def test_preflight_fails_when_quality_gate_evidence_regresses(tmp_path: Path) -> None:
     preflight = _load_preflight()
-    root = _skeleton(tmp_path, "2.4.0")
+    root = _skeleton(tmp_path, "2.4.1")
     (root / "pyproject.toml").write_text("[tool.coverage.report]\nfail_under = 75\n", encoding="utf-8")
-    result = next(r for r in preflight.run_preflight(root, "2.4.0") if r.name == "quality_gate_evidence")
+    result = next(r for r in preflight.run_preflight(root, "2.4.1") if r.name == "quality_gate_evidence")
     assert result.status == "fail"
     assert "coverage fail_under" in result.detail
