@@ -1,6 +1,6 @@
 # HTTP API
 
-适用版本：v2.6.0。
+适用版本：v2.6.1。
 
 默认情况下，所有 `/api/*` 路由都需要本地 token 鉴权。客户端可以发送 `Authorization: Bearer <token>`，也可以使用打开 `/?token=<token>` 后写入的 `auth_token` Cookie。未设置 `AUTH_TOKEN` 时，服务端会把自动生成的 token 保存到本地 `.auth-token`，重启后继续复用。
 
@@ -794,6 +794,31 @@ POST /api/workspace/exports
 ```
 
 项目 ZIP 包固定包含 `metadata.json`、`project.md`、`conversations/`、`saved-items/saved-items.json`、`artifacts/`、`files/source-files/` 与 `traces/`。导出会脱敏 API key / auth token / password / secret 类字段。
+
+## Skill System
+
+Skill HTTP 入口走本地 token 鉴权：
+
+```http
+POST /api/skills
+POST /api/skills/{skill_id}/run
+```
+
+`POST /api/skills` 是 action API，支持 `list`、`builtin`、`get`、`create`、`update`、`disable`、`enable`、`delete`、`import`、`export`、`run`。`run` 会校验 Skill input schema，加载可用项目上下文，按 `allowedTools` 进入统一 Tool Policy，再按 artifact policy 写入 Workspace。
+
+运行示例：
+
+```json
+{
+  "action": "run",
+  "skillId": "skill_research_brief",
+  "input": {"topic": "Skill System", "depth": "quick"},
+  "projectId": "proj-abc123",
+  "offline": true
+}
+```
+
+`POST /api/skills/{skill_id}/run` 等价于 action `run`，适合外部客户端直接绑定某个 Skill。
 
 ## POST `/api/project-files?projectId=<id>`
 

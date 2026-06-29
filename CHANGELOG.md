@@ -2,6 +2,21 @@
 
 本项目使用类似 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的分组方式维护变更记录。未发布内容记录在 `[Unreleased]`，正式发版时迁移到具体版本。
 
+## [2.6.1] - Skill API Integration Patch
+
+**主题：Skill System 收口补丁。** 补齐 Skill System 的 HTTP API 集成，把 2.6.0 已落地的 registry / runner / artifact / evidence 能力接到 Web 层，并同步发布证据。
+
+### 新增
+
+- **Skill Web API**：新增 `deepseek_infra/web/routes/skills.py`，挂载 `POST /api/skills` 与 `POST /api/skills/{skill_id}/run`，支持 `list` / `builtin` / `get` / `create` / `update` / `disable` / `enable` / `delete` / `import` / `export` / `run`。
+- **Skill API 测试**：新增 `tests/test_web_skills_routes.py`，覆盖鉴权、list / get / create / disable / enable 与离线 run，并验证 skill-run artifact source metadata。
+- **Skill evidence gate**：`scripts/smoke_skills.py --offline` 新增 `skillApiRoutes` 检查，默认输出 `docs/evidence/skills-v2.6.1.json`；`preflight_release.py` 与 release manifest 新增 `skill_system_evidence` / `skillSystem` gate。
+
+### 修复
+
+- `create_server()` 现在装配 Skill router，文档承诺的 `/api/skills` 入口可被前端和外部客户端调用。
+- `Settings.from_env(root=...)` 下 `skills_dir` 与 `builtin_skills_dir` 跟随 runtime root，避免测试、打包或自定义 root 时 `.skills` 路径跑偏。
+
 ## [2.6.0] - Skill System
 
 **主题：Skill System（技能系统）。** 新增 `deepseek_infra/infra/skills/` 技能注册表、schema、执行器、权限模型与模板系统；内置 6 个可组合 Skill；配套 smoke、eval、文档与测试；全仓版本号同步到 2.6.0。

@@ -34,7 +34,7 @@ from deepseek_infra.core.config import (
 
 class ConfigTests(unittest.TestCase):
     def test_nested_settings_back_compat_constants_match(self) -> None:
-        self.assertEqual(settings.app_version, "2.6.0")
+        self.assertEqual(settings.app_version, "2.6.1")
         self.assertEqual(settings.default_host, "127.0.0.1")
         self.assertEqual(DEFAULT_HOST, settings.default_host)
         self.assertEqual(MULTI_AGENT_TIMEOUT_SECONDS, settings.multi_agent_timeout_seconds)
@@ -277,6 +277,14 @@ class ConfigTests(unittest.TestCase):
                 second = Settings.from_env(root=root)
 
         self.assertEqual(first.auth.token, second.auth.token)
+
+    def test_skill_dirs_follow_runtime_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, patch.dict("os.environ", {"AUTH_TOKEN": "token"}, clear=True):
+            root = Path(tmp)
+            loaded = Settings.from_env(root=root)
+
+        self.assertEqual(loaded.skills.skills_dir, root / ".skills")
+        self.assertEqual(loaded.skills.builtin_skills_dir, root / "skills" / "builtin")
 
     def test_android_packaging_paths_can_be_overridden_by_env(self) -> None:
         with tempfile.TemporaryDirectory() as root_tmp, tempfile.TemporaryDirectory() as static_tmp:

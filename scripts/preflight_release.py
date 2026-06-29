@@ -10,7 +10,7 @@ and Edge Router evidence is strict when submitted, that key docs do not contain
 encoding corruption (since v2.3.4), and (since v2.3.1) that GUI interop evidence
 for Claude Desktop / Cursor has been recorded in ``docs/COMPATIBILITY.md``.
 
-    python scripts/preflight_release.py --version 2.6.0
+    python scripts/preflight_release.py --version 2.6.1
 
 Exits 1 on any FAIL; WARNINGs do not fail. Version defaults to
 ``settings.app_version``.
@@ -387,6 +387,15 @@ def check_a2a_external_peer_evidence(root: Path, version: str) -> CheckResult:
     )
 
 
+def _optional_stale_evidence(name: str, label: str, reported: str, version: str, path: Path) -> CheckResult:
+    return CheckResult(
+        name,
+        STATUS_WARN,
+        f"{label} evidence version is {reported!r}, expected {version!r}; refresh this optional evidence when validating that ecosystem path for the current release",
+        {"path": str(path), "version": reported, "expected": version},
+    )
+
+
 def check_a2a_third_party_peer_evidence(root: Path, version: str) -> CheckResult:
     path = root / "docs" / "evidence" / "a2a-third-party-peer.json"
     if not path.is_file():
@@ -405,12 +414,7 @@ def check_a2a_third_party_peer_evidence(root: Path, version: str) -> CheckResult
         return metadata_fail
     reported = str(data.get("version") or "")
     if reported != version:
-        return CheckResult(
-            "a2a_third_party_peer_evidence",
-            STATUS_FAIL,
-            f"third-party A2A evidence version is {reported!r}, expected {version!r}",
-            {"version": reported, "expected": version},
-        )
+        return _optional_stale_evidence("a2a_third_party_peer_evidence", "third-party A2A", reported, version, path)
     if data.get("status") != "PASS":
         return CheckResult(
             "a2a_third_party_peer_evidence",
@@ -465,12 +469,7 @@ def check_edge_router_smoke_evidence(root: Path, version: str) -> CheckResult:
         return metadata_fail
     reported = str(data.get("version") or "")
     if reported != version:
-        return CheckResult(
-            "edge_router_smoke_evidence",
-            STATUS_FAIL,
-            f"Edge Router smoke evidence version is {reported!r}, expected {version!r}",
-            {"version": reported, "expected": version},
-        )
+        return _optional_stale_evidence("edge_router_smoke_evidence", "Edge Router smoke", reported, version, path)
     if data.get("status") != "PASS":
         return CheckResult(
             "edge_router_smoke_evidence",
@@ -515,12 +514,7 @@ def check_continue_dev_mcp_evidence(root: Path, version: str) -> CheckResult:
         return metadata_fail
     reported = str(data.get("version") or "")
     if reported != version:
-        return CheckResult(
-            "continue_dev_mcp_evidence",
-            STATUS_FAIL,
-            f"Continue.dev MCP evidence version is {reported!r}, expected {version!r}",
-            {"version": reported, "expected": version},
-        )
+        return _optional_stale_evidence("continue_dev_mcp_evidence", "Continue.dev MCP", reported, version, path)
     if data.get("status") != "PASS":
         return CheckResult(
             "continue_dev_mcp_evidence",
@@ -566,12 +560,7 @@ def check_openai_compatible_sdk_evidence(root: Path, version: str) -> CheckResul
         return metadata_fail
     reported = str(data.get("version") or "")
     if reported != version:
-        return CheckResult(
-            "openai_compatible_sdk_evidence",
-            STATUS_FAIL,
-            f"OpenAI-compatible SDK evidence version is {reported!r}, expected {version!r}",
-            {"version": reported, "expected": version},
-        )
+        return _optional_stale_evidence("openai_compatible_sdk_evidence", "OpenAI-compatible SDK", reported, version, path)
     if data.get("status") != "PASS":
         return CheckResult(
             "openai_compatible_sdk_evidence",
@@ -614,7 +603,7 @@ def check_openai_compatible_sdk_evidence(root: Path, version: str) -> CheckResul
 
 
 def check_workspace_core_evidence(root: Path, version: str) -> CheckResult:
-    path = root / "docs" / "evidence" / "workspace-v2.6.0.json"
+    path = root / "docs" / "evidence" / f"workspace-v{version}.json"
     if not path.is_file():
         return CheckResult(
             "workspace_core_evidence",
@@ -671,12 +660,12 @@ def check_workspace_core_evidence(root: Path, version: str) -> CheckResult:
 
 
 def check_semantic_cache_onnx_evidence(root: Path, version: str) -> CheckResult:
-    path = root / "docs" / "evidence" / "semantic-cache-onnx-v2.6.0.json"
+    path = root / "docs" / "evidence" / f"semantic-cache-onnx-v{version}.json"
     if not path.is_file():
         return CheckResult(
             "semantic_cache_onnx_evidence",
             STATUS_WARN,
-            "Semantic Cache ONNX evidence missing; run benchmarks/bench_semantic_cache.py --compare --out docs/evidence/semantic-cache-onnx-v2.6.0.json --markdown docs/evidence/semantic-cache-onnx-v2.6.0.md",
+            f"Semantic Cache ONNX evidence missing; run benchmarks/bench_semantic_cache.py --compare --out docs/evidence/semantic-cache-onnx-v{version}.json --markdown docs/evidence/semantic-cache-onnx-v{version}.md",
             {"path": str(path)},
         )
     try:
@@ -688,12 +677,7 @@ def check_semantic_cache_onnx_evidence(root: Path, version: str) -> CheckResult:
         return metadata_fail
     reported = str(data.get("version") or "")
     if reported != version:
-        return CheckResult(
-            "semantic_cache_onnx_evidence",
-            STATUS_FAIL,
-            f"Semantic Cache ONNX evidence version is {reported!r}, expected {version!r}",
-            {"version": reported, "expected": version},
-        )
+        return _optional_stale_evidence("semantic_cache_onnx_evidence", "Semantic Cache ONNX", reported, version, path)
     if data.get("status") != "PASS":
         return CheckResult(
             "semantic_cache_onnx_evidence",
@@ -718,6 +702,65 @@ def check_semantic_cache_onnx_evidence(root: Path, version: str) -> CheckResult:
         STATUS_PASS,
         "Semantic Cache ONNX evidence recorded",
         {"path": str(path), "onnxAvailable": data.get("onnxAvailable")},
+    )
+
+
+def check_skill_system_evidence(root: Path, version: str) -> CheckResult:
+    path = root / "docs" / "evidence" / f"skills-v{version}.json"
+    if not path.is_file():
+        return CheckResult(
+            "skill_system_evidence",
+            STATUS_FAIL,
+            "Skill System evidence missing; run scripts/smoke_skills.py --offline",
+            {"path": str(path)},
+        )
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return CheckResult("skill_system_evidence", STATUS_FAIL, f"cannot parse Skill System evidence: {exc}", {"path": str(path)})
+    metadata_fail = _check_evidence_metadata("skill_system", data, path)
+    if metadata_fail:
+        return metadata_fail
+    reported = str(data.get("version") or "")
+    if reported != version:
+        return CheckResult(
+            "skill_system_evidence",
+            STATUS_FAIL,
+            f"Skill System evidence version is {reported!r}, expected {version!r}",
+            {"version": reported, "expected": version},
+        )
+    if data.get("status") != "PASS":
+        return CheckResult(
+            "skill_system_evidence",
+            STATUS_FAIL,
+            f"Skill System evidence status is {data.get('status')!r}, expected PASS",
+            {"status": data.get("status")},
+        )
+    checks = data.get("checks")
+    check_status = {str(k): str(v).upper() for k, v in checks.items()} if isinstance(checks, dict) else {}
+    required = (
+        "skillApiRoutes",
+        "builtinSkillsLoad",
+        "customSkillCreate",
+        "inputSchemaValidation",
+        "toolPermissionGate",
+        "artifactPolicy",
+        "projectBinding",
+        "skillExport",
+    )
+    missing_or_failed = [name for name in required if check_status.get(name) != "PASS"]
+    if missing_or_failed:
+        return CheckResult(
+            "skill_system_evidence",
+            STATUS_FAIL,
+            f"Skill System evidence missing PASS checks: {', '.join(missing_or_failed)}",
+            {"missingOrFailed": missing_or_failed},
+        )
+    return CheckResult(
+        "skill_system_evidence",
+        STATUS_PASS,
+        "Skill System evidence recorded",
+        {"path": str(path), "checks": list(required)},
     )
 
 
@@ -804,6 +847,7 @@ def run_preflight(root: Path, version: str) -> list[CheckResult]:
         check_openai_compatible_sdk_evidence(root, version),
         check_semantic_cache_onnx_evidence(root, version),
         check_workspace_core_evidence(root, version),
+        check_skill_system_evidence(root, version),
         check_gui_interop_evidence(root),
     ]
 

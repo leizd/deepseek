@@ -136,6 +136,21 @@ def test_phase5_workspace_routes_are_not_declared_inline_in_server() -> None:
         assert decorator not in server_source
 
 
+def test_phase6_skill_routes_are_not_declared_inline_in_server() -> None:
+    app = server_module.create_app()
+    paths = _collect_route_paths(app.routes)
+    server_source = Path(server_module.__file__).read_text(encoding="utf-8")
+
+    assert "/api/skills" in paths
+    assert "/api/skills/{skill_id}/run" in paths
+    assert "create_skills_router(_skills_route_deps())" in server_source
+    for decorator in [
+        '@api.post("/api/skills")',
+        '@api.post("/api/skills/{skill_id}/run")',
+    ]:
+        assert decorator not in server_source
+
+
 def test_phase_final_chat_routes_split_and_api_surface_intact() -> None:
     server_source = Path(server_module.__file__).read_text(encoding="utf-8")
 

@@ -416,7 +416,7 @@ class SkillsSettings:
 @dataclass(frozen=True, slots=True)
 class Settings:
     root: Path = ROOT
-    app_version: str = "2.6.0"
+    app_version: str = "2.6.1"
     deepseek_url: str = "https://api.deepseek.com/chat/completions"
     tavily_url: str = "https://api.tavily.com/search"
     deepseek_timeout_seconds: int = 180
@@ -767,6 +767,14 @@ class Settings:
                 escalate_confirm=_env_bool("TAINT_ESCALATE_CONFIRM", True),
                 max_segments=_env_int_clamped("TAINT_MAX_SEGMENTS", 24, 4, 200),
             ),
+            skills=SkillsSettings(
+                enabled=_env_bool("SKILLS_ENABLED", True),
+                skills_dir=_env_path(("SKILLS_DIR", "DEEPSEEK_SKILLS_DIR"), runtime_root / ".skills"),
+                builtin_skills_dir=_env_path(
+                    ("BUILTIN_SKILLS_DIR", "DEEPSEEK_BUILTIN_SKILLS_DIR"),
+                    runtime_root / "skills" / "builtin",
+                ),
+            ),
         )
 
 
@@ -837,6 +845,14 @@ def _env_bool(name: str, default: bool = False) -> bool:
 def _env_tuple(name: str) -> tuple[str, ...]:
     raw = os.environ.get(name, "")
     return tuple(part.strip() for part in raw.split(",") if part.strip())
+
+
+def _env_path(names: tuple[str, ...], default: Path) -> Path:
+    for name in names:
+        raw = os.environ.get(name, "").strip()
+        if raw:
+            return Path(raw).expanduser().resolve()
+    return default
 
 
 _AGENT_MODEL_ENV = {

@@ -54,10 +54,30 @@ def custom_skill_config() -> dict[str, Any]:
     }
 
 
+def collect_route_paths(routes: list[Any]) -> set[str]:
+    paths: set[str] = set()
+    for route in routes:
+        path = getattr(route, "path", "")
+        if path:
+            paths.add(path)
+        original = getattr(route, "original_router", None)
+        if original is not None:
+            paths |= collect_route_paths(getattr(original, "routes", []))
+    return paths
+
+
 def run_checks(runtime_root: Path) -> tuple[dict[str, str], dict[str, Any]]:
     patch_runtime(runtime_root)
     checks: dict[str, str] = {}
     details: dict[str, Any] = {}
+
+    from deepseek_infra.web.server import create_app
+
+    app = create_app()
+    routes = collect_route_paths(getattr(app, "routes", []))
+    api_routes = {"/api/skills", "/api/skills/{skill_id}/run"}.issubset(routes)
+    checks["skillApiRoutes"] = "PASS" if api_routes else "FAIL"
+    details["skillApiRoutes"] = sorted(route for route in routes if route.startswith("/api/skills"))
 
     builtins = registry.list_builtin_skills()
     checks["builtinSkillsLoad"] = "PASS" if len(builtins) >= 6 else "FAIL"
@@ -104,7 +124,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Offline Skill System smoke")
     parser.add_argument("--offline", action="store_true", help="Run without API keys. This is the only supported smoke mode.")
     parser.add_argument("--version", default=APP_VERSION)
-    parser.add_argument("--out", default=str(REPO_ROOT / "docs" / "evidence" / "skills-v2.6.0.json"))
+    parser.add_argument("--out", default=str(REPO_ROOT / "docs" / "evidence" / f"skills-v{APP_VERSION}.json"))
     parser.add_argument("--json", action="store_true")
     return parser.parse_args(argv)
 

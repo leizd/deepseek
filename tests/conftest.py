@@ -26,6 +26,8 @@ import deepseek_infra.infra.tool_runtime.tools as tools
 import deepseek_infra.infra.workspace.artifacts as workspace_artifacts
 import deepseek_infra.infra.workspace.exports as workspace_exports
 import deepseek_infra.infra.workspace.saved_items as workspace_saved_items
+import deepseek_infra.infra.skills.evidence as skill_evidence
+import deepseek_infra.infra.skills.registry as skill_registry
 
 
 @pytest.fixture
@@ -103,6 +105,8 @@ def tmp_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Pa
     monkeypatch.setattr(workspace_exports.legacy_projects, "PROJECTS_DIR", projects_dir)
     skills_dir = tmp_path / ".skills"
     monkeypatch.setattr(config, "SKILLS_DIR", skills_dir)
+    monkeypatch.setattr(skill_registry, "SKILLS_DIR", skills_dir)
+    monkeypatch.setattr(skill_evidence, "GENERATED_DIR", generated_dir)
 
     files._load_cached_file_cached.cache_clear()
     yield tmp_path

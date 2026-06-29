@@ -110,6 +110,8 @@ from deepseek_infra.infra.data.reminders import create_reminder, delete_reminder
 from deepseek_infra.infra.gateway.resiliency import gateway_status
 from deepseek_infra.infra.gateway.semantic_cache import clear as clear_semantic_cache
 from deepseek_infra.infra.gateway.semantic_cache import status as semantic_cache_status
+from deepseek_infra.infra.skills import registry as skill_registry
+from deepseek_infra.infra.skills.runner import run_skill
 from deepseek_infra.infra.tool_runtime.tools import fetch_url
 from deepseek_infra.web.http_utils import (
     allowed_cors_origin,
@@ -132,6 +134,7 @@ from deepseek_infra.web.routes.files import FilesRouteDeps, create_files_router
 from deepseek_infra.web.routes.mcp import McpRouteDeps, create_mcp_router
 from deepseek_infra.web.routes.memory import MemoryRouteDeps, create_memory_router
 from deepseek_infra.web.routes.rag import RagRouteDeps, create_rag_router
+from deepseek_infra.web.routes.skills import SkillsRouteDeps, create_skills_router
 from deepseek_infra.web.routes.status import StatusRouteDeps, create_status_router
 from deepseek_infra.web.routes.workspace import WorkspaceRouteDeps, create_workspace_router
 
@@ -323,6 +326,21 @@ def _edge_route_deps() -> EdgeRouteDeps:
     )
 
 
+def _skills_route_deps() -> SkillsRouteDeps:
+    return SkillsRouteDeps(
+        list_skills=lambda include_disabled=False: skill_registry.list_skills(include_disabled=include_disabled),
+        list_builtin_skills=lambda include_disabled=True: skill_registry.list_builtin_skills(include_disabled=include_disabled),
+        get_skill=lambda skill_id, include_disabled=False: skill_registry.get_skill(skill_id, include_disabled=include_disabled),
+        create_custom_skill=lambda config, overwrite=False: skill_registry.create_custom_skill(config, overwrite=overwrite),
+        update_skill=lambda skill_id, patch: skill_registry.update_skill(skill_id, patch),
+        set_skill_disabled=lambda skill_id, disabled: skill_registry.set_skill_disabled(skill_id, disabled),
+        delete_skill=lambda skill_id: skill_registry.delete_skill(skill_id),
+        import_skill_config=lambda config, overwrite=False: skill_registry.import_skill_config(config, overwrite=overwrite),
+        export_skill_config=lambda skill_id: skill_registry.export_skill_config(skill_id),
+        run_skill=lambda skill_id, input_data, **kwargs: run_skill(skill_id, input_data, **kwargs),
+    )
+
+
 def _workspace_route_deps() -> WorkspaceRouteDeps:
     return WorkspaceRouteDeps(
         read_multipart_files=lambda request: read_multipart_files(request),
@@ -374,6 +392,7 @@ def create_app() -> FastAPI:
     api.include_router(create_mcp_router(_mcp_route_deps()))
     api.include_router(create_a2a_router(_a2a_route_deps()))
     api.include_router(create_edge_router(_edge_route_deps()))
+    api.include_router(create_skills_router(_skills_route_deps()))
     api.include_router(create_workspace_router(_workspace_route_deps()))
     api.include_router(create_chat_router(_chat_route_deps()))
 

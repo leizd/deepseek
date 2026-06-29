@@ -27,6 +27,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from deepseek_infra.core.config import APP_VERSION  # noqa: E402
+
 
 def _py() -> str:
     return sys.executable
@@ -45,6 +47,10 @@ def build_stages(args: argparse.Namespace) -> list[tuple[str, list[str]]]:
     if not args.skip_workspace:
         workspace_cmd = [_py(), str(REPO_ROOT / "scripts" / "smoke_workspace.py"), "--offline", "--out", args.workspace_out]
         stages.append(("workspace_core", workspace_cmd))
+
+    if not args.skip_skills:
+        skills_cmd = [_py(), str(REPO_ROOT / "scripts" / "smoke_skills.py"), "--offline", "--out", args.skills_out]
+        stages.append(("skill_system", skills_cmd))
 
     if not args.skip_evals:
         stages.append(
@@ -173,13 +179,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--compare-out", default=str(REPO_ROOT / "evals" / "reports" / "baseline-compare-latest.json"))
     parser.add_argument("--security-out", default=str(REPO_ROOT / "evals" / "reports" / "security-latest.json"))
     parser.add_argument("--security-markdown", default=str(REPO_ROOT / "evals" / "reports" / "security-latest.md"))
-    parser.add_argument("--workspace-out", default=str(REPO_ROOT / "docs" / "evidence" / "workspace-v2.6.0.json"))
+    parser.add_argument("--workspace-out", default=str(REPO_ROOT / "docs" / "evidence" / f"workspace-v{APP_VERSION}.json"))
+    parser.add_argument("--skills-out", default=str(REPO_ROOT / "docs" / "evidence" / f"skills-v{APP_VERSION}.json"))
     parser.add_argument("--skip-doctor", action="store_true")
     parser.add_argument("--skip-workspace", action="store_true")
     parser.add_argument("--skip-evals", action="store_true")
     parser.add_argument("--skip-security", action="store_true")
     parser.add_argument("--skip-agent", action="store_true")
     parser.add_argument("--skip-compare", action="store_true")
+    parser.add_argument("--skip-skills", action="store_true")
     parser.add_argument("--skip-mcp", action="store_true")
     parser.add_argument("--skip-a2a", action="store_true")
     parser.add_argument("--json", action="store_true", help="Emit a machine-readable JSON summary instead of running shells verbosely.")

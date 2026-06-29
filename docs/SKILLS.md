@@ -1,8 +1,8 @@
 # Skill System
 
-Applicable version: v2.6.0.
+Applicable version: v2.6.1.
 
-DeepSeek Infra v2.6.0 defines a Skill as:
+DeepSeek Infra v2.6.1 defines a Skill as:
 
 ```text
 Skill = Prompt + Tools + Input Schema + Output Schema + Memory Policy + Artifact Policy + Project Binding
@@ -40,6 +40,7 @@ HTTP entrypoint:
 
 ```text
 POST /api/skills
+POST /api/skills/{skill_id}/run
 ```
 
 Common actions: `list`, `builtin`, `get`, `create`, `update`, `disable`, `enable`, `delete`, `import`, `export`, `run`.
@@ -89,6 +90,6 @@ python scripts/smoke_skills.py --offline
 python evals/runners/run_skill_eval.py --strict
 ```
 
-The release evidence file is `docs/evidence/skills-v2.6.0.json`.
+The release evidence file is `docs/evidence/skills-v2.6.1.json`.
 
-Required checks: `builtinSkillsLoad`, `customSkillCreate`, `inputSchemaValidation`, `toolPermissionGate`, `artifactPolicy`, `projectBinding`, and `skillExport`.
+Required checks: `skillApiRoutes`, `builtinSkillsLoad`, `customSkillCreate`, `inputSchemaValidation`, `toolPermissionGate`, `artifactPolicy`, `projectBinding`, and `skillExport`.
