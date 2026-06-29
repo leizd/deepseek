@@ -1,0 +1,3 @@
+{"id":"builtin-pack","check":"builtinSkillsLoad","expectedMin":6}
+{"id":"permission-gate","check":"toolPermissionGate","skillId":"skill_code_review","deniedTool":"fetch_url"}
+{"id":"project-artifact","check":"artifactPolicy","skillId":"skill_research_brief","input":{"topic":"Skill eval smoke","depth":"quick"}}

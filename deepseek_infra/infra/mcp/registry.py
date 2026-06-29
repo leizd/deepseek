@@ -128,7 +128,7 @@ def read_mcp_resource(uri: str) -> list[dict[str, Any]]:
         if path is None:
             raise AppError("Resource not found", code=ErrorCode.NOT_FOUND, status=404)
         media_type = GENERATED_MEDIA_TYPES.get(path.suffix.lower().lstrip("."), "application/octet-stream")
-        if media_type == "image/svg+xml":
+        if media_type == "image/svg+xml" or media_type.startswith("text/"):
             return [{"uri": value, "mimeType": media_type, "text": path.read_text(encoding="utf-8")}]
         return [
             {

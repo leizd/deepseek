@@ -31,11 +31,12 @@ GENERATED_MEDIA_TYPES: dict[str, str] = {
     "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "pdf": "application/pdf",
+    "md": "text/markdown; charset=utf-8",
     "svg": "image/svg+xml",
 }
 
 _ID_RE = re.compile(r"[0-9a-f]{32}")
-_DOC_EXT_RE = re.compile(r"\.(?:pptx|docx|pdf|svg)$", flags=re.IGNORECASE)
+_DOC_EXT_RE = re.compile(r"\.(?:pptx|docx|pdf|md|svg)$", flags=re.IGNORECASE)
 
 
 def _safe_filename(title: str) -> str:
@@ -102,7 +103,7 @@ def download_descriptor(path: Path) -> tuple[str, str]:
     """给下载响应返回 (MIME, 附件文件名)。文件名按类型给个通用名，扩展名取自实际文件。"""
     ext = path.suffix.lower().lstrip(".")
     media_type = GENERATED_MEDIA_TYPES.get(ext, "application/octet-stream")
-    base = "presentation" if ext == "pptx" else "mindmap" if ext == "svg" else "document"
+    base = "presentation" if ext == "pptx" else "mindmap" if ext == "svg" else "notes" if ext == "md" else "document"
     return media_type, f"{base}.{ext}"
 
 
@@ -129,7 +130,7 @@ def _download_filename(value: str, ext: str) -> str:
     raw = str(value or "").strip()
     raw = _DOC_EXT_RE.sub("", raw)
     raw = re.sub(r"^(?:点击)?下载\s*", "", raw, flags=re.IGNORECASE).strip()
-    base = _safe_filename(raw) or ("presentation" if ext == "pptx" else "mindmap" if ext == "svg" else "document")
+    base = _safe_filename(raw) or ("presentation" if ext == "pptx" else "mindmap" if ext == "svg" else "notes" if ext == "md" else "document")
     return f"{base}.{ext}"
 
 

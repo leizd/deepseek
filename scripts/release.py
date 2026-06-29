@@ -30,6 +30,7 @@ EXCLUDED_DIRS = {
     ".tool-audit",
     ".scheduler",
     ".a2a",
+    ".skills",
     ".local-rag",
     ".traces",
     ".semantic-cache",

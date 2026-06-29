@@ -399,6 +399,21 @@ class ContextTaintSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class SkillsSettings:
+    """Skill system knobs.
+
+    Built-in Skills ship under ``skills/builtin/`` as bundled JSON descriptors.
+    Custom Skills are written to ``.skills/custom/`` at runtime; disabled Skill
+    IDs are tracked in ``.skills/disabled.json``.  Skill storage directories are
+    configurable through env so tests and smoke scripts can isolate them.
+    """
+
+    enabled: bool = True
+    skills_dir: Path = field(default_factory=lambda: ROOT / ".skills")
+    builtin_skills_dir: Path = field(default_factory=lambda: ROOT / "skills" / "builtin")
+
+
+@dataclass(frozen=True, slots=True)
 class Settings:
     root: Path = ROOT
     app_version: str = "2.5.9"
@@ -470,6 +485,7 @@ class Settings:
     mcp: MCPSettings = field(default_factory=MCPSettings)
     a2a: A2ASettings = field(default_factory=A2ASettings)
     context_taint: ContextTaintSettings = field(default_factory=ContextTaintSettings)
+    skills: SkillsSettings = field(default_factory=SkillsSettings)
     @property
     def static_dir(self) -> Path:
         return _bundled_static_dir()
@@ -1118,6 +1134,9 @@ TAINT_HARDEN_SEARCH_CONTEXT = settings.context_taint.harden_search_context
 TAINT_HARDEN_FILE_CONTEXT = settings.context_taint.harden_file_context
 TAINT_ESCALATE_CONFIRM = settings.context_taint.escalate_confirm
 TAINT_MAX_SEGMENTS = settings.context_taint.max_segments
+SKILLS_ENABLED = settings.skills.enabled
+SKILLS_DIR = settings.skills.skills_dir
+BUILTIN_SKILLS_DIR = settings.skills.builtin_skills_dir
 AUTH_TOKEN_FILE = settings.auth_token_file
 
 TEXT_EXTENSIONS = {

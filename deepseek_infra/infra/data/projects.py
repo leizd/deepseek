@@ -15,6 +15,9 @@ from deepseek_infra.infra.rag.files import extract_uploaded_file
 
 MAX_PROJECTS = 40
 MAX_PROJECT_DOCUMENTS = 120
+MAX_PROJECT_SKILL_RUNS = 200
+MAX_PROJECT_SAVED_ITEMS = 200
+MAX_PROJECT_ARTIFACTS = 200
 
 
 def list_projects() -> list[dict[str, Any]]:
@@ -38,6 +41,10 @@ def create_project(name: str) -> dict[str, Any]:
         "id": f"proj-{secrets.token_hex(6)}",
         "name": normalize_project_name(name),
         "documents": [],
+        "skills": {"enabledSkills": [], "defaultSkill": "", "recentSkills": []},
+        "skillRuns": [],
+        "savedItems": [],
+        "artifacts": [],
         "createdAt": now,
         "updatedAt": now,
     }
@@ -58,6 +65,93 @@ def delete_project(project_id: str) -> int:
         pass
     shutil.rmtree(path)
     return 1
+
+
+def project_skill_binding(project_id: str) -> dict[str, Any]:
+    project = require_project(project_id)
+    return normalize_project_skills(project.get("skills"))
+
+
+def set_project_skill_binding(project_id: str, enabled_skills: list[str], *, default_skill: str = "") -> dict[str, Any]:
+    project = require_project(project_id)
+    enabled = [skill for skill in (normalize_skill_id_for_project(item) for item in enabled_skills) if skill]
+    default = normalize_skill_id_for_project(default_skill)
+    if default and default not in enabled:
+        enabled.insert(0, default)
+    project["skills"] = {
+        "enabledSkills": unique_strings(enabled)[:40],
+        "defaultSkill": default if default in enabled else "",
+        "recentSkills": normalize_project_skills(project.get("skills")).get("recentSkills", []),
+    }
+    project["updatedAt"] = int(time.time() * 1000)
+    write_project(project)
+    return normalize_project_skills(project["skills"])
+
+
+def append_project_skill_run(project_id: str, run: dict[str, Any]) -> dict[str, Any]:
+    project = require_project(project_id)
+    run_record = normalize_skill_run(run)
+    runs = [item for item in normalize_skill_runs(project.get("skillRuns")) if item.get("skillRunId") != run_record.get("skillRunId")]
+    runs.insert(0, run_record)
+    project["skillRuns"] = runs[:MAX_PROJECT_SKILL_RUNS]
+    touch_project_skill(project, str(run_record.get("skillId") or ""))
+    project["updatedAt"] = int(time.time() * 1000)
+    write_project(project)
+    return run_record
+
+
+def list_project_skill_runs(project_id: str, *, limit: int = 50) -> list[dict[str, Any]]:
+    project = require_project(project_id)
+    return normalize_skill_runs(project.get("skillRuns"))[: max(1, min(int(limit or 50), MAX_PROJECT_SKILL_RUNS))]
+
+
+def add_project_saved_item(
+    project_id: str,
+    *,
+    title: str,
+    content: str,
+    kind: str = "skill_output",
+    source: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    project = require_project(project_id)
+    now = int(time.time() * 1000)
+    item = {
+        "id": f"saved-{secrets.token_hex(8)}",
+        "title": str(title or "Skill output")[:160],
+        "kind": str(kind or "skill_output")[:80],
+        "content": str(content or "")[:80_000],
+        "source": source or {},
+        "createdAt": now,
+    }
+    saved_items = normalize_saved_items(project.get("savedItems"))
+    saved_items.insert(0, item)
+    project["savedItems"] = saved_items[:MAX_PROJECT_SAVED_ITEMS]
+    project["updatedAt"] = now
+    write_project(project)
+    return item
+
+
+def link_project_artifact(project_id: str, artifact: dict[str, Any]) -> dict[str, Any]:
+    project = require_project(project_id)
+    normalized = normalize_project_artifact(artifact)
+    artifacts = [item for item in normalize_project_artifacts(project.get("artifacts")) if item.get("artifactId") != normalized.get("artifactId")]
+    artifacts.insert(0, normalized)
+    project["artifacts"] = artifacts[:MAX_PROJECT_ARTIFACTS]
+    project["updatedAt"] = int(time.time() * 1000)
+    write_project(project)
+    return normalized
+
+
+def export_project(project_id: str) -> dict[str, Any]:
+    project = require_project(project_id)
+    return {
+        "project": public_project(project),
+        "documents": normalize_documents(project.get("documents")),
+        "skills": normalize_project_skills(project.get("skills")),
+        "skillRuns": normalize_skill_runs(project.get("skillRuns")),
+        "savedItems": normalize_saved_items(project.get("savedItems")),
+        "artifacts": normalize_project_artifacts(project.get("artifacts")),
+    }
 
 
 def add_project_files(
@@ -134,6 +228,10 @@ def read_project(project_id: str) -> dict[str, Any] | None:
     data["id"] = safe_id
     data["name"] = normalize_project_name(data.get("name"))
     data["documents"] = normalize_documents(data.get("documents"))
+    data["skills"] = normalize_project_skills(data.get("skills"))
+    data["skillRuns"] = normalize_skill_runs(data.get("skillRuns"))
+    data["savedItems"] = normalize_saved_items(data.get("savedItems"))
+    data["artifacts"] = normalize_project_artifacts(data.get("artifacts"))
     return data
 
 
@@ -152,6 +250,10 @@ def public_project(project: dict[str, Any]) -> dict[str, Any]:
         "id": str(project.get("id") or ""),
         "name": normalize_project_name(project.get("name")),
         "documents": normalize_documents(project.get("documents")),
+        "skills": normalize_project_skills(project.get("skills")),
+        "skillRuns": normalize_skill_runs(project.get("skillRuns"))[:20],
+        "savedItems": normalize_saved_items(project.get("savedItems"))[:20],
+        "artifacts": normalize_project_artifacts(project.get("artifacts"))[:20],
         "createdAt": int(project.get("createdAt") or 0),
         "updatedAt": int(project.get("updatedAt") or 0),
     }
@@ -192,6 +294,114 @@ def normalize_documents(value: Any) -> list[dict[str, Any]]:
             }
         )
     return documents
+
+
+def normalize_project_skills(value: Any) -> dict[str, Any]:
+    data = value if isinstance(value, dict) else {}
+    enabled = unique_strings(normalize_skill_id_for_project(item) for item in data.get("enabledSkills") or [])
+    recent = unique_strings(normalize_skill_id_for_project(item) for item in data.get("recentSkills") or [])
+    default = normalize_skill_id_for_project(data.get("defaultSkill"))
+    return {
+        "enabledSkills": enabled[:40],
+        "defaultSkill": default if default in enabled else "",
+        "recentSkills": recent[:20],
+    }
+
+
+def normalize_skill_runs(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    runs = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        runs.append(normalize_skill_run(item))
+    return runs[:MAX_PROJECT_SKILL_RUNS]
+
+
+def normalize_skill_run(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "skillRunId": str(item.get("skillRunId") or item.get("runId") or f"run-{secrets.token_hex(8)}")[:80],
+        "skillId": normalize_skill_id_for_project(item.get("skillId")),
+        "status": str(item.get("status") or "completed")[:40],
+        "projectId": str(item.get("projectId") or "")[:80],
+        "input": item.get("input") if isinstance(item.get("input"), dict) else {},
+        "outputSummary": str(item.get("outputSummary") or "")[:1200],
+        "artifactIds": unique_strings(str(value or "") for value in item.get("artifactIds") or [])[:40],
+        "savedItemIds": unique_strings(str(value or "") for value in item.get("savedItemIds") or [])[:40],
+        "traceId": str(item.get("traceId") or "")[:80],
+        "startedAt": str(item.get("startedAt") or ""),
+        "completedAt": str(item.get("completedAt") or ""),
+    }
+
+
+def normalize_saved_items(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    items: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        items.append(
+            {
+                "id": str(item.get("id") or f"saved-{secrets.token_hex(8)}")[:80],
+                "title": str(item.get("title") or "Saved item")[:160],
+                "kind": str(item.get("kind") or "note")[:80],
+                "content": str(item.get("content") or "")[:80_000],
+                "source": item.get("source") if isinstance(item.get("source"), dict) else {},
+                "createdAt": int(item.get("createdAt") or 0),
+            }
+        )
+    return items[:MAX_PROJECT_SAVED_ITEMS]
+
+
+def normalize_project_artifacts(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    artifacts = []
+    for item in value:
+        if isinstance(item, dict):
+            artifacts.append(normalize_project_artifact(item))
+    return artifacts[:MAX_PROJECT_ARTIFACTS]
+
+
+def normalize_project_artifact(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "artifactId": str(item.get("artifactId") or "")[:80],
+        "fileId": str(item.get("fileId") or "")[:80],
+        "filename": str(item.get("filename") or "")[:180],
+        "downloadUrl": str(item.get("downloadUrl") or "")[:500],
+        "type": str(item.get("type") or "")[:40],
+        "source": item.get("source") if isinstance(item.get("source"), dict) else {},
+        "createdAt": str(item.get("createdAt") or ""),
+    }
+
+
+def touch_project_skill(project: dict[str, Any], skill_id: str) -> None:
+    skill_id = normalize_skill_id_for_project(skill_id)
+    if not skill_id:
+        return
+    skills = normalize_project_skills(project.get("skills"))
+    if skill_id not in skills["enabledSkills"]:
+        skills["enabledSkills"].insert(0, skill_id)
+    skills["recentSkills"] = unique_strings([skill_id, *skills["recentSkills"]])[:20]
+    if not skills["defaultSkill"]:
+        skills["defaultSkill"] = skill_id
+    project["skills"] = skills
+
+
+def normalize_skill_id_for_project(value: Any) -> str:
+    skill_id = str(value or "").strip()
+    return skill_id if re.fullmatch(r"[A-Za-z0-9_:-]{3,80}", skill_id) else ""
+
+
+def unique_strings(values: Any) -> list[str]:
+    result = []
+    for value in values if isinstance(values, list) else list(values):
+        text = str(value or "").strip()
+        if text and text not in result:
+            result.append(text)
+    return result
 
 
 def validate_project_id(project_id: str) -> str:

@@ -26,6 +26,7 @@ class ReleaseScriptTests(unittest.TestCase):
                 ".budget",
                 ".tool-audit",
                 ".scheduler",
+                ".skills",
                 ".local-rag",
                 ".traces",
                 ".semantic-cache",

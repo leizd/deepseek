@@ -101,6 +101,8 @@ def tmp_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Pa
     monkeypatch.setattr(workspace_artifacts.legacy_projects, "PROJECTS_DIR", projects_dir)
     monkeypatch.setattr(workspace_saved_items.legacy_projects, "PROJECTS_DIR", projects_dir)
     monkeypatch.setattr(workspace_exports.legacy_projects, "PROJECTS_DIR", projects_dir)
+    skills_dir = tmp_path / ".skills"
+    monkeypatch.setattr(config, "SKILLS_DIR", skills_dir)
 
     files._load_cached_file_cached.cache_clear()
     yield tmp_path
