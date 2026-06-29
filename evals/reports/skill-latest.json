@@ -1,0 +1,81 @@
+{
+  "version": "2.6.1",
+  "commit": "c28ab678aac6",
+  "generatedAt": "2026-06-29T12:24:39+00:00",
+  "environment": {
+    "os": "Windows",
+    "python": "3.13.5",
+    "ci": false
+  },
+  "status": "PASS",
+  "checks": {
+    "skillApiRoutes": "PASS",
+    "builtinSkillsLoad": "PASS",
+    "customSkillCreate": "PASS",
+    "inputSchemaValidation": "PASS",
+    "toolPermissionGate": "PASS",
+    "artifactPolicy": "PASS",
+    "projectBinding": "PASS",
+    "skillExport": "PASS"
+  },
+  "details": {
+    "skillApiRoutes": [
+      "/api/skills",
+      "/api/skills/{skill_id}/run"
+    ],
+    "builtinSkillIds": [
+      "skill_code_review",
+      "skill_document_reader",
+      "skill_paper_writer",
+      "skill_ppt_generator",
+      "skill_research_brief",
+      "skill_study_tutor"
+    ],
+    "toolPermissionGate": {
+      "tool": "fetch_url",
+      "action": "deny",
+      "policyVerdict": "denied",
+      "risk": "high",
+      "reasons": [
+        "capability_denied:full"
+      ],
+      "violations": [],
+      "capability": "full",
+      "reason": "Tool is out of scope for the 'full' capability profile",
+      "suggestion": "Switch capability or add the tool to CAPABILITY_PROFILES['full']"
+    },
+    "skillRun": {
+      "skillRunId": "run-e25937b100238e44",
+      "projectId": "proj-4c82ed896d6d",
+      "artifactIds": [
+        "art-abb8d00be91a3660"
+      ],
+      "savedItemIds": [
+        "saved-568c81663d411a64"
+      ]
+    },
+    "caseCount": 3,
+    "cases": [
+      {
+        "id": "builtin-pack",
+        "check": "builtinSkillsLoad",
+        "expectedMin": 6
+      },
+      {
+        "id": "permission-gate",
+        "check": "toolPermissionGate",
+        "skillId": "skill_code_review",
+        "deniedTool": "fetch_url"
+      },
+      {
+        "id": "project-artifact",
+        "check": "artifactPolicy",
+        "skillId": "skill_research_brief",
+        "input": {
+          "topic": "Skill eval smoke",
+          "depth": "quick"
+        }
+      }
+    ]
+  }
+}

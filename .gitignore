@@ -33,6 +33,7 @@ evals/reports/*
 !evals/reports/baseline-compare-latest.md
 !evals/reports/security-latest.json
 !evals/reports/security-latest.md
+!evals/reports/skill-latest.json
 
 .coverage
 .mypy_cache/
