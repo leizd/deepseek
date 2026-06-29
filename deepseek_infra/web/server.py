@@ -14,11 +14,10 @@ import threading
 import time
 from collections.abc import Callable, Generator
 from inspect import signature
-from http.cookies import SimpleCookie
 from pathlib import Path
 from types import ModuleType
 from typing import Any
-from urllib.parse import parse_qs, quote, unquote, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qs, unquote, urlencode, urlsplit, urlunsplit
 
 import uvicorn
 from fastapi import FastAPI, Request
@@ -125,10 +124,25 @@ from deepseek_infra.infra.gateway.semantic_cache import clear as clear_semantic_
 from deepseek_infra.infra.gateway.semantic_cache import status as semantic_cache_status
 from deepseek_infra.infra.gateway.title_generator import generate_title_payload
 from deepseek_infra.infra.tool_runtime.tools import fetch_url
+from deepseek_infra.web.http_utils import (
+    allowed_cors_origin,
+    apply_common_headers,
+    auth_cookie_header,
+    content_disposition_header,
+    expired_auth_cookie_header,
+    json_response,
+    parse_content_length,
+    read_json_body,
+    request_base_url,
+    request_port,
+    require_allowed_host,
+    require_api_auth,
+    truthy,
+)
+from deepseek_infra.web.routes.status import StatusRouteDeps, create_status_router
 
 logger = logging.getLogger("deepseek_infra.server")
 
-AUTH_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
 MAX_MULTIPART_FIELD_BYTES = 4_096
 MAX_MULTIPART_FILES = 8
 MAX_MULTIPART_PARTS = MAX_MULTIPART_FILES + 4
@@ -193,6 +207,36 @@ def load_multipart_module() -> ModuleType | None:
 multipart_module = load_multipart_module()
 
 
+def _status_route_deps() -> StatusRouteDeps:
+    return StatusRouteDeps(
+        version=APP_VERSION,
+        settings=settings,
+        tavily_api_key=TAVILY_API_KEY,
+        supported_models=SUPPORTED_MODELS,
+        model_routes=MODEL_ROUTES,
+        max_upload_file_bytes=MAX_UPLOAD_FILE_BYTES,
+        max_upload_bytes=MAX_UPLOAD_BYTES,
+        max_multipart_files=MAX_MULTIPART_FILES,
+        local_ip=lambda: local_ip(),
+        url_with_token=lambda url, token: url_with_token(url, token),
+        edge_inference_status=lambda: edge_inference_status(),
+        local_rag_status=lambda: local_rag_status(),
+        trace_status=lambda: trace_status(),
+        semantic_cache_status=lambda: semantic_cache_status(),
+        gateway_status=lambda: gateway_status(),
+        providers_status=lambda: providers_status(),
+        model_router_status=lambda: model_router_status(),
+        budget_status=lambda scope: budget_status_for_scope(scope),
+        tool_policy_status=lambda: tool_policy_status(),
+        read_recent_audit=lambda limit: read_recent_audit(limit),
+        scheduler_status=lambda: scheduler_status(),
+        scheduler_dead_letters=lambda limit: scheduler_dead_letters(limit),
+        mcp_status=lambda: mcp_status(),
+        a2a_status=lambda: a2a_mesh_status(),
+        taint_status=lambda: taint_status(),
+    )
+
+
 def create_app() -> FastAPI:
     api = FastAPI(title="DeepSeek Infra", version=APP_VERSION)
 
@@ -223,80 +267,7 @@ def create_app() -> FastAPI:
             headers["Vary"] = "Origin"
         return Response(status_code=204, headers=headers)
 
-    @api.get("/api/config")
-    async def api_config(request: Request) -> JSONResponse:
-        require_api_auth(request)
-        port = request_port(request)
-        computer_url = f"http://127.0.0.1:{port}"
-        phone_url = f"http://{local_ip()}:{port}"
-        if settings.auth.enabled:
-            computer_url = url_with_token(computer_url + "/", settings.auth.token)
-            phone_url = url_with_token(phone_url + "/", settings.auth.token)
-        return json_response(
-            {
-                "version": APP_VERSION,
-                "hasServerKey": bool(settings.deepseek_api_key),
-                "hasSearch": bool(TAVILY_API_KEY),
-                "defaultModel": settings.default_model,
-                "models": list(SUPPORTED_MODELS),
-                "modelRoutes": dict(MODEL_ROUTES),
-                "searchModes": ["off", "auto", "on"],
-                "uploadLimits": {
-                    "fileMaxBytes": MAX_UPLOAD_FILE_BYTES,
-                    "requestMaxBytes": MAX_UPLOAD_BYTES,
-                    "maxFiles": MAX_MULTIPART_FILES,
-                },
-                "ocr": {"enabled": settings.ocr.enabled, "mode": settings.ocr.mode, "localOnly": False},
-                "edgeInference": edge_inference_status(),
-                "localRag": local_rag_status(),
-                "tracing": trace_status(),
-                "semanticCache": semantic_cache_status(),
-                "gateway": gateway_status(),
-                "providers": providers_status(),
-                "modelRouter": model_router_status(),
-                "budget": budget_status_for_scope("global"),
-                "toolPolicy": tool_policy_status(),
-                "mcp": mcp_status(),
-                "a2a": a2a_mesh_status(),
-                "contextTaint": taint_status(),
-                "computerUrl": computer_url,
-                "phoneUrl": phone_url,
-            }
-        )
-
-    @api.get("/api/rag/status")
-    async def api_rag_status(request: Request) -> JSONResponse:
-        require_api_auth(request)
-        return json_response({"ok": True, "localRag": local_rag_status()})
-
-    @api.get("/api/budget")
-    async def api_budget(request: Request) -> JSONResponse:
-        require_api_auth(request)
-        scope = str(request.query_params.get("scope") or "global").strip() or "global"
-        return json_response({"ok": True, "budget": budget_status_for_scope(scope)})
-
-    @api.get("/api/tool-policy")
-    async def api_tool_policy(request: Request) -> JSONResponse:
-        require_api_auth(request)
-        try:
-            limit = int(request.query_params.get("limit", "50"))
-        except ValueError:
-            limit = 50
-        return json_response({"ok": True, "toolPolicy": tool_policy_status(), "audit": read_recent_audit(limit)})
-
-    @api.get("/api/scheduler")
-    async def api_scheduler(request: Request) -> JSONResponse:
-        require_api_auth(request)
-        try:
-            limit = int(request.query_params.get("limit", "50"))
-        except ValueError:
-            limit = 50
-        return json_response({"ok": True, "scheduler": scheduler_status(), "deadLetters": scheduler_dead_letters(limit)})
-
-    @api.get("/api/mcp")
-    async def api_mcp_status(request: Request) -> JSONResponse:
-        require_api_auth(request)
-        return json_response({"ok": True, "mcp": mcp_status()})
+    api.include_router(create_status_router(_status_route_deps()))
 
     @api.get("/api/mcp/external/tools")
     async def api_external_mcp_tools(request: Request) -> JSONResponse:
@@ -323,11 +294,6 @@ def create_app() -> FastAPI:
                 for p in external_mcp_registry.list_profiles()
             ],
         })
-
-    @api.get("/api/taint")
-    async def api_taint_status(request: Request) -> JSONResponse:
-        require_api_auth(request)
-        return json_response({"ok": True, "contextTaint": taint_status()})
 
     @api.post("/mcp")
     async def mcp_endpoint(request: Request) -> Response:
@@ -434,11 +400,6 @@ def create_app() -> FastAPI:
         trace_status_fn=trace_status_for_api,
     )
 
-    @api.get("/api/semantic-cache/status")
-    async def api_semantic_cache_status(request: Request) -> JSONResponse:
-        require_api_auth(request)
-        return json_response({"ok": True, "semanticCache": semantic_cache_status()})
-
     @api.post("/api/semantic-cache")
     async def api_semantic_cache_action(request: Request) -> JSONResponse:
         require_api_auth(request)
@@ -449,16 +410,6 @@ def create_app() -> FastAPI:
         if action == "status":
             return json_response({"ok": True, "semanticCache": semantic_cache_status()})
         raise AppError("Unsupported semantic cache action", code=ErrorCode.INVALID_PAYLOAD)
-
-    @api.get("/api/gateway/status")
-    async def api_gateway_status(request: Request) -> JSONResponse:
-        require_api_auth(request)
-        return json_response({"ok": True, "gateway": gateway_status()})
-
-    @api.get("/api/edge/status")
-    async def api_edge_status(request: Request) -> JSONResponse:
-        require_api_auth(request)
-        return json_response({"ok": True, "edgeInference": edge_inference_status()})
 
     @api.post("/api/edge/reload")
     async def api_edge_reload(request: Request) -> JSONResponse:
@@ -1112,42 +1063,6 @@ def open_bind_socket(host: str, port: int) -> socket.socket:
     return sock
 
 
-def apply_common_headers(response: Response, path: str) -> None:
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["Referrer-Policy"] = "no-referrer"
-    if path == "/api/file-source":
-        response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; "
-            "script-src 'self'; "
-            "style-src 'self' 'unsafe-inline'; "
-            "img-src 'self' data:; "
-            "font-src 'self'; "
-            "connect-src 'self'; "
-            "object-src 'self'; "
-            "base-uri 'self'; "
-            "frame-ancestors 'self'"
-        )
-        response.headers["X-Frame-Options"] = "SAMEORIGIN"
-    else:
-        response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; "
-            "script-src 'self'; "
-            "style-src 'self' 'unsafe-inline'; "
-            "img-src 'self' data: http: https:; "
-            "font-src 'self'; "
-            "connect-src 'self'; "
-            "object-src 'none'; "
-            "base-uri 'self'; "
-            "frame-ancestors 'none'"
-        )
-        response.headers["X-Frame-Options"] = "DENY"
-    response.headers["Cache-Control"] = "no-store" if path.startswith("/api/") else "no-cache"
-
-
-def json_response(data: dict[str, Any], status: int = 200, headers: dict[str, str] | None = None) -> JSONResponse:
-    return JSONResponse(data, status_code=status, headers=headers)
-
-
 def handle_auth_token_redirect(request: Request) -> Response | None:
     if request.url.path != "/" or not settings.auth.enabled:
         return None
@@ -1166,37 +1081,6 @@ def handle_auth_token_redirect(request: Request) -> Response | None:
             headers={"Set-Cookie": auth_cookie_header(settings.auth.token)},
         )
     return RedirectResponse("/", status_code=302, headers={"Set-Cookie": auth_cookie_header(settings.auth.token)})
-
-
-def require_api_auth(request: Request) -> None:
-    if not settings.auth.enabled:
-        return
-    require_allowed_host(request)
-    provided = auth_token_from_headers(request.headers.get("Authorization", ""), request.headers.get("Cookie", ""))
-    if not secrets.compare_digest(provided, settings.auth.token):
-        raise AppError("Auth required", code=ErrorCode.UNAUTHORIZED, status=401)
-
-
-def require_allowed_host(request: Request) -> None:
-    host = host_without_port(request.headers.get("Host", ""))
-    if host not in allowed_auth_hosts():
-        raise AppError("Host not allowed", code=ErrorCode.FORBIDDEN, status=403)
-
-
-async def read_json_body(request: Request, max_bytes: int = 2_000_000) -> dict[str, Any]:
-    content_length = parse_content_length(request.headers.get("Content-Length", "0"))
-    if content_length <= 0:
-        raise AppError("Request body is empty", code=ErrorCode.INVALID_PAYLOAD)
-    if content_length > max_bytes:
-        raise AppError("Request body is too large", code=ErrorCode.UPLOAD_TOO_LARGE, status=413)
-    raw = await request.body()
-    try:
-        body = json.loads(raw.decode("utf-8"))
-    except json.JSONDecodeError as exc:
-        raise AppError(f"Invalid JSON: {exc}", code=ErrorCode.INVALID_PAYLOAD) from exc
-    if not isinstance(body, dict):
-        raise AppError("Request body must be a JSON object", code=ErrorCode.INVALID_PAYLOAD)
-    return body
 
 
 async def read_multipart_files(request: Request) -> tuple[list[dict[str, Any]], bool, str]:
@@ -1496,39 +1380,6 @@ def static_media_type(path: Path) -> str:
     return mapping.get(path.suffix.lower()) or mimetypes.guess_type(str(path))[0] or "application/octet-stream"
 
 
-def request_port(request: Request) -> int:
-    server = request.scope.get("server")
-    if isinstance(server, tuple) and len(server) >= 2:
-        try:
-            return int(server[1])
-        except (TypeError, ValueError):
-            pass
-    host = str(request.headers.get("Host") or "")
-    try:
-        parsed = urlsplit(f"http://{host}")
-        return int(parsed.port or 80)
-    except (TypeError, ValueError):
-        return 0
-
-
-def request_base_url(request: Request) -> str:
-    host_header = str(request.headers.get("Host") or "").split(",", 1)[0].strip()
-    if host_header and "/" not in host_header and "\\" not in host_header and host_without_port(host_header) in allowed_auth_hosts():
-        return f"http://{host_header}"
-    port = request_port(request)
-    return f"http://127.0.0.1:{port}" if port else "http://127.0.0.1"
-
-
-def parse_content_length(value: str) -> int:
-    try:
-        content_length = int(value)
-    except (TypeError, ValueError) as exc:
-        raise AppError("Invalid Content-Length", code=ErrorCode.INVALID_PAYLOAD) from exc
-    if content_length < 0:
-        raise AppError("Invalid Content-Length", code=ErrorCode.INVALID_PAYLOAD)
-    return content_length
-
-
 def parse_agent_run_action(path: str) -> tuple[str, str]:
     parts = [part for part in path.split("/") if part]
     if len(parts) < 3 or parts[0] != "api" or parts[1] != "agent-runs":
@@ -1594,26 +1445,6 @@ def pop_share_target_payload(share_id: str) -> dict[str, Any] | None:
     return item[1] if item else None
 
 
-def auth_cookie_header(token: str) -> str:
-    cookie = SimpleCookie()
-    cookie["auth_token"] = token
-    cookie["auth_token"]["path"] = "/"
-    cookie["auth_token"]["samesite"] = "Strict"
-    cookie["auth_token"]["httponly"] = True
-    cookie["auth_token"]["max-age"] = str(AUTH_COOKIE_MAX_AGE_SECONDS)
-    return cookie.output(header="").strip()
-
-
-def expired_auth_cookie_header() -> str:
-    cookie = SimpleCookie()
-    cookie["auth_token"] = ""
-    cookie["auth_token"]["path"] = "/"
-    cookie["auth_token"]["samesite"] = "Strict"
-    cookie["auth_token"]["httponly"] = True
-    cookie["auth_token"]["max-age"] = "0"
-    return cookie.output(header="").strip()
-
-
 def translate_multipart_error(exc: Exception) -> AppError | None:
     status = int(getattr(exc, "http_status", 0) or 0)
     if status == 0:
@@ -1660,46 +1491,6 @@ def conversation_search_matches(conversation: dict[str, Any], query: str) -> lis
     return matches
 
 
-def host_without_port(value: str) -> str:
-    host = value.strip().split(",", 1)[0].strip()
-    if host.startswith("["):
-        return host.split("]", 1)[0].lstrip("[").lower()
-    return host.split(":", 1)[0].lower()
-
-
-def allowed_auth_hosts() -> set[str]:
-    hosts = {"localhost", "127.0.0.1", "::1"}
-    configured_host = settings.default_host.strip().lower()
-    if configured_host and configured_host != "0.0.0.0":
-        hosts.add(configured_host)
-    lan_ip = local_ip()
-    if lan_ip:
-        hosts.add(lan_ip.lower())
-    hosts.update(host_without_port(host) for host in settings.auth.allowed_hosts)
-    return {host for host in hosts if host}
-
-
-def allowed_cors_origin(origin: str, port: int) -> str:
-    origin = origin.strip()
-    if not origin or port <= 0:
-        return ""
-    try:
-        parsed = urlsplit(origin)
-        origin_port = parsed.port
-    except ValueError:
-        return ""
-    if parsed.scheme != "http" or not parsed.netloc or parsed.path or parsed.query or parsed.fragment:
-        return ""
-    if origin_port is None:
-        origin_port = 80
-    if origin_port != port:
-        return ""
-    host = (parsed.hostname or "").lower()
-    if host not in allowed_auth_hosts():
-        return ""
-    return origin
-
-
 def original_file_media_type(cached: dict[str, Any]) -> str:
     kind = str(cached.get("kind") or "").lower()
     raw_type = str(cached.get("type") or "").split(";", 1)[0].strip().lower()
@@ -1718,32 +1509,6 @@ def original_file_media_type(cached: dict[str, Any]) -> str:
     }:
         return raw_type
     return "application/octet-stream"
-
-
-def content_disposition_header(disposition: str, filename: str) -> str:
-    safe_name = clean_filename(filename)
-    ascii_name = safe_name.encode("ascii", errors="ignore").decode("ascii") or "document"
-    ascii_name = ascii_name.replace('"', "")
-    return f'{disposition}; filename="{ascii_name}"; filename*=UTF-8\'\'{quote(safe_name)}'
-
-
-def auth_token_from_headers(authorization: str, cookie_header: str) -> str:
-    prefix = "bearer "
-    authorization = authorization.strip()
-    if authorization.lower().startswith(prefix):
-        return authorization[len(prefix) :].strip()
-
-    if cookie_header:
-        cookie = SimpleCookie()
-        cookie.load(cookie_header)
-        morsel = cookie.get("auth_token")
-        if morsel is not None:
-            return morsel.value
-    return ""
-
-
-def truthy(value: object) -> bool:
-    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def redact_sensitive_query(value: str) -> str:
