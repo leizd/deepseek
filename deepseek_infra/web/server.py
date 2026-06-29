@@ -53,7 +53,6 @@ from deepseek_infra.infra.rag.context_compressor import compress_context_payload
 from deepseek_infra.infra.gateway.deepseek_client import (
     RequestCancelled,
     call_deepseek_cascade,
-    preflight_chat_payload,
     preflight_deepseek_payload,
     stream_deepseek,
 )
@@ -73,12 +72,6 @@ from deepseek_infra.infra.agent_runtime.a2a import (
 from deepseek_infra.infra.agent_runtime.a2a import a2a_status as a2a_mesh_status
 from deepseek_infra.infra.gateway.model_router import cascade_requested as model_router_cascade_requested
 from deepseek_infra.infra.gateway.model_router import router_status as model_router_status
-from deepseek_infra.infra.gateway.openai_api import (
-    openai_chat_completion,
-    openai_chat_stream,
-    openai_models_list,
-    openai_to_internal_payload,
-)
 from deepseek_infra.infra.gateway.providers.registry import providers_status
 from deepseek_infra.infra.observability.health import healthz, readyz
 from deepseek_infra.infra.observability.metrics import render_prometheus
@@ -117,7 +110,6 @@ from deepseek_infra.infra.data.reminders import create_reminder, delete_reminder
 from deepseek_infra.infra.gateway.resiliency import gateway_status
 from deepseek_infra.infra.gateway.semantic_cache import clear as clear_semantic_cache
 from deepseek_infra.infra.gateway.semantic_cache import status as semantic_cache_status
-from deepseek_infra.infra.gateway.title_generator import generate_title_payload
 from deepseek_infra.infra.tool_runtime.tools import fetch_url
 from deepseek_infra.web.http_utils import (
     allowed_cors_origin,
@@ -127,13 +119,13 @@ from deepseek_infra.web.http_utils import (
     json_response,
     parse_content_length,
     read_json_body,
-    request_base_url,
     request_port,
     require_allowed_host,
     require_api_auth,
     truthy,
 )
 from deepseek_infra.web.routes.a2a import A2ARouteDeps, create_a2a_router
+from deepseek_infra.web.routes.chat import ChatRouteDeps, create_chat_router
 from deepseek_infra.web.routes.downloads import DownloadsRouteDeps, create_downloads_router
 from deepseek_infra.web.routes.edge import EdgeRouteDeps, create_edge_router
 from deepseek_infra.web.routes.files import FilesRouteDeps, create_files_router
@@ -337,6 +329,13 @@ def _workspace_route_deps() -> WorkspaceRouteDeps:
     )
 
 
+def _chat_route_deps() -> ChatRouteDeps:
+    return ChatRouteDeps(
+        chat_event_stream=lambda payload: chat_event_stream(payload),
+        conversation_search=lambda payload: conversation_search(payload),
+    )
+
+
 def create_app() -> FastAPI:
     api = FastAPI(title="DeepSeek Infra", version=APP_VERSION)
 
@@ -376,6 +375,7 @@ def create_app() -> FastAPI:
     api.include_router(create_a2a_router(_a2a_route_deps()))
     api.include_router(create_edge_router(_edge_route_deps()))
     api.include_router(create_workspace_router(_workspace_route_deps()))
+    api.include_router(create_chat_router(_chat_route_deps()))
 
     def require_trace_api_auth(request: Request) -> None:
         require_api_auth(request)
@@ -426,11 +426,6 @@ def create_app() -> FastAPI:
     async def api_auth_logout(request: Request) -> JSONResponse:
         require_api_auth(request)
         return json_response({"ok": True}, headers={"Set-Cookie": expired_auth_cookie_header()})
-
-    @api.post("/api/conversations/search")
-    async def api_conversation_search(request: Request) -> JSONResponse:
-        require_api_auth(request)
-        return json_response(conversation_search(await read_json_body(request)))
 
     @api.post("/api/download-save")
     async def api_download_save(request: Request) -> JSONResponse:
@@ -527,11 +522,6 @@ def create_app() -> FastAPI:
         require_api_auth(request)
         return json_response(compress_context_payload(await read_json_body(request)))
 
-    @api.post("/api/title")
-    async def api_title(request: Request) -> JSONResponse:
-        require_api_auth(request)
-        return json_response(generate_title_payload(await read_json_body(request)))
-
     @api.post("/api/reminders")
     async def api_reminders(request: Request) -> JSONResponse:
         require_api_auth(request)
@@ -542,43 +532,6 @@ def create_app() -> FastAPI:
         require_api_auth(request)
         await read_json_body(request)
         return json_response({"reminders": due_reminders()})
-
-    @api.post("/api/chat")
-    async def api_chat(request: Request) -> Response:
-        require_api_auth(request)
-        payload = await read_json_body(request, max_bytes=16_000_000)
-        payload = {**payload, "localBaseUrl": request_base_url(request)}
-        if payload.get("stream"):
-            preflight_chat_payload(payload)
-            return StreamingResponse(
-                chat_event_stream(payload),
-                media_type=STREAM_MEDIA_TYPE,
-                headers={"X-Accel-Buffering": "no"},
-            )
-        # Non-stream chat goes through the cascade entry, which transparently runs
-        # plain call_deepseek unless the request opted into cascade inference.
-        return json_response(call_deepseek_cascade(payload))
-
-    @api.post("/v1/chat/completions")
-    async def v1_chat_completions(request: Request) -> Response:
-        """OpenAI-compatible chat completions over the local DeepSeek runtime."""
-        require_api_auth(request)
-        body = await read_json_body(request, max_bytes=16_000_000)
-        payload = openai_to_internal_payload(body, local_base_url=request_base_url(request))
-        model = str(payload["model"])
-        if payload.get("stream"):
-            return StreamingResponse(
-                openai_chat_stream(payload, model),
-                media_type="text/event-stream",
-                headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
-            )
-        return json_response(openai_chat_completion(payload, model))
-
-    @api.get("/v1/models")
-    async def v1_models(request: Request) -> JSONResponse:
-        """OpenAI-compatible model listing from the configured catalog."""
-        require_api_auth(request)
-        return json_response(openai_models_list())
 
     @api.get("/healthz")
     async def healthz_route() -> JSONResponse:
@@ -786,7 +739,7 @@ def create_server(start_port: int, host: str | None = None) -> tuple[FastAPIServ
         try:
             sock = open_bind_socket(bind_host, port)
             actual_port = int(sock.getsockname()[1])
-            return FastAPIServer(app, sock, bind_host, actual_port), actual_port
+            return FastAPIServer(create_app(), sock, bind_host, actual_port), actual_port
         except OSError as exc:
             last_error = exc
             if sock is not None:

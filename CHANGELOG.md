@@ -2,6 +2,20 @@
 
 本项目使用类似 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的分组方式维护变更记录。未发布内容记录在 `[Unreleased]`，正式发版时迁移到具体版本。
 
+## [2.5.9] - Web Route Split Final
+
+**主题：Chat 路由拆分 & Web Route Split 收口。** 提取 chat、title、conversation search 与 OpenAI-compatible 路由到 `routes/chat.py`，完成 #14 全部路由拆分。
+
+### 新增
+
+- **Chat routes**：`deepseek_infra/web/routes/chat.py`，含 `POST /api/chat`（含 streaming）、`POST /api/title`、`POST /api/conversations/search`、`POST /v1/chat/completions` 与 `GET /v1/models`。
+- **Final 测试**：`tests/test_web_chat_routes.py`（12 条）。
+
+### 变更
+
+- **server.py 精简为路由装配**：移除全部内联 chat route handler。
+- **create_server 改用 `create_app()`**：便于测试 deps 注入。
+
 ## [2.5.8] - Web Route Split Phase 5
 
 **主题：Web Route Split Phase 5 / Workspace 路由拆分。** 提取 Workspace Core 全部 API（projects、saved items、artifacts、exports 共 22 条路由）到 `routes/workspace.py`。
