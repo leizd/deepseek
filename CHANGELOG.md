@@ -2,6 +2,26 @@
 
 本项目使用类似 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的分组方式维护变更记录。未发布内容记录在 `[Unreleased]`，正式发版时迁移到具体版本。
 
+## [2.5.4] - Web Route Split Phase 1
+
+**主题：Web Route Split Phase 1 / 状态路由拆分。** 本版本开始处理 #14 的 `server.py` 路由拆分，先抽公共 HTTP helper 与只读状态/诊断路由，不触碰 chat、files、RAG 写入、workspace 写入和下载路径。
+
+### 新增
+
+- **HTTP helper 模块**：新增 `deepseek_infra/web/http_utils.py`，集中 `require_api_auth`、`json_response`、`read_json_body`、`request_port`、`request_base_url`、CORS、auth cookie、content-disposition 与 `truthy` 等公共助手，后续 route 子包不再反向依赖 `server.py`。
+- **Status routes 子包**：新增 `deepseek_infra/web/routes/status.py`，承载 `/api/config`、`/api/rag/status`、`/api/budget`、`/api/tool-policy`、`/api/scheduler`、`/api/mcp`、`/api/taint`、`/api/semantic-cache/status`、`/api/gateway/status` 与 `/api/edge/status`。
+- **Route split registry 测试**：新增 `tests/test_web_route_split.py`，锁定 `create_app()` 兼容、status route 注册、旧 `web.server` 入口与 HTTP helper re-export。
+
+### 变更
+
+- **`server.py` 进入装配化拆分**：`create_app()` 通过 `api.include_router(create_status_router(...))` 安装第一批拆分路由，继续保留 `create_app` / `create_server` / `FastAPIServer` 对外入口。
+- **兼容旧 patch/import 习惯**：status router 通过 dependency 对象调用 `server.py` 现有状态函数，原有 `server_module.gateway_status` / `semantic_cache_status` patch 语义继续可用。
+- **版本号全仓同步**：README badge、`app_version`、Dockerfile tag、Android `versionName` / `versionCode`、CI preflight 版本、文档「适用版本」与 evidence 报告版本同步到 2.5.4。
+
+### 测试
+
+- 新增 `tests/test_web_route_split.py`；保留并验证 `/api/config`、RAG / semantic cache / gateway / edge status 等原有集成路径。
+
 ## [2.5.3] - ONNX Semantic Cache Evidence Patch
 
 **主题：语义缓存 ONNX evidence 补丁。** 本版把语义缓存的"hash vs ONNX"决策从一句话推进为结构化 evidence，新增 `--compare` 对照模式和 preflight 检查，不强制依赖 ONNX 模型文件。
