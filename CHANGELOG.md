@@ -2,6 +2,22 @@
 
 本项目使用类似 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的分组方式维护变更记录。未发布内容记录在 `[Unreleased]`，正式发版时迁移到具体版本。
 
+## [2.5.7] - Web Route Split Phase 4
+
+**主题：Web Route Split Phase 4 / MCP & A2A & Edge 路由拆分。** 本版本提取 MCP（JSON-RPC + external tools）、A2A（agent card / task lifecycle / streaming）与 Edge（reload）路由。
+
+### 新增
+
+- **MCP routes**：`deepseek_infra/web/routes/mcp.py`，含 `POST /mcp`（notification 返回 202）与 `GET /api/mcp/external/tools`。
+- **A2A routes**：`deepseek_infra/web/routes/a2a.py`，含 `GET /.well-known/agent-card.json`、`GET /a2a/agents`、`POST /a2a` 与 `POST /a2a/agents/{agent_id}`，保留 `text/event-stream` streaming。
+- **Edge routes**：`deepseek_infra/web/routes/edge.py`，含 `POST /api/edge/reload`。
+- **Phase 4 测试**：`tests/test_web_mcp_routes.py`（7 条）、`tests/test_web_a2a_routes.py`（8 条）、`tests/test_web_edge_routes.py`（6 条）。
+
+### 变更
+
+- **enabled 字段改用 Callable lambda**：`mcp_enabled` / `a2a_enabled` 使用 lambda 读取 `settings.*`，非 bool 快照。
+- **编码回归重定向**：MCP / A2A 断言从 `server.py` 切换到 `routes/mcp.py` / `routes/a2a.py`。
+
 ## [2.5.6] - Web Route Split Phase 3
 
 **主题：Web Route Split Phase 3 / RAG & Memory 路由拆分。** 本版本继续处理 #14 的 `server.py` 路由拆分，提取 RAG reindex/verify-citation/eval 与 Memory list/upsert/delete/conflicts 路由，继续遵循 dependency 传参模式，不触碰 chat、A2A、MCP、workspace、reminders 等高耦合路径。
