@@ -1,11 +1,24 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI
 
 import deepseek_infra.web.http_utils as http_utils
 import deepseek_infra.web.server as server_module
+
+
+def _collect_route_paths(routes: list[Any]) -> set[str]:
+    paths: set[str] = set()
+    for route in routes:
+        path = getattr(route, "path", "")
+        if path:
+            paths.add(path)
+        original = getattr(route, "original_router", None)
+        if original is not None:
+            paths |= _collect_route_paths(getattr(original, "routes", []))
+    return paths
 
 
 def test_create_app_still_returns_fastapi_app() -> None:
@@ -16,7 +29,7 @@ def test_create_app_still_returns_fastapi_app() -> None:
 
 def test_phase1_status_routes_are_registered() -> None:
     app = server_module.create_app()
-    paths = {getattr(route, "path", "") for route in app.routes}
+    paths = _collect_route_paths(app.routes)
 
     for expected in {
         "/api/config",
