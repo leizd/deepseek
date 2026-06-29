@@ -2,6 +2,23 @@
 
 本项目使用类似 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的分组方式维护变更记录。未发布内容记录在 `[Unreleased]`，正式发版时迁移到具体版本。
 
+## [2.6.0] - Skill System
+
+**主题：Skill System（技能系统）。** 新增 `deepseek_infra/infra/skills/` 技能注册表、schema、执行器、权限模型与模板系统；内置 6 个可组合 Skill；配套 smoke、eval、文档与测试；全仓版本号同步到 2.6.0。
+
+### 新增
+
+- **Skill 基础设施**：`deepseek_infra/infra/skills/registry.py`、`schema.py`、`runner.py`、`permissions.py`、`templates.py`、`evidence.py`，提供技能发现、加载、校验、执行与证据收集。
+- **内置 Skill**：`skills/builtin/` 下新增 `code_review`、`document_reader`、`paper_writer`、`ppt_generator`、`research_brief`、`study_tutor` 六个可组合技能。
+- **Skill 配置**：`Settings` 新增 `skills_dir`、`builtin_skills_dir`；`config.py` 新增 `SKILLS_DIR`、`BUILTIN_SKILLS_DIR`、`SKILLS_ENABLED` 模块常量。
+- **Skill smoke & eval**：`scripts/smoke_skills.py`、`evals/runners/run_skill_eval.py`、`evals/golden/skills/skill_eval_cases.jsonl`、`docs/evidence/skills-v2.6.0.json`。
+- **Skill 文档**：`docs/SKILLS.md` 描述 Skill 架构、内置技能与调用方式。
+- **Skill 测试**：`tests/test_skills.py` 覆盖注册、执行、权限与 evidence。
+
+### 变更
+
+- 全仓版本号从 2.5.9 同步到 2.6.0（README badge、`app_version`、Dockerfile tag、Android `versionName` / `versionCode`、CI preflight 版本、evidence 路径、文档「适用版本」、eval / agent / security / baseline 报告版本）。
+
 ## [2.5.9] - Web Route Split Final
 
 **主题：Chat 路由拆分 & Web Route Split 收口。** 提取 chat、title、conversation search 与 OpenAI-compatible 路由到 `routes/chat.py`，完成 #14 全部路由拆分。
