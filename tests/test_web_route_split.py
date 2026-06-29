@@ -134,3 +134,21 @@ def test_phase5_workspace_routes_are_not_declared_inline_in_server() -> None:
         '@api.post("/api/project-files")',
     ]:
         assert decorator not in server_source
+
+
+def test_phase_final_chat_routes_split_and_api_surface_intact() -> None:
+    server_source = Path(server_module.__file__).read_text(encoding="utf-8")
+
+    assert "create_chat_router(_chat_route_deps())" in server_source
+    for decorator in [
+        '@api.post("/api/chat")',
+        '@api.post("/api/title")',
+        '@api.post("/api/conversations/search")',
+        '@api.post("/v1/chat/completions")',
+        '@api.get("/v1/models")',
+    ]:
+        assert decorator not in server_source
+
+    assert callable(server_module.create_app)
+    assert callable(server_module.create_server)
+    assert hasattr(server_module, "FastAPIServer")

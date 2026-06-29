@@ -678,9 +678,9 @@ class EncodingRegressionTests(unittest.TestCase):
                 self.assertNotIn(removed, app)
 
         self.assertIn("deepseek-infra-v187", sw)
-        self.assertIn("version-2.5.8-blue", readme)
+        self.assertIn("version-2.5.9-blue", readme)
         self.assertIn("## [0.8.6]", changelog)
-        self.assertIn("适用版本：v2.5.8。", api)
+        self.assertIn("适用版本：v2.5.9。", api)
 
     def test_v170_streaming_phase_labels_and_timer_are_present(self) -> None:
         app = Path("static/modules/chat.js").read_text(encoding="utf-8")
@@ -708,9 +708,9 @@ class EncodingRegressionTests(unittest.TestCase):
             with self.subTest(token=token):
                 self.assertIn(token, app)
 
-        self.assertIn('app_version: str = "2.5.8"', config)
+        self.assertIn('app_version: str = "2.5.9"', config)
         self.assertIn("deepseek-infra-v187", sw)
-        self.assertIn("version-2.5.8-blue", readme)
+        self.assertIn("version-2.5.9-blue", readme)
         self.assertIn("图片视觉理解", readme)
         self.assertIn("## [1.7.0]", changelog)
 
@@ -809,9 +809,9 @@ class EncodingRegressionTests(unittest.TestCase):
 
         self.assertIn('id="reasoningEffortSelect"', html)
         self.assertIn("deepseek-infra-v187", sw)
-        self.assertIn("version-2.5.8-blue", readme)
+        self.assertIn("version-2.5.9-blue", readme)
         self.assertIn("## [0.9.1]", changelog)
-        self.assertIn("适用版本：v2.5.8。", api)
+        self.assertIn("适用版本：v2.5.9。", api)
 
     def test_v092_upload_limits_and_frontend_interactions_are_present(self) -> None:
         app = Path("static/modules/chat.js").read_text(encoding="utf-8")
@@ -898,7 +898,7 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn("thumbnail: String(value.thumbnail || \"\")", normalize)
         self.assertIn("imagePreview: String(value.imagePreview || \"\")", normalize)
         self.assertIn("deepseek-infra-v187", sw)
-        self.assertIn("version-2.5.8-blue", readme)
+        self.assertIn("version-2.5.9-blue", readme)
         self.assertIn("## [0.9.4]", changelog)
         self.assertIn("uploadLimits", api)
 
@@ -968,7 +968,7 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn(".selection-popover", css)
         self.assertIn(".search-round-count", css)
         self.assertIn("deepseek-infra-v187", sw)
-        self.assertIn("version-2.5.8-blue", readme)
+        self.assertIn("version-2.5.9-blue", readme)
 
     def test_v094_citations_titles_peek_and_timeline_are_present(self) -> None:
         app = Path("static/modules/chat.js").read_text(encoding="utf-8")
@@ -977,7 +977,7 @@ class EncodingRegressionTests(unittest.TestCase):
         search = Path("deepseek_infra/infra/tool_runtime/search.py").read_text(encoding="utf-8")
         client = Path("deepseek_infra/infra/gateway/deepseek_client.py").read_text(encoding="utf-8")
         tools = Path("deepseek_infra/infra/tool_runtime/tools.py").read_text(encoding="utf-8")
-        server = Path("deepseek_infra/web/server.py").read_text(encoding="utf-8")
+        chat_routes = Path("deepseek_infra/web/routes/chat.py").read_text(encoding="utf-8")
         title = Path("deepseek_infra/infra/gateway/title_generator.py").read_text(encoding="utf-8")
         sw = Path("static/sw.js").read_text(encoding="utf-8")
         readme = Path("README.md").read_text(encoding="utf-8")
@@ -998,7 +998,7 @@ class EncodingRegressionTests(unittest.TestCase):
                 self.assertIn(token, client)
 
         self.assertIn("Each result includes a cite field", tools)
-        self.assertIn('"/api/title"', server)
+        self.assertIn('"/api/title"', chat_routes)
         self.assertIn("def generate_title_payload", title)
         self.assertIn("你是一个对话标题生成器", title)
         self.assertIn("用户首轮提问", title)
@@ -1029,7 +1029,7 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn(".reasoning-search-round", css)
         self.assertIn(".history-title.is-pending-title", css)
         self.assertIn("deepseek-infra-v187", sw)
-        self.assertIn("version-2.5.8-blue", readme)
+        self.assertIn("version-2.5.9-blue", readme)
         self.assertIn("## [0.9.4]", changelog)
 
     def test_v096_search_hotfix_and_tool_expansion_are_present(self) -> None:
@@ -1094,10 +1094,10 @@ class EncodingRegressionTests(unittest.TestCase):
                 self.assertIn(token, tools)
 
         self.assertIn("deepseek-infra-v187", sw)
-        self.assertIn("version-2.5.8-blue", readme)
+        self.assertIn("version-2.5.9-blue", readme)
         self.assertIn("## [0.9.6]", changelog)
-        self.assertIn("适用版本：v2.5.8。", api)
-        self.assertIn("适用版本：v2.5.8。", security)
+        self.assertIn("适用版本：v2.5.9。", api)
+        self.assertIn("适用版本：v2.5.9。", security)
 
     def test_v111_visual_theme_system_is_present(self) -> None:
         app = Path("static/modules/chat.js").read_text(encoding="utf-8")
@@ -1189,7 +1189,7 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertNotIn(':root[data-theme="dark"]', css)
 
         self.assertIn("deepseek-infra-v187", sw)
-        self.assertIn("version-2.5.8-blue", readme)
+        self.assertIn("version-2.5.9-blue", readme)
         self.assertIn("## [1.2.2]", changelog)
         self.assertIn("normalizeThemeStyle", frontend_docs)
         self.assertIn("Google Fonts", security)
@@ -1218,7 +1218,7 @@ class EncodingRegressionTests(unittest.TestCase):
                 self.assertIn(token, search)
 
         self.assertIn("deepseek-infra-v187", sw)
-        self.assertIn("version-2.5.8-blue", readme)
+        self.assertIn("version-2.5.9-blue", readme)
         self.assertIn("## [1.2.2]", changelog)
 
     def test_v115_agent_mode_and_search_limits_are_present(self) -> None:
@@ -1575,9 +1575,9 @@ class EncodingRegressionTests(unittest.TestCase):
                 self.assertIn(token, app)
 
         self.assertNotIn('copyReport.addEventListener("click"', app)
-        self.assertIn('app_version: str = "2.5.8"', config)
+        self.assertIn('app_version: str = "2.5.9"', config)
         self.assertIn("deepseek-infra-v187", sw)
-        self.assertIn("version-2.5.8-blue", readme)
+        self.assertIn("version-2.5.9-blue", readme)
         self.assertIn("## [1.6.0]", changelog)
         self.assertIn("v1.6.0", architecture)
 
@@ -1617,9 +1617,9 @@ class EncodingRegressionTests(unittest.TestCase):
             with self.subTest(token=token):
                 self.assertIn(token, tools)
 
-        self.assertIn("version-2.5.8-blue", readme)
+        self.assertIn("version-2.5.9-blue", readme)
         self.assertIn("## [1.6.1]", changelog)
-        self.assertIn("适用版本：v2.5.8。", api)
+        self.assertIn("适用版本：v2.5.9。", api)
         self.assertIn("deepseek-infra-v187", sw)
 
 
@@ -1646,7 +1646,7 @@ class EncodingRegressionTests(unittest.TestCase):
 
         self.assertIn("AndroidOcrBridge.initialize(getApplicationContext())", main_activity)
         self.assertIn("com.google.mlkit:text-recognition-chinese", build_gradle)
-        self.assertIn('versionName "2.5.8"', build_gradle)
+        self.assertIn('versionName "2.5.9"', build_gradle)
         self.assertIn('os.environ["DEEPSEEK_ANDROID_APP"] = "1"', android_entry)
         self.assertIn('os.environ.setdefault("OCR_ENABLED", "1")', android_entry)
         self.assertIn("PDF_RENDER_SCALE = 3", android_ocr)
@@ -1657,7 +1657,7 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn("PowerShell is required for Windows OCR.", ocr)
         self.assertIn('jclass("com.deepseek.mobile.AndroidOcrBridge")', ocr)
         self.assertIn("DEEPSEEK_ANDROID_APP", ocr)
-        self.assertIn("version-2.5.8-blue", readme)
+        self.assertIn("version-2.5.9-blue", readme)
         self.assertIn("## [1.6.2]", changelog)
         self.assertIn("ML Kit", apk_docs)
         self.assertIn("deepseek-infra-v187", sw)
@@ -1708,10 +1708,10 @@ class EncodingRegressionTests(unittest.TestCase):
                 self.assertIn(token, build_exe)
 
         self.assertIn("pywebview>=5,<6", requirements)
-        self.assertIn("version-2.5.8-blue", readme)
+        self.assertIn("version-2.5.9-blue", readme)
         self.assertIn("内嵌 WebView", readme)
         self.assertIn("## [1.6.3]", changelog)
-        self.assertIn("适用版本：v2.5.8。", api)
+        self.assertIn("适用版本：v2.5.9。", api)
         self.assertIn("deepseek_infra/desktop_app.py", architecture)
         self.assertIn("pywebview", architecture)
         self.assertIn("pywebview", frontend_docs)
@@ -1748,9 +1748,9 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn("class TokenBudget", client)
         self.assertIn("normalizeEditableAgentDependsOn", chat)
         self.assertIn('depends_on: ["researcher", "coder", "reasoner"]', chat)
-        self.assertIn("version-2.5.8-blue", readme)
+        self.assertIn("version-2.5.9-blue", readme)
         self.assertIn("## [1.6.5]", changelog)
-        self.assertIn("适用版本：v2.5.8。", api)
+        self.assertIn("适用版本：v2.5.9。", api)
         self.assertIn("deepseek-infra-v187", sw)
 
     def test_v166_gemini_skin_and_frontend_fixes_are_present(self) -> None:
@@ -1778,10 +1778,10 @@ class EncodingRegressionTests(unittest.TestCase):
         # SW 棰勭紦瀛樼毊鑲?+ 鐗堟湰鍚屾鍒?1.6.6
         self.assertIn("/gemini.css", sw)
         self.assertIn("deepseek-infra-v187", sw)
-        self.assertIn('app_version: str = "2.5.8"', config)
-        self.assertIn('versionName "2.5.8"', build_gradle)
+        self.assertIn('app_version: str = "2.5.9"', config)
+        self.assertIn('versionName "2.5.9"', build_gradle)
         self.assertIn("versionCode 255", build_gradle)
-        self.assertIn("version-2.5.8-blue", readme)
+        self.assertIn("version-2.5.9-blue", readme)
         self.assertIn("create_pptx", readme)
         self.assertIn("## [1.6.6]", changelog)
 
@@ -1797,7 +1797,7 @@ class EncodingRegressionTests(unittest.TestCase):
         api = Path("docs/API.md").read_text(encoding="utf-8")
         security = Path("docs/SECURITY.md").read_text(encoding="utf-8")
 
-        self.assertIn('app_version: str = "2.5.8"', config)
+        self.assertIn('app_version: str = "2.5.9"', config)
         self.assertIn("class LocalRAGSettings", config)
         self.assertIn("LOCAL_RAG_BACKEND", config)
         self.assertIn("sqlite_vec.load", local_rag)
@@ -1807,10 +1807,10 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn("search_files_index", tools)
         self.assertIn("/api/rag/status", status_routes)
         self.assertIn("/api/rag/reindex", rag_routes)
-        self.assertIn("version-2.5.8-blue", readme)
+        self.assertIn("version-2.5.9-blue", readme)
         self.assertIn(".local-rag", readme)
         self.assertIn("## [1.7.6]", changelog)
-        self.assertIn("适用版本：v2.5.8。", api)
+        self.assertIn("适用版本：v2.5.9。", api)
         self.assertIn(".local-rag/rag.sqlite3", security)
 
 
@@ -1831,7 +1831,7 @@ class EncodingRegressionTests(unittest.TestCase):
         api = Path("docs/API.md").read_text(encoding="utf-8")
         security = Path("docs/SECURITY.md").read_text(encoding="utf-8")
 
-        self.assertIn('app_version: str = "2.5.8"', config)
+        self.assertIn('app_version: str = "2.5.9"', config)
         self.assertIn("class TracingSettings", config)
         self.assertIn("class SemanticCacheSettings", config)
         self.assertIn("class GatewaySettings", config)
@@ -1860,7 +1860,7 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn("data-trace-message", chat_js)
         self.assertIn("renderTracePanel", chat_js)
         self.assertIn(".trace-waterfall", styles)
-        self.assertIn("version-2.5.8-blue", readme)
+        self.assertIn("version-2.5.9-blue", readme)
         self.assertIn(".request-queue", readme)
         self.assertIn("## [1.8.0]", changelog)
         self.assertIn("GET `/api/gateway/status`", api)
@@ -1896,8 +1896,8 @@ class EncodingRegressionTests(unittest.TestCase):
 
         # 版本戳 + 前端资源缓存版本
         self.assertIn("deepseek-infra-v187", sw)
-        self.assertIn('app_version: str = "2.5.8"', config)
-        self.assertIn("version-2.5.8-blue", readme)
+        self.assertIn('app_version: str = "2.5.9"', config)
+        self.assertIn("version-2.5.9-blue", readme)
         self.assertIn("## [1.9.1]", changelog)
 
     def test_v200_infra_platform_reposition_is_present(self) -> None:
@@ -1905,6 +1905,7 @@ class EncodingRegressionTests(unittest.TestCase):
         architecture = Path("docs/ARCHITECTURE.md").read_text(encoding="utf-8")
         changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
         server = Path("deepseek_infra/web/server.py").read_text(encoding="utf-8")
+        chat_routes = Path("deepseek_infra/web/routes/chat.py").read_text(encoding="utf-8")
         openai_api = Path("deepseek_infra/infra/gateway/openai_api.py").read_text(encoding="utf-8")
         metrics = Path("deepseek_infra/infra/observability/metrics.py").read_text(encoding="utf-8")
         health = Path("deepseek_infra/infra/observability/health.py").read_text(encoding="utf-8")
@@ -1923,8 +1924,8 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn('FastAPI(title="DeepSeek Infra"', server)
 
         # OpenAI 兼容网关
-        self.assertIn("/v1/chat/completions", server)
-        self.assertIn("/v1/models", server)
+        self.assertIn("/v1/chat/completions", chat_routes)
+        self.assertIn("/v1/models", chat_routes)
         self.assertIn("def openai_to_internal_payload", openai_api)
         self.assertIn("chat.completion.chunk", openai_api)
 
@@ -1944,7 +1945,7 @@ class EncodingRegressionTests(unittest.TestCase):
         ollama = Path("deepseek_infra/infra/gateway/providers/ollama.py").read_text(encoding="utf-8")
         registry = Path("deepseek_infra/infra/gateway/providers/registry.py").read_text(encoding="utf-8")
         openai_api = Path("deepseek_infra/infra/gateway/openai_api.py").read_text(encoding="utf-8")
-        server = Path("deepseek_infra/web/server.py").read_text(encoding="utf-8")
+        chat_routes = Path("deepseek_infra/web/routes/chat.py").read_text(encoding="utf-8")
         status_routes = Path("deepseek_infra/web/routes/status.py").read_text(encoding="utf-8")
         changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
 
@@ -1960,7 +1961,7 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn("OLLAMA_ENABLED", config)
         # /v1 routes through the provider registry
         self.assertIn("resolve_provider", openai_api)
-        self.assertIn("openai_chat_completion", server)
+        self.assertIn("openai_chat_completion", chat_routes)
         self.assertIn('"providers": deps.providers_status()', status_routes)
         self.assertIn("## [2.0.1]", changelog)
 
@@ -2017,10 +2018,10 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn("class ContextEngineSettings", config)
         self.assertIn("CONTEXT_ENGINE_ENABLED = settings.context_engine.enabled", config)
         self.assertIn("CONTEXT_ENGINE_MODEL_CONTEXT_WINDOWS", config)
-        self.assertIn('app_version: str = "2.5.8"', config)
+        self.assertIn('app_version: str = "2.5.9"', config)
         self.assertIn("def test_token_trim_drops_oldest_and_preserves_system_anchors", test_context_engine)
 
-        self.assertIn("version-2.5.8-blue", readme)
+        self.assertIn("version-2.5.9-blue", readme)
         self.assertIn("## [2.0.4]", changelog)
         self.assertIn("tokenBudget", api)
         self.assertIn("context_engine.py", architecture)
@@ -2063,14 +2064,14 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn("def _outputs_in_plan_order", multi_agent)
         self.assertIn("class AgentRuntimeSettings", config)
         self.assertIn("AGENT_RUNTIME_AUTO_RESUME = settings.agent_runtime.auto_resume", config)
-        self.assertIn('app_version: str = "2.5.8"', config)
+        self.assertIn('app_version: str = "2.5.9"', config)
         self.assertIn('action == "resume"', server)
         self.assertIn("resume_run", server)
         self.assertIn("resume_orphaned_runs()", app)
         self.assertIn("def test_reduce_tracks_running_success_and_metrics", test_agent_state)
         self.assertIn("def test_resume_run_skips_completed_and_reruns_incomplete", test_agent_runs)
 
-        self.assertIn("version-2.5.8-blue", readme)
+        self.assertIn("version-2.5.9-blue", readme)
         self.assertIn("## [2.0.5]", changelog)
         self.assertIn("/api/agent-runs/{run_id}/resume", api)
         self.assertIn("agent_state.py", architecture)
@@ -2117,11 +2118,11 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn("renderTraceSpan(span, maxEnd, depth)", chat)
         self.assertIn(".trace-span.is-child", css)
         self.assertIn("deepseek-infra-v187", sw)
-        self.assertIn('app_version: str = "2.5.8"', config)
+        self.assertIn('app_version: str = "2.5.9"', config)
         self.assertIn("def test_build_trace_span_tree_nests_children_and_keeps_orphans", test_frontend)
         self.assertIn("def test_execute_agent_tier_nests_llm_span_under_agent_span", test_trace_tree)
 
-        self.assertIn("version-2.5.8-blue", readme)
+        self.assertIn("version-2.5.9-blue", readme)
         self.assertIn("## [2.0.6]", changelog)
         self.assertIn("tool.web_search", api)
         self.assertIn("OpenTelemetry", architecture)
@@ -2152,7 +2153,7 @@ class EncodingRegressionTests(unittest.TestCase):
             "SEMANTIC_CACHE_VERSION = settings.semantic_cache.version",
             "SEMANTIC_CACHE_MIN_QUALITY = settings.semantic_cache.min_quality_score",
             "SEMANTIC_CACHE_ATTACHMENTS = settings.semantic_cache.cache_attachments",
-            'app_version: str = "2.5.8"',
+            'app_version: str = "2.5.9"',
         ):
             with self.subTest(token=token):
                 self.assertIn(token, config)
@@ -2160,7 +2161,7 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn("def test_semantic_cache_version_isolation", test_cache)
         self.assertIn("def test_semantic_cache_attachments_use_exact_match_only", test_cache)
 
-        self.assertIn("version-2.5.8-blue", readme)
+        self.assertIn("version-2.5.9-blue", readme)
         self.assertIn("## [2.0.7]", changelog)
         self.assertIn("qualityScore", api)
         self.assertIn("semantic_cache.py", architecture)
@@ -2193,7 +2194,7 @@ class EncodingRegressionTests(unittest.TestCase):
         for token in (
             "LOCAL_RAG_BM25_K1 = settings.local_rag.bm25_k1",
             "LOCAL_RAG_INCREMENTAL = settings.local_rag.incremental",
-            'app_version: str = "2.5.8"',
+            'app_version: str = "2.5.9"',
         ):
             with self.subTest(token=token):
                 self.assertIn(token, config)
@@ -2204,7 +2205,7 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn("def test_verify_citation_grounding", test_rag)
         self.assertIn("def test_incremental_index_skips_unchanged_document", test_rag)
 
-        self.assertIn("version-2.5.8-blue", readme)
+        self.assertIn("version-2.5.9-blue", readme)
         self.assertIn("## [2.0.8]", changelog)
         self.assertIn("chunk lineage", api.lower())
         self.assertIn("local_rag.py", architecture)
@@ -2247,7 +2248,7 @@ class EncodingRegressionTests(unittest.TestCase):
 
         self.assertIn("class ModelRouterSettings", config)
         self.assertIn("MODEL_ROUTER_ENABLED = settings.model_router.enabled", config)
-        self.assertIn('app_version: str = "2.5.8"', config)
+        self.assertIn('app_version: str = "2.5.9"', config)
         self.assertIn("emit_cascade_as_stream", server)
         self.assertIn("model_router_cascade_requested", server)
 
@@ -2258,7 +2259,7 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn("deepseek-infra-v187", sw)
         self.assertIn("def test_cascade_escalates_when_gate_fails", test_router)
 
-        self.assertIn("version-2.5.8-blue", readme)
+        self.assertIn("version-2.5.9-blue", readme)
         self.assertIn("## [2.0.9]", changelog)
         self.assertIn("modelCascade", api)
         self.assertIn("model_router.py", architecture)
@@ -2305,7 +2306,7 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn('"agentCostUsd"', multi_agent)
         self.assertIn("class BudgetSettings", config)
         self.assertIn("BUDGET_PRICING = settings.budget.pricing", config)
-        self.assertIn('app_version: str = "2.5.8"', config)
+        self.assertIn('app_version: str = "2.5.9"', config)
         self.assertIn('"/api/budget"', status_routes)
         self.assertIn("def agent_exhausted(", deepseek_client)
         self.assertIn("function formatCostUsd(", chat)
@@ -2313,7 +2314,7 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn("deepseek-infra-v187", sw)
         self.assertIn("def test_build_request_downgrades_model_when_over_budget", test_budget)
 
-        self.assertIn("version-2.5.8-blue", readme)
+        self.assertIn("version-2.5.9-blue", readme)
         self.assertIn("## [2.0.10]", changelog)
         self.assertIn("costUsd", api)
         self.assertIn("budget_manager.py", architecture)
@@ -2372,7 +2373,7 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn('"capability": agent_id', multi_agent)
         self.assertIn("class ToolPolicySettings", config)
         self.assertIn("TOOL_POLICY_ENABLED = settings.tool_policy.enabled", config)
-        self.assertIn('app_version: str = "2.5.8"', config)
+        self.assertIn('app_version: str = "2.5.9"', config)
         self.assertIn('"/api/tool-policy"', status_routes)
         self.assertIn("deps.tool_policy_status()", status_routes)
         self.assertIn("function formatToolPolicy(", chat)
@@ -2380,7 +2381,7 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn("deepseek-infra-v187", sw)
         self.assertIn("def test_capability_profile_denies_out_of_scope_tool", test_policy)
 
-        self.assertIn("version-2.5.8-blue", readme)
+        self.assertIn("version-2.5.9-blue", readme)
         self.assertIn("## [2.1.0]", changelog)
         self.assertIn("tool-policy", api)
         self.assertIn("tool_policy.py", architecture)
@@ -2427,12 +2428,12 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn("expected_tools", agent_golden)
         self.assertIn("RAG Recall@K", evals_readme)
 
-        self.assertIn('app_version: str = "2.5.8"', config)
+        self.assertIn('app_version: str = "2.5.9"', config)
         self.assertIn("def test_rag_runner_evaluates_real_retrieval_offline", test_harness)
         # Pure backend + tooling change: no frontend, Service Worker cache stays put.
         self.assertIn("deepseek-infra-v187", sw)
 
-        self.assertIn("version-2.5.8-blue", readme)
+        self.assertIn("version-2.5.9-blue", readme)
         self.assertIn("Evaluation Harness", readme)
         self.assertIn("## [2.2.6]", changelog)
         self.assertIn("evaluation/harness.py", architecture)
@@ -2477,7 +2478,7 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn("recover_scheduler_orphans", app)
         self.assertIn("class SchedulerSettings", config)
         self.assertIn("SCHEDULER_ENABLED = settings.scheduler.enabled", config)
-        self.assertIn('app_version: str = "2.5.8"', config)
+        self.assertIn('app_version: str = "2.5.9"', config)
         self.assertIn('"/api/scheduler"', status_routes)
         self.assertIn("deps.scheduler_status()", status_routes)
         self.assertIn("SCHEDULER_DIR", conftest)
@@ -2485,7 +2486,7 @@ class EncodingRegressionTests(unittest.TestCase):
         # Pure backend change: no frontend, Service Worker cache stays put.
         self.assertIn("deepseek-infra-v187", sw)
 
-        self.assertIn("version-2.5.8-blue", readme)
+        self.assertIn("version-2.5.9-blue", readme)
         self.assertIn("请求调度", readme)
         self.assertIn("## [2.1.2]", changelog)
         self.assertIn("/api/scheduler", api)
@@ -2530,14 +2531,14 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn("Mcp-Session-Id", mcp_client)
         self.assertIn("class MCPSettings", config)
         self.assertIn("MCP_ENABLED = settings.mcp.enabled", config)
-        self.assertIn('app_version: str = "2.5.8"', config)
+        self.assertIn('app_version: str = "2.5.9"', config)
         self.assertIn('@router.post("/mcp")', mcp_routes)
         self.assertIn('"/api/mcp"', status_routes)
         self.assertIn("def test_client_initialize_list_and_call_roundtrip", test_mcp)
         # Pure backend change: no frontend, Service Worker cache stays put.
         self.assertIn("deepseek-infra-v187", sw)
 
-        self.assertIn("version-2.5.8-blue", readme)
+        self.assertIn("version-2.5.9-blue", readme)
         self.assertIn("MCP Tool Hub", readme)
         self.assertIn("## [2.1.3]", changelog)
         self.assertIn("POST `/mcp`", api)
@@ -2573,7 +2574,7 @@ class EncodingRegressionTests(unittest.TestCase):
 
         self.assertIn("class A2ASettings", config)
         self.assertIn("A2A_ENABLED = settings.a2a.enabled", config)
-        self.assertIn('app_version: str = "2.5.8"', config)
+        self.assertIn('app_version: str = "2.5.9"', config)
         self.assertIn('"/.well-known/agent-card.json"', a2a_routes)
         self.assertIn('"/a2a/agents"', a2a_routes)
         self.assertIn('@router.post("/a2a")', a2a_routes)
@@ -2583,7 +2584,7 @@ class EncodingRegressionTests(unittest.TestCase):
         # Pure backend change: no frontend, Service Worker cache stays put.
         self.assertIn("deepseek-infra-v187", sw)
 
-        self.assertIn("version-2.5.8-blue", readme)
+        self.assertIn("version-2.5.9-blue", readme)
         self.assertIn("A2A Agent Mesh", readme)
         self.assertIn("## [2.1.4]", changelog)
         self.assertIn("agent-card.json", api)
@@ -2629,13 +2630,13 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn("context_taint_file_guard_line", files)
         self.assertIn("class ContextTaintSettings", config)
         self.assertIn("TAINT_ENABLED = settings.context_taint.enabled", config)
-        self.assertIn('app_version: str = "2.5.8"', config)
+        self.assertIn('app_version: str = "2.5.9"', config)
         self.assertIn('"/api/taint"', status_routes)
         self.assertIn("def test_tainted_turn_escalates_dangerous_tools_to_confirmation", test_taint)
         # Pure backend change: no frontend, Service Worker cache stays put.
         self.assertIn("deepseek-infra-v187", sw)
 
-        self.assertIn("version-2.5.8-blue", readme)
+        self.assertIn("version-2.5.9-blue", readme)
         self.assertIn("Taint", readme)
         self.assertIn("## [2.1.5]", changelog)
         self.assertIn("/api/taint", api)
@@ -2750,8 +2751,8 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn("/modules/trace_waterfall.js", sw)
 
         # 版本联动：后端 / Android / 文档 / 工具链 / 前端缓存同步到 v2.2.6
-        self.assertIn('app_version: str = "2.5.8"', config)
-        self.assertIn("version-2.5.8-blue", readme)
+        self.assertIn('app_version: str = "2.5.9"', config)
+        self.assertIn("version-2.5.9-blue", readme)
         self.assertIn("## [2.2.6] - Eval Gate & Security Hardening", changelog)
         self.assertIn("deepseek-infra-v187", sw)
 
@@ -2849,7 +2850,7 @@ class EncodingRegressionTests(unittest.TestCase):
             changelog.index("## [2.2.2] - MCP Policy Hardening"),
             changelog.index("## [2.2.1] - External MCP Tool Bridge"),
         )
-        self.assertIn("version-2.5.8-blue", readme)
+        self.assertIn("version-2.5.9-blue", readme)
         self.assertIn("### v2.2.2: MCP Policy Hardening", readme)
         self.assertIn("/mcp tools/call", api)
         self.assertIn("upstream_tool_error", api)
@@ -2949,7 +2950,7 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertTrue(Path("scripts/smoke_a2a_compat.py").is_file())
         self.assertTrue(Path("examples/a2a_compat_smoke.py").is_file())
         self.assertTrue(Path("examples/edge_router_smoke.py").is_file())
-        self.assertIn("version-2.5.8-blue", readme)
+        self.assertIn("version-2.5.9-blue", readme)
         self.assertIn("### v2.2.5: Compatibility Smoke Pack", readme)
         self.assertIn("## [2.2.5] - Compatibility Smoke & Release Polish", changelog)
         self.assertIn("Compatibility Smoke Pack", compatibility)
@@ -2977,9 +2978,9 @@ class EncodingRegressionTests(unittest.TestCase):
 
         self.assertTrue(Path("evals/reports/latest.json").is_file())
         self.assertTrue(Path("evals/reports/latest.md").is_file())
-        self.assertIn("version-2.5.8-blue", readme)
-        self.assertIn('app_version: str = "2.5.8"', config)
-        self.assertIn('versionName "2.5.8"', build_gradle)
+        self.assertIn("version-2.5.9-blue", readme)
+        self.assertIn('app_version: str = "2.5.9"', config)
+        self.assertIn('versionName "2.5.9"', build_gradle)
         self.assertIn("versionCode 255", build_gradle)
         self.assertIn("## [2.2.7] - Eval Reports & Regression Evidence", changelog)
         self.assertIn("### v2.2.7: Eval Reports & Regression Evidence", readme)
@@ -3016,7 +3017,7 @@ class EncodingRegressionTests(unittest.TestCase):
 
         self.assertTrue(Path("evals/golden/agent_predictions.v2.2.8.sample.jsonl").is_file())
         self.assertTrue(Path("evals/reports/agent-latest.md").is_file())
-        self.assertIn("version-2.5.8-blue", readme)
+        self.assertIn("version-2.5.9-blue", readme)
         self.assertIn("## [2.2.8] - Agent Eval Replay & Stability", changelog)
         self.assertIn("### v2.2.8: Agent Eval Replay & Stability", readme)
         self.assertIn("docs/AGENT_EVAL.md", readme)
@@ -3063,20 +3064,20 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertTrue(Path("tests/test_preflight_release.py").is_file())
         self.assertTrue(Path("tests/test_release_manifest.py").is_file())
         self.assertTrue(Path("tests/test_smoke_release.py").is_file())
-        self.assertIn("version-2.5.8-blue", readme)
-        self.assertIn('app_version: str = "2.5.8"', config)
-        self.assertIn('versionName "2.5.8"', build_gradle)
+        self.assertIn("version-2.5.9-blue", readme)
+        self.assertIn('app_version: str = "2.5.9"', config)
+        self.assertIn('versionName "2.5.9"', build_gradle)
         self.assertIn("versionCode 255", build_gradle)
-        self.assertIn("deepseek-infra:2.5.8", dockerfile)
+        self.assertIn("deepseek-infra:2.5.9", dockerfile)
         self.assertIn("## [2.2.9] - Release Readiness & Runtime Doctor", changelog)
         self.assertIn("## [2.3.0] - Protocol Interop GA", changelog)
         self.assertIn("## [2.3.1] - GUI Interop Evidence Patch", changelog)
         self.assertIn("### v2.2.9: Release Readiness & Runtime Doctor", readme)
         self.assertIn("scripts/doctor.py --offline", readme)
-        self.assertIn("scripts/preflight_release.py --version 2.5.8", readme)
+        self.assertIn("scripts/preflight_release.py --version 2.5.9", readme)
         self.assertIn("scripts/smoke_release.py --offline", readme)
         self.assertIn("release-readiness", ci)
-        self.assertIn("preflight_release.py --version 2.5.8", ci)
+        self.assertIn("preflight_release.py --version 2.5.9", ci)
         self.assertIn("doctor.py --offline", ci)
         self.assertIn("--dry-run", release)
         self.assertIn("release_manifest", release)
@@ -3108,15 +3109,15 @@ class EncodingRegressionTests(unittest.TestCase):
         test_headless_smoke = Path("tests/test_headless_mcp_bridge_smoke.py").read_text(encoding="utf-8")
         test_preflight = Path("tests/test_preflight_release.py").read_text(encoding="utf-8")
 
-        self.assertIn("version-2.5.8-blue", readme)
-        self.assertIn('app_version: str = "2.5.8"', config)
-        self.assertIn('versionName "2.5.8"', build_gradle)
+        self.assertIn("version-2.5.9-blue", readme)
+        self.assertIn('app_version: str = "2.5.9"', config)
+        self.assertIn('versionName "2.5.9"', build_gradle)
         self.assertIn("versionCode 255", build_gradle)
-        self.assertIn("deepseek-infra:2.5.8", dockerfile)
+        self.assertIn("deepseek-infra:2.5.9", dockerfile)
         self.assertIn("## [2.3.2] - Headless MCP Client Compatibility Pack", changelog)
         self.assertIn("### v2.3.2: Headless MCP Client Compatibility Pack", readme)
         self.assertIn("scripts/smoke_mcp_headless_bridge.py --out docs/evidence/headless-mcp-bridge.json", ci)
-        self.assertIn("preflight_release.py --version 2.5.8", ci)
+        self.assertIn("preflight_release.py --version 2.5.9", ci)
         self.assertIn("Headless MCP bridge", compatibility)
         self.assertIn("Claude Desktop | ✅ GUI tested", compatibility)
         self.assertIn("Cursor | ✅ GUI tested", compatibility)
@@ -3129,7 +3130,7 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn("mcp-remote", generator)
         self.assertIn("Client Config Generator", headless_doc)
         self.assertEqual(evidence["schemaVersion"], "headless-mcp-bridge-evidence.v1")
-        self.assertEqual(evidence["version"], "2.5.8")
+        self.assertEqual(evidence["version"], "2.5.9")
         self.assertIn("mcp.policy_denial", {step["name"] for step in evidence["steps"]})
         self.assertIn("test_claude_stdio_bridge_config_uses_mcp_remote_header", test_config_generator)
         self.assertIn("test_headless_mcp_bridge_evidence_passes_without_token_leak", test_headless_smoke)
@@ -3171,7 +3172,7 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn("tasks/list", smoke)
         self.assertEqual(schema["properties"]["checks"]["required"], list(evidence["checks"].keys()))
         self.assertEqual(evidence["schemaVersion"], "a2a-external-peer-evidence.v1")
-        self.assertEqual(evidence["version"], "2.5.8")
+        self.assertEqual(evidence["version"], "2.5.9")
         self.assertEqual(evidence["status"], "PASS")
         self.assertTrue(all(value == "PASS" for value in evidence["checks"].values()))
         self.assertIn("run_langgraph_agent", langgraph_adapter)
@@ -3200,11 +3201,11 @@ class EncodingRegressionTests(unittest.TestCase):
         test_index = Path("tests/test_evidence_index.py").read_text(encoding="utf-8")
         test_manifest = Path("tests/test_release_manifest.py").read_text(encoding="utf-8")
 
-        self.assertIn("version-2.5.8-blue", readme)
-        self.assertIn('app_version: str = "2.5.8"', config)
-        self.assertIn('versionName "2.5.8"', build_gradle)
+        self.assertIn("version-2.5.9-blue", readme)
+        self.assertIn('app_version: str = "2.5.9"', config)
+        self.assertIn('versionName "2.5.9"', build_gradle)
         self.assertIn("versionCode 255", build_gradle)
-        self.assertIn("deepseek-infra:2.5.8", dockerfile)
+        self.assertIn("deepseek-infra:2.5.9", dockerfile)
         self.assertIn("## [2.4.0] - 质量门禁与安全评测硬化", changelog)
         self.assertIn("## [2.4.2] - GUI Interop Evidence Patch", changelog)
         self.assertIn("## [2.4.1] - Release Evidence Patch", changelog)
@@ -3225,12 +3226,12 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn("DEFAULT_EVIDENCE_PATHS", release_manifest_module)
         self.assertIn("DEFAULT_QUALITY_GATES", release_manifest_module)
         self.assertIn("docs/EVIDENCE_INDEX.md", release_manifest_module)
-        self.assertEqual(headless_evidence["version"], "2.5.8")
-        self.assertEqual(a2a_evidence["version"], "2.5.8")
-        self.assertEqual(latest_report["version"], "2.5.8")
-        self.assertEqual(agent_report["version"], "2.5.8")
-        self.assertEqual(compare_report["version"], "2.5.8")
-        self.assertEqual(security_report["version"], "2.5.8")
+        self.assertEqual(headless_evidence["version"], "2.5.9")
+        self.assertEqual(a2a_evidence["version"], "2.5.9")
+        self.assertEqual(latest_report["version"], "2.5.9")
+        self.assertEqual(agent_report["version"], "2.5.9")
+        self.assertEqual(compare_report["version"], "2.5.9")
+        self.assertEqual(security_report["version"], "2.5.9")
         for evidence in (headless_evidence, a2a_evidence, latest_report, agent_report, compare_report, security_report):
             self.assertIn("commit", evidence)
             self.assertIn("environment", evidence)
@@ -3241,7 +3242,7 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn("test_docs_encoding_sanity", test_encoding)
         self.assertIn("test_evidence_index", test_index)
         self.assertIn("evidence", test_manifest)
-        self.assertIn("preflight_release.py --version 2.5.8", ci)
+        self.assertIn("preflight_release.py --version 2.5.9", ci)
 
     def test_v242_gui_interop_evidence_patch_is_present(self) -> None:
         compatibility = Path("docs/COMPATIBILITY.md").read_text(encoding="utf-8")
@@ -3289,7 +3290,7 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn("docs/evidence/edge-router-smoke.json", manifest)
         self.assertEqual(schema["properties"]["checks"]["required"], list(evidence["checks"].keys()))
         self.assertEqual(evidence["schemaVersion"], "edge-router-smoke-evidence.v1")
-        self.assertEqual(evidence["version"], "2.5.8")
+        self.assertEqual(evidence["version"], "2.5.9")
         self.assertEqual(evidence["status"], "PASS")
 
     def test_v245_continue_dev_mcp_compatibility_patch_is_present(self) -> None:
@@ -3319,7 +3320,7 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn("docs/evidence/continue-dev-mcp.json", manifest)
         self.assertEqual(schema["properties"]["checks"]["required"], list(evidence["checks"].keys()))
         self.assertEqual(evidence["schemaVersion"], "continue-dev-mcp-evidence.v1")
-        self.assertEqual(evidence["version"], "2.5.8")
+        self.assertEqual(evidence["version"], "2.5.9")
         self.assertEqual(evidence["status"], "PASS")
         self.assertTrue(all(value == "PASS" for value in evidence["checks"].values()))
         self.assertIn("# Continue.dev MCP Evidence", markdown)
@@ -3355,7 +3356,7 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn("langchain-openai", reqs)
         self.assertEqual(schema["properties"]["sdks"]["required"], ["langchain", "litellm", "llamaindex"])
         self.assertEqual(evidence["schemaVersion"], "openai-compatible-sdks-evidence.v1")
-        self.assertEqual(evidence["version"], "2.5.8")
+        self.assertEqual(evidence["version"], "2.5.9")
         self.assertEqual(evidence["status"], "PASS")
         self.assertTrue(all(
             value == "PASS"
@@ -3382,12 +3383,12 @@ class EncodingRegressionTests(unittest.TestCase):
         smoke_workspace = Path("scripts/smoke_workspace.py").read_text(encoding="utf-8")
         manifest = Path("deepseek_infra/infra/diagnostics/release_manifest.py").read_text(encoding="utf-8")
         ci = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
-        workspace_evidence = json.loads(Path("docs/evidence/workspace-v2.5.8.json").read_text(encoding="utf-8"))
+        workspace_evidence = json.loads(Path("docs/evidence/workspace-v2.5.9.json").read_text(encoding="utf-8"))
         test_workspace = Path("tests/test_workspace.py").read_text(encoding="utf-8")
         test_smoke_workspace = Path("tests/test_smoke_workspace.py").read_text(encoding="utf-8")
 
-        self.assertIn("## [2.5.8] - Web Route Split Phase 5", changelog)
-        self.assertIn("### v2.5.8: Web Route Split Phase 5", readme)
+        self.assertIn("## [2.5.9] - Web Route Split Final", changelog)
+        self.assertIn("### v2.5.9: Web Route Split Final", readme)
         self.assertIn("deepseek_infra/web/routes/files.py", readme)
         self.assertIn("deepseek_infra/web/routes/downloads.py", readme)
         self.assertIn("Workspace Core 工作台", readme)
@@ -3401,9 +3402,9 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn("Artifact Hub", workspace_doc)
         self.assertIn("project-export.zip", workspace_doc)
         self.assertIn("Workspace Core | MVP", implementation)
-        self.assertIn("Workspace Core Evidence（v2.5.8）", readiness)
+        self.assertIn("Workspace Core Evidence（v2.5.9）", readiness)
         self.assertIn("workspace_core_evidence", evidence_index)
-        self.assertIn("docs/evidence/workspace-v2.5.8.json", evidence_index)
+        self.assertIn("docs/evidence/workspace-v2.5.9.json", evidence_index)
         self.assertIn("check_workspace_core_evidence", preflight)
         self.assertIn("workspace_core", preflight)
         self.assertIn("workspace_core", smoke_release)
@@ -3411,9 +3412,9 @@ class EncodingRegressionTests(unittest.TestCase):
         self.assertIn("projectExportZip", smoke_workspace)
         self.assertIn("secretRedaction", smoke_workspace)
         self.assertIn("workspaceCore", manifest)
-        self.assertIn("docs/evidence/workspace-v2.5.8.json", manifest)
-        self.assertIn("smoke_workspace.py --offline --out docs/evidence/workspace-v2.5.8.json", ci)
-        self.assertEqual(workspace_evidence["version"], "2.5.8")
+        self.assertIn("docs/evidence/workspace-v2.5.9.json", manifest)
+        self.assertIn("smoke_workspace.py --offline --out docs/evidence/workspace-v2.5.9.json", ci)
+        self.assertEqual(workspace_evidence["version"], "2.5.9")
         self.assertEqual(workspace_evidence["status"], "PASS")
         for check in ("projectCreate", "savedItemCreate", "artifactList", "conversationExport", "projectExportZip", "secretRedaction"):
             self.assertEqual(workspace_evidence["checks"][check], "PASS")

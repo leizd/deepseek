@@ -1,7 +1,7 @@
 # Continue.dev MCP Evidence
 
 - Client: Continue.dev
-- Version: 2.5.8
+- Version: 2.5.9
 - Commit: 2e2782e
 - Status: PASS
 - Generated: 2026-06-28T10:00:00Z
