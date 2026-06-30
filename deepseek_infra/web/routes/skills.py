@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 
 from deepseek_infra.core.errors import AppError, ErrorCode
 from deepseek_infra.core.utils import utc_now_iso
+from deepseek_infra.infra.skills.pack import tool_permission_summary
 from deepseek_infra.infra.skills.permissions import skill_allowed_tools
 from deepseek_infra.infra.skills.schema import SkillSchemaError, validate_instance, validate_skill_config
 from deepseek_infra.infra.skills.templates import offline_skill_content
@@ -29,6 +30,12 @@ class SkillsRouteDeps:
     import_skill_config: Callable[..., dict[str, Any]]
     export_skill_config: Callable[[str], dict[str, Any]]
     run_skill: Callable[..., dict[str, Any]]
+    list_packs: Callable[..., list[dict[str, Any]]]
+    get_pack: Callable[[str], dict[str, Any]]
+    export_pack: Callable[[str], dict[str, Any]]
+    import_pack: Callable[..., dict[str, Any]]
+    validate_pack: Callable[[dict[str, Any]], dict[str, Any]]
+    delete_pack: Callable[[str], dict[str, Any]]
 
 
 def create_skills_router(deps: SkillsRouteDeps) -> APIRouter:
@@ -65,6 +72,24 @@ def create_skills_router(deps: SkillsRouteDeps) -> APIRouter:
             return json_response(_run_skill(deps, payload, skill_id=_skill_id(payload)))
         if action == "dry_run":
             return json_response(_dry_run_skill_config(payload))
+        if action == "list_packs":
+            return json_response({"ok": True, "packs": deps.list_packs(include_builtin=_bool(payload, "includeBuiltin", default=True))})
+        if action == "get_pack":
+            return json_response({"ok": True, "pack": deps.get_pack(_pack_id(payload))})
+        if action == "export_pack":
+            return json_response({"ok": True, "pack": deps.export_pack(_pack_id(payload))})
+        if action == "validate_pack":
+            return json_response({"ok": True, "pack": deps.validate_pack(_pack_config(payload)), "toolPermissions": tool_permission_summary(deps.validate_pack(_pack_config(payload)))})
+        if action == "import_pack":
+            return json_response(
+                deps.import_pack(
+                    _pack_config(payload),
+                    overwrite=_bool(payload, "overwrite"),
+                    on_conflict=str(payload.get("onConflict") or "error"),
+                )
+            )
+        if action == "delete_pack":
+            return json_response(deps.delete_pack(_pack_id(payload)))
         raise AppError("Unsupported Skill action", code=ErrorCode.INVALID_PAYLOAD)
 
     @router.post("/api/skills/{skill_id}/run")
@@ -81,6 +106,28 @@ def _skill_id(payload: dict[str, Any]) -> str:
     if not skill_id:
         raise AppError("skillId is required", code=ErrorCode.INVALID_PAYLOAD)
     return skill_id
+
+
+def _pack_id(payload: dict[str, Any]) -> str:
+    pack_id = str(payload.get("packId") or payload.get("id") or "").strip()
+    if not pack_id:
+        raise AppError("packId is required", code=ErrorCode.INVALID_PAYLOAD)
+    return pack_id
+
+
+def _pack_config(payload: dict[str, Any]) -> dict[str, Any]:
+    for key in ("pack", "config"):
+        value = payload.get(key)
+        if isinstance(value, dict):
+            return value
+    candidate = {
+        key: value
+        for key, value in payload.items()
+        if key not in {"action", "overwrite", "onConflict"}
+    }
+    if not candidate:
+        raise AppError("Skill Pack config is required", code=ErrorCode.INVALID_PAYLOAD)
+    return candidate
 
 
 def _skill_config(payload: dict[str, Any]) -> dict[str, Any]:

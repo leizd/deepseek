@@ -226,3 +226,113 @@ def test_skills_validate_rejects_unknown_builder_tool(tmp_settings: Path) -> Non
 
     assert status == 400
     assert "unknown_builder_tool" in payload["error"]
+
+
+def _pack_payload() -> dict[str, Any]:
+    return {
+        "packId": "pack_web_test",
+        "name": "Web Pack",
+        "description": "Used by Skill Pack route tests.",
+        "version": "1.0.0",
+        "author": "local",
+        "skills": [
+            {
+                "skillId": "skill_pack_web_a",
+                "name": "Pack Web A",
+                "description": "d",
+                "version": "1.0.0",
+                "systemPrompt": "Return markdown.",
+                "inputSchema": {"type": "object", "properties": {"topic": {"type": "string"}}, "required": ["topic"], "additionalProperties": False},
+                "outputSchema": {"type": "object", "properties": {"content": {"type": "string"}}, "required": ["content"], "additionalProperties": True},
+                "allowedTools": ["search_files"],
+                "memoryPolicy": {"scope": "project", "read": True, "write": False},
+                "artifactPolicy": {"autoSave": True, "types": ["md"]},
+                "projectBinding": {"enabled": True},
+                "exampleInputs": [{"topic": "pack"}],
+            }
+        ],
+    }
+
+
+def test_skills_pack_list_get_export_and_import(tmp_settings: Path) -> None:
+    with _running_server() as server:
+        status, listed, _ = _request(server, "POST", "/api/skills", payload={"action": "list_packs"}, headers=_auth_headers())
+        assert status == 200
+        assert "pack_study" in {item["packId"] for item in listed["packs"]}
+
+        status, fetched, _ = _request(
+            server,
+            "POST",
+            "/api/skills",
+            payload={"action": "get_pack", "packId": "pack_study"},
+            headers=_auth_headers(),
+        )
+        assert status == 200
+        assert fetched["pack"]["packId"] == "pack_study"
+
+        status, exported, _ = _request(
+            server,
+            "POST",
+            "/api/skills",
+            payload={"action": "export_pack", "packId": "pack_study"},
+            headers=_auth_headers(),
+        )
+        assert status == 200
+        assert all("systemPrompt" in skill for skill in exported["pack"]["skills"])
+
+        status, imported, _ = _request(
+            server,
+            "POST",
+            "/api/skills",
+            payload={"action": "import_pack", "pack": _pack_payload()},
+            headers=_auth_headers(),
+        )
+        assert status == 200
+        assert imported["ok"] is True
+        assert imported["installedSkills"] == ["skill_pack_web_a"]
+        assert imported["toolPermissions"]
+
+
+def test_skills_pack_import_conflict_and_delete(tmp_settings: Path) -> None:
+    with _running_server() as server:
+        _request(server, "POST", "/api/skills", payload={"action": "import_pack", "pack": _pack_payload()}, headers=_auth_headers())
+        status, payload, _ = _request(
+            server,
+            "POST",
+            "/api/skills",
+            payload={"action": "import_pack", "pack": _pack_payload()},
+            headers=_auth_headers(),
+        )
+        assert status == 409
+        assert "skill_pack_web_a" in payload["error"]
+
+        status, deleted, _ = _request(
+            server,
+            "POST",
+            "/api/skills",
+            payload={"action": "delete_pack", "packId": "pack_web_test"},
+            headers=_auth_headers(),
+        )
+        assert status == 200
+        assert deleted["ok"] is True
+
+
+def test_skills_pack_install_to_project(tmp_settings: Path) -> None:
+    project = projects.create_project("Pack Install Project")
+    with _running_server() as server:
+        status, payload, _ = _request(
+            server,
+            "POST",
+            f"/api/workspace/projects/{project['id']}/skill-packs/pack_study/install",
+            headers=_auth_headers(),
+        )
+    assert status == 200
+    assert "skill_study_tutor" in payload["skills"]["enabledSkills"]
+    assert "pack_study" in payload["skills"]["enabledPacks"]
+
+
+def test_skills_pack_actions_require_auth() -> None:
+    with _running_server() as server:
+        status, payload, _ = _request(server, "POST", "/api/skills", payload={"action": "list_packs"})
+    assert status == 401
+    assert payload["code"] == ErrorCode.UNAUTHORIZED.value

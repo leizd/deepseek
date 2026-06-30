@@ -1,8 +1,8 @@
 # Skill System
 
-Applicable version: v2.6.3.
+Applicable version: v2.6.4.
 
-DeepSeek Infra v2.6.3 defines a Skill as:
+DeepSeek Infra v2.6.4 defines a Skill as:
 
 ```text
 Skill = Prompt + Tools + Input Schema + Output Schema + Memory Policy + Artifact Policy + Project Binding
@@ -15,7 +15,8 @@ A Skill is not just a prompt template. It has an explicit tool grant, validates 
 ```text
 deepseek_infra/infra/skills/
   schema.py        # Skill config and input/output schema validation
-  registry.py      # built-in + custom Skill registry
+  pack.py          # Skill Pack schema, validation, and tool-permission diff
+  registry.py      # built-in + custom Skill and Skill Pack registry
   permissions.py   # Skill allowedTools -> ToolPolicy
   runner.py        # Skill execution and project/artifact persistence
   templates.py     # prompt and offline output helpers
@@ -28,9 +29,15 @@ skills/builtin/
   ppt_generator.json
   code_review.json
   study_tutor.json
+
+skills/packs/
+  study.json       # Study Pack
+  research.json    # Research Pack
+  code.json        # Code Pack
+  office.json      # Office Pack
 ```
 
-User-created Skills are stored in runtime state under `.skills/custom/` and must not be committed.
+User-created Skills are stored in runtime state under `.skills/custom/` and user-created Skill Packs under `.skills/packs/`; neither must be committed.
 
 ## Registry
 
@@ -43,7 +50,7 @@ POST /api/skills
 POST /api/skills/{skill_id}/run
 ```
 
-Common actions: `list`, `builtin`, `get`, `create`, `update`, `disable`, `enable`, `delete`, `import`, `export`, `validate`, `dry_run`, `run`.
+Common actions: `list`, `builtin`, `get`, `create`, `update`, `disable`, `enable`, `delete`, `import`, `export`, `validate`, `dry_run`, `run`, `list_packs`, `get_pack`, `export_pack`, `import_pack`, `validate_pack`, `delete_pack`.
 
 ## Runner
 
@@ -69,6 +76,7 @@ Project Skill state is stored in `.projects/<projectId>/project.json`:
 ```json
 {
   "skills": {
+    "enabledPacks": ["pack_study"],
     "enabledSkills": ["skill_study_tutor"],
     "defaultSkill": "skill_study_tutor",
     "recentSkills": ["skill_research_brief"]
@@ -79,11 +87,11 @@ Project Skill state is stored in `.projects/<projectId>/project.json`:
 }
 ```
 
-Project export includes Skill bindings, Skill run history, saved Skill outputs, and Skill artifact metadata.
+Project export includes Skill bindings, Skill run history, saved Skill outputs, and Skill artifact metadata. `enabledPacks` records which Skill Packs a project has installed; installing a Pack enables its referenced Skills through `POST /api/workspace/projects/{projectId}/skill-packs/{packId}/install`.
 
 ## Skill Workbench UI
 
-v2.6.3 adds a local Skill Workbench in the main Web UI:
+v2.6.4 adds a local Skill Workbench in the main Web UI:
 
 - Open the `Skills` entry in the sidebar to browse built-in and custom Skills.
 - Use the workbench toolbar to search, import Skill JSON, export custom Skills, and enable or disable custom Skills.
@@ -102,7 +110,7 @@ static/styles.css
 
 ## Custom Skill Builder
 
-v2.6.3 adds a Custom Skill Builder inside the Skill Workbench so users can author Skills without hand-writing JSON:
+v2.6.4 adds a Custom Skill Builder inside the Skill Workbench so users can author Skills without hand-writing JSON:
 
 - `New Skill` opens a guided builder for `skillId`, `name`, `description`, `version`, `systemPrompt`, policies, schema fields, and tools.
 - `Clone` on a built-in Skill creates a custom editable copy, preserving the source prompt, schemas, tool grants, memory policy, artifact policy, and project binding.
@@ -119,6 +127,60 @@ The authoring API actions are intentionally local-only and do not download third
 { "action": "dry_run", "skill": { "...": "..." }, "input": { "...": "..." } }
 ```
 
+## Skill Packs
+
+v2.6.4 introduces local Skill Packs so a set of Skills can be imported, exported, installed, and bound to projects together. A Skill Pack is a `.skillpack.json` manifest:
+
+```json
+{
+  "packId": "pack_study",
+  "name": "Study Pack",
+  "description": "Skills for study, writing and reading.",
+  "version": "1.0.0",
+  "author": "builtin",
+  "skills": [
+    {"skillId": "skill_study_tutor"},
+    {"skillId": "skill_paper_writer", "name": "...", "...full Skill config": "..."}
+  ]
+}
+```
+
+Each `skills` entry is either a **reference** (only `skillId`, resolved against existing built-in / custom Skills) or an **embedded** full Skill config. Built-in template packs use references; exported packs embed full configs so they stay self-contained.
+
+Built-in Template Library (shipped under `skills/packs/`):
+
+- **Study Pack** — study_tutor, paper_writer, document_reader
+- **Research Pack** — research_brief, document_reader, paper_writer
+- **Code Pack** — code_review, document_reader
+- **Office Pack** — ppt_generator, paper_writer, document_reader
+
+Pack actions on `POST /api/skills`:
+
+```json
+{ "action": "list_packs" }
+{ "action": "get_pack", "packId": "pack_study" }
+{ "action": "export_pack", "packId": "pack_study" }
+{ "action": "validate_pack", "pack": { "...": "..." } }
+{ "action": "import_pack", "pack": { "...": "..." }, "onConflict": "error" }
+{ "action": "delete_pack", "packId": "pack_custom" }
+```
+
+Install a Pack onto a project (enables the Pack's Skills and records `enabledPacks`):
+
+```text
+POST /api/workspace/projects/{projectId}/skill-packs/{packId}/install
+```
+
+### Pack import safety
+
+Importing a Pack never silently overwrites existing Skills. The `onConflict` strategy must be one of:
+
+- `error` (default) — raise when an embedded `skillId` already exists.
+- `overwrite` — re-install embedded Skills with the same `skillId`.
+- `skip` — leave existing Skills untouched and report them as skipped.
+
+The import summary returns an `allowedTools` permission diff with risk labels (`read-only`, `filesystem`, `network`, `sensitive`, `requires approval`, or the raw risk level) and flags high-risk / requires-approval tools so reviewers can confirm them before running. Skill Packs are **local-only**: there is no remote Skill Marketplace, and the authoring API never downloads third-party Skills.
+
 ## Evidence
 
 Run the local offline checks:
@@ -127,11 +189,13 @@ Run the local offline checks:
 python scripts/smoke_skills.py --offline
 python scripts/smoke_skills_ui.py --offline
 python scripts/smoke_skill_builder.py --offline
+python scripts/smoke_skill_packs.py --offline
 python evals/runners/run_skill_eval.py --strict
 ```
 
-The release evidence file is `docs/evidence/skills-v2.6.3.json`.
-The Skill Workbench UI evidence file is `docs/evidence/skills-ui-v2.6.3.json`.
-The Custom Skill Builder evidence file is `docs/evidence/skill-builder-v2.6.3.json`.
+The release evidence file is `docs/evidence/skills-v2.6.4.json`.
+The Skill Workbench UI evidence file is `docs/evidence/skills-ui-v2.6.4.json`.
+The Custom Skill Builder evidence file is `docs/evidence/skill-builder-v2.6.4.json`.
+The Skill Packs evidence file is `docs/evidence/skill-packs-v2.6.4.json`.
 
 Required checks: `skillApiRoutes`, `builtinSkillsLoad`, `customSkillCreate`, `inputSchemaValidation`, `toolPermissionGate`, `artifactPolicy`, `projectBinding`, and `skillExport`.

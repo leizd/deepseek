@@ -41,7 +41,7 @@ def create_project(name: str) -> dict[str, Any]:
         "id": f"proj-{secrets.token_hex(6)}",
         "name": normalize_project_name(name),
         "documents": [],
-        "skills": {"enabledSkills": [], "defaultSkill": "", "recentSkills": []},
+        "skills": {"enabledPacks": [], "enabledSkills": [], "defaultSkill": "", "recentSkills": []},
         "skillRuns": [],
         "savedItems": [],
         "artifacts": [],
@@ -72,20 +72,57 @@ def project_skill_binding(project_id: str) -> dict[str, Any]:
     return normalize_project_skills(project.get("skills"))
 
 
-def set_project_skill_binding(project_id: str, enabled_skills: list[str], *, default_skill: str = "") -> dict[str, Any]:
+def set_project_skill_binding(
+    project_id: str,
+    enabled_skills: list[str],
+    *,
+    default_skill: str = "",
+    enabled_packs: list[str] | None = None,
+) -> dict[str, Any]:
     project = require_project(project_id)
     enabled = [skill for skill in (normalize_skill_id_for_project(item) for item in enabled_skills) if skill]
     default = normalize_skill_id_for_project(default_skill)
     if default and default not in enabled:
         enabled.insert(0, default)
+    existing = normalize_project_skills(project.get("skills"))
+    packs = unique_strings(normalize_pack_id_for_project(item) for item in (enabled_packs if enabled_packs is not None else existing.get("enabledPacks", [])))
     project["skills"] = {
+        "enabledPacks": packs[:40],
         "enabledSkills": unique_strings(enabled)[:40],
         "defaultSkill": default if default in enabled else "",
-        "recentSkills": normalize_project_skills(project.get("skills")).get("recentSkills", []),
+        "recentSkills": existing.get("recentSkills", []),
     }
     project["updatedAt"] = int(time.time() * 1000)
     write_project(project)
     return normalize_project_skills(project["skills"])
+
+
+def enable_pack_for_project(project_id: str, pack_id: str) -> dict[str, Any]:
+    """Enable all Skills referenced by a Skill Pack on a project.
+
+    Resolves the pack through the Skill registry and adds its skillIds to the
+    project's enabledSkills, recording the pack in enabledPacks.
+    """
+    from deepseek_infra.infra.skills import registry as skill_registry
+
+    pack = skill_registry.get_pack(pack_id)
+    pack_skill_ids = [str(entry.get("skillId") or "") for entry in (pack.get("skills") or []) if isinstance(entry, dict)]
+    resolved: list[str] = []
+    for skill_id in pack_skill_ids:
+        if skill_registry._safe_get_skill(skill_id) is not None:  # noqa: SLF001
+            resolved.append(skill_id)
+    binding = project_skill_binding(project_id)
+    enabled = list(binding.get("enabledSkills") or [])
+    for skill_id in resolved:
+        if skill_id not in enabled:
+            enabled.append(skill_id)
+    default = str(binding.get("defaultSkill") or "")
+    if not default and resolved:
+        default = resolved[0]
+    packs = list(binding.get("enabledPacks") or [])
+    if pack.get("packId") not in packs:
+        packs.append(str(pack.get("packId") or ""))
+    return set_project_skill_binding(project_id, enabled, default_skill=default, enabled_packs=packs)
 
 
 def append_project_skill_run(project_id: str, run: dict[str, Any]) -> dict[str, Any]:
@@ -298,10 +335,12 @@ def normalize_documents(value: Any) -> list[dict[str, Any]]:
 
 def normalize_project_skills(value: Any) -> dict[str, Any]:
     data = value if isinstance(value, dict) else {}
+    packs = unique_strings(normalize_pack_id_for_project(item) for item in data.get("enabledPacks") or [])
     enabled = unique_strings(normalize_skill_id_for_project(item) for item in data.get("enabledSkills") or [])
     recent = unique_strings(normalize_skill_id_for_project(item) for item in data.get("recentSkills") or [])
     default = normalize_skill_id_for_project(data.get("defaultSkill"))
     return {
+        "enabledPacks": packs[:40],
         "enabledSkills": enabled[:40],
         "defaultSkill": default if default in enabled else "",
         "recentSkills": recent[:20],
@@ -393,6 +432,11 @@ def touch_project_skill(project: dict[str, Any], skill_id: str) -> None:
 def normalize_skill_id_for_project(value: Any) -> str:
     skill_id = str(value or "").strip()
     return skill_id if re.fullmatch(r"[A-Za-z0-9_:-]{3,80}", skill_id) else ""
+
+
+def normalize_pack_id_for_project(value: Any) -> str:
+    pack_id = str(value or "").strip()
+    return pack_id if re.fullmatch(r"[A-Za-z0-9_:-]{3,80}", pack_id) else ""
 
 
 def unique_strings(values: Any) -> list[str]:

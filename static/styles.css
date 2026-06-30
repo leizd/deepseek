@@ -6276,6 +6276,123 @@ body.file-reader-side-open.file-reader-pdf-open .file-original-region-toolbar .f
   display: none;
 }
 
+.skill-packs-host {
+  margin: 0 0 20px;
+}
+
+.skill-packs-host[hidden] {
+  display: none;
+}
+
+.skill-packs-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.skill-packs-header h3 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 16px;
+  font-weight: 760;
+}
+
+.skill-packs-header p {
+  margin: 4px 0 0;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.skill-packs-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 10px 0;
+}
+
+.skill-packs-hint {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.skill-pack-list {
+  display: grid;
+  gap: 12px;
+}
+
+.skill-pack-card {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  background: var(--bg-sunken);
+  padding: 14px;
+}
+
+.skill-pack-card-body h4 {
+  margin: 0 0 4px;
+  color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 720;
+}
+
+.skill-pack-card-body p {
+  margin: 0 0 8px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.skill-pack-skills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}
+
+.skill-pack-skills li {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.skill-pack-import-summary {
+  margin: 10px 0;
+}
+
+.skill-pack-summary {
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--bg-sunken);
+  padding: 12px 14px;
+}
+
+.skill-pack-summary strong {
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.skill-pack-summary p {
+  margin: 6px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.skill-pack-warning {
+  color: var(--accent-warning, #c77700);
+}
+
 .skill-builder-form {
   display: grid;
   gap: 14px;

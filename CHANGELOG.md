@@ -2,6 +2,26 @@
 
 本项目使用类似 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的分组方式维护变更记录。未发布内容记录在 `[Unreleased]`，正式发版时迁移到具体版本。
 
+## [2.6.4] - Skill Packs
+
+**主题：Skill Pack 与模板库。** 继 v2.6.3 支持可视化创建单个 Skill 后，本版本把 Skills 扩展为可成套导入、导出、安装和项目绑定的本地 Skill Packs。
+
+### Added
+
+- **Skill Pack schema**：新增本地 `.skillpack.json` 格式，支持 packId、name、description、version、author、skills 与 install metadata，skills 条目可为引用或完整内嵌 Skill 配置。
+- **Pack Import / Export**：支持导入、导出、校验 Skill Pack，生成 skillId 冲突处理与工具权限摘要；冲突策略支持 error / overwrite / skip。
+- **Built-in Template Library**：新增 Study / Research / Code / Office 四个内置 Skill Pack。
+- **Pack Workbench UI**：Skill Workbench 新增 Packs 页签，支持查看、安装、导出、批量启用和删除 Pack 内 Skills，并展示导入摘要与高风险工具提示。
+- **Project Pack Binding**：项目配置支持 `enabledPacks`，可从 Pack 一键启用一组 Skills。
+- **Pack Safety Checks**：导入前展示 allowedTools diff 与 requires approval 风险提示，skillId 冲突必须显式处理，仅支持本地文件导入。
+- **Skill Pack Evidence**：新增 `scripts/smoke_skill_packs.py` 与 `docs/evidence/skill-packs-v2.6.4.json`，release readiness 纳入 `skillPacks` gate。
+
+### Changed
+
+- docs/SKILLS.md 增加 Skill Pack 格式、导入导出流程和安全说明。
+- README roadmap 增加 Skill Packs / Template Library。
+- `preflight_release.py` / `smoke_release.py` / release manifest 纳入 `skill_packs_evidence` 与 `skillPacks` 质量门。
+
 ## [2.6.3] - Custom Skill Builder
 
 **Theme: Custom Skill authoring.** After v2.6.2 made Skills usable from the Workbench, this release upgrades custom Skill creation from JSON import to a visual builder with validation and offline dry-run.

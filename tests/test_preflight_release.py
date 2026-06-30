@@ -50,6 +50,7 @@ def _skeleton(tmp_path: Path, version: str, *, release_exclusions: bool = True) 
     _write_skill_system_evidence(evidence_dir / f"skills-v{version}.json", version)
     _write_skill_ui_evidence(evidence_dir / f"skills-ui-v{version}.json", version)
     _write_skill_builder_evidence(evidence_dir / f"skill-builder-v{version}.json", version)
+    _write_skill_packs_evidence(evidence_dir / f"skill-packs-v{version}.json", version)
     (root / "evals").mkdir()
     (root / "evals" / "README.md").write_text(f"适用版本：v{version}。\n", encoding="utf-8")
     reports = root / "evals" / "reports"
@@ -320,6 +321,36 @@ def _write_skill_builder_evidence(path: Path, version: str, *, status: str = "PA
         "skillBuilderAssets": "PASS",
         "skillBuilderJsSyntax": "PASS",
         "ciSyntaxGate": "PASS",
+    }
+    if omit_check:
+        checks.pop(omit_check, None)
+    payload: dict[str, Any] = {
+        "version": version,
+        "commit": "abc1234",
+        "generatedAt": "2026-06-30T00:00:00Z",
+        "environment": {"os": "Linux", "python": "3.12", "ci": True},
+        "status": status,
+        "checks": checks,
+    }
+    if omit_metadata:
+        payload.pop(omit_metadata, None)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _write_skill_packs_evidence(path: Path, version: str, *, status: str = "PASS", omit_check: str = "", omit_metadata: str = "") -> None:
+    checks = {
+        "packSchemaValidation": "PASS",
+        "builtinPacksLoad": "PASS",
+        "packImport": "PASS",
+        "packExport": "PASS",
+        "skillIdConflictHandling": "PASS",
+        "toolPermissionDiff": "PASS",
+        "projectPackBinding": "PASS",
+        "packInstallDryRun": "PASS",
+        "packUiTab": "PASS",
+        "packJsSyntax": "PASS",
+        "ciSyntaxGate": "PASS",
+        "packAssets": "PASS",
     }
     if omit_check:
         checks.pop(omit_check, None)
@@ -872,6 +903,31 @@ def test_preflight_passes_on_skill_builder_evidence_complete(tmp_path: Path) -> 
     preflight = _load_preflight()
     root = _skeleton(tmp_path, "2.6.3")
     result = next(r for r in preflight.run_preflight(root, "2.6.3") if r.name == "skill_builder_evidence")
+    assert result.status == "pass"
+
+
+def test_preflight_fails_on_missing_skill_packs_evidence(tmp_path: Path) -> None:
+    preflight = _load_preflight()
+    root = _skeleton(tmp_path, "2.6.4")
+    (root / "docs" / "evidence" / "skill-packs-v2.6.4.json").unlink()
+    result = next(r for r in preflight.run_preflight(root, "2.6.4") if r.name == "skill_packs_evidence")
+    assert result.status == "fail"
+    assert "smoke_skill_packs.py" in result.detail
+
+
+def test_preflight_fails_on_skill_packs_missing_required_check(tmp_path: Path) -> None:
+    preflight = _load_preflight()
+    root = _skeleton(tmp_path, "2.6.4")
+    _write_skill_packs_evidence(root / "docs" / "evidence" / "skill-packs-v2.6.4.json", "2.6.4", omit_check="skillIdConflictHandling")
+    result = next(r for r in preflight.run_preflight(root, "2.6.4") if r.name == "skill_packs_evidence")
+    assert result.status == "fail"
+    assert "skillIdConflictHandling" in result.detail
+
+
+def test_preflight_passes_on_skill_packs_evidence_complete(tmp_path: Path) -> None:
+    preflight = _load_preflight()
+    root = _skeleton(tmp_path, "2.6.4")
+    result = next(r for r in preflight.run_preflight(root, "2.6.4") if r.name == "skill_packs_evidence")
     assert result.status == "pass"
 
 

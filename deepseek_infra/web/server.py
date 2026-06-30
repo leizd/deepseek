@@ -338,6 +338,14 @@ def _skills_route_deps() -> SkillsRouteDeps:
         import_skill_config=lambda config, overwrite=False: skill_registry.import_skill_config(config, overwrite=overwrite),
         export_skill_config=lambda skill_id: skill_registry.export_skill_config(skill_id),
         run_skill=lambda skill_id, input_data, **kwargs: run_skill(skill_id, input_data, **kwargs),
+        list_packs=lambda include_builtin=True: skill_registry.list_packs(include_builtin=include_builtin),
+        get_pack=lambda pack_id: skill_registry.get_pack(pack_id),
+        export_pack=lambda pack_id: skill_registry.export_pack(pack_id),
+        import_pack=lambda config, overwrite=False, on_conflict="error": skill_registry.import_pack(
+            config, overwrite=overwrite, on_conflict=on_conflict
+        ),
+        validate_pack=lambda config: skill_registry.validate_pack_manifest(config),
+        delete_pack=lambda pack_id: skill_registry.delete_pack(pack_id),
     )
 
 

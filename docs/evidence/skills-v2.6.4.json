@@ -1,7 +1,7 @@
 {
   "version": "2.6.4",
   "commit": "c21bbeb59403",
-  "generatedAt": "2026-06-30T05:50:15+00:00",
+  "generatedAt": "2026-06-30T05:48:47+00:00",
   "environment": {
     "os": "Windows",
     "python": "3.13.5",
@@ -45,37 +45,14 @@
       "suggestion": "Switch capability or add the tool to CAPABILITY_PROFILES['full']"
     },
     "skillRun": {
-      "skillRunId": "run-5b1341c2729c6b53",
-      "projectId": "proj-923d0f27f50f",
+      "skillRunId": "run-2fa8694ef8bc3dca",
+      "projectId": "proj-999443857b44",
       "artifactIds": [
-        "art-f3c768ac450b252f"
+        "art-6e96103357c4eb58"
       ],
       "savedItemIds": [
-        "saved-2358e3ad3ae2e9f8"
+        "saved-7a43f97679612a15"
       ]
-    },
-    "caseCount": 3,
-    "cases": [
-      {
-        "id": "builtin-pack",
-        "check": "builtinSkillsLoad",
-        "expectedMin": 6
-      },
-      {
-        "id": "permission-gate",
-        "check": "toolPermissionGate",
-        "skillId": "skill_code_review",
-        "deniedTool": "fetch_url"
-      },
-      {
-        "id": "project-artifact",
-        "check": "artifactPolicy",
-        "skillId": "skill_research_brief",
-        "input": {
-          "topic": "Skill eval smoke",
-          "depth": "quick"
-        }
-      }
-    ]
+    }
   }
 }

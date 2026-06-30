@@ -411,12 +411,13 @@ class SkillsSettings:
     enabled: bool = True
     skills_dir: Path = field(default_factory=lambda: ROOT / ".skills")
     builtin_skills_dir: Path = field(default_factory=lambda: ROOT / "skills" / "builtin")
+    builtin_packs_dir: Path = field(default_factory=lambda: ROOT / "skills" / "packs")
 
 
 @dataclass(frozen=True, slots=True)
 class Settings:
     root: Path = ROOT
-    app_version: str = "2.6.3"
+    app_version: str = "2.6.4"
     deepseek_url: str = "https://api.deepseek.com/chat/completions"
     tavily_url: str = "https://api.tavily.com/search"
     deepseek_timeout_seconds: int = 180
@@ -773,6 +774,10 @@ class Settings:
                 builtin_skills_dir=_env_path(
                     ("BUILTIN_SKILLS_DIR", "DEEPSEEK_BUILTIN_SKILLS_DIR"),
                     runtime_root / "skills" / "builtin",
+                ),
+                builtin_packs_dir=_env_path(
+                    ("BUILTIN_PACKS_DIR", "DEEPSEEK_BUILTIN_PACKS_DIR"),
+                    runtime_root / "skills" / "packs",
                 ),
             ),
         )
@@ -1153,6 +1158,7 @@ TAINT_MAX_SEGMENTS = settings.context_taint.max_segments
 SKILLS_ENABLED = settings.skills.enabled
 SKILLS_DIR = settings.skills.skills_dir
 BUILTIN_SKILLS_DIR = settings.skills.builtin_skills_dir
+BUILTIN_PACKS_DIR = settings.skills.builtin_packs_dir
 AUTH_TOKEN_FILE = settings.auth_token_file
 
 TEXT_EXTENSIONS = {

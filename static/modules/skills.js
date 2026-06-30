@@ -1,4 +1,4 @@
-/** Skill Workbench UI and Custom Skill Builder - v2.6.3 frontend integration. */
+/** Skill Workbench UI, Custom Skill Builder and Skill Packs - v2.6.4 frontend integration. */
 
 const SKILL_API = "/api/skills";
 const PROJECT_API = "/api/workspace/projects";
@@ -36,6 +36,7 @@ function defaultShowToast(message) {
 const state = {
   skills: [],
   projects: [],
+  packs: [],
   activeProjectId: "",
   search: "",
   runningSkillId: "",
@@ -61,6 +62,7 @@ export function initSkillWorkbench(options = {}) {
   bindEvents();
   loadSkills();
   loadProjects();
+  loadPacks();
 }
 
 export function renderProjectSkillBinding(projectId, container) {
@@ -114,6 +116,16 @@ function cacheElements() {
     "skillBuilderDryRunButton",
     "skillBuilderSaveRunButton",
     "skillBuilderSaveButton",
+    "skillPacksButton",
+    "skillPacksHost",
+    "skillPacksCloseButton",
+    "skillPacksSource",
+    "skillPacksHint",
+    "skillPackImportButton",
+    "skillPackImportInput",
+    "skillPackImportSummary",
+    "skillBuiltinPackList",
+    "skillCustomPackList",
     "skillBuiltinList",
     "skillCustomList",
     "skillRecentRunList",
@@ -146,6 +158,17 @@ function bindEvents() {
     renderSkillPanel();
   });
   els.skillNewButton?.addEventListener("click", () => openSkillBuilder({ mode: "create" }));
+  els.skillPacksButton?.addEventListener("click", openPacksHost);
+  els.skillPacksCloseButton?.addEventListener("click", closePacksHost);
+  els.skillPackImportButton?.addEventListener("click", () => {
+    if (els.skillPackImportInput) {
+      els.skillPackImportInput.value = "";
+      els.skillPackImportInput.click();
+    }
+  });
+  els.skillPackImportInput?.addEventListener("change", importPackFromFile);
+  els.skillBuiltinPackList?.addEventListener("click", onPackListClick);
+  els.skillCustomPackList?.addEventListener("click", onPackListClick);
   els.skillImportButton?.addEventListener("click", () => {
     if (els.skillImportInput) {
       els.skillImportInput.value = "";
@@ -186,8 +209,10 @@ function openSkillPanel() {
   if (!els.skillPanel) return;
   beforeOpenPanel();
   closeSkillRunHost();
+  closePacksHost();
   loadSkills();
   loadProjects();
+  loadPacks();
   els.skillPanel.classList.add("open");
   els.skillPanel.setAttribute("aria-hidden", "false");
   onPanelStateChange();
@@ -580,6 +605,7 @@ function defaultBuilderSkill() {
 function openSkillBuilder({ mode = "create", skill = null } = {}) {
   if (!els.skillBuilderHost) return;
   closeSkillRunHost();
+  closePacksHost();
   state.builder.mode = mode;
   state.builder.originalSkillId = mode === "edit" ? (skill?.skillId || "") : "";
   state.builder.saveAndRun = false;
@@ -1104,6 +1130,245 @@ async function deleteSkill(skillId) {
   }
 }
 
+// --- Skill Packs (v2.6.4) -----------------------------------------------------
+
+async function loadPacks() {
+  try {
+    const response = await apiFetch(SKILL_API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "list_packs" }),
+    });
+    const data = await parseJsonResponse(response);
+    state.packs = Array.isArray(data.packs) ? data.packs : [];
+    renderPacks();
+  } catch {
+    state.packs = [];
+  }
+}
+
+function renderPacks() {
+  if (!els.skillBuiltinPackList || !els.skillCustomPackList) return;
+  renderPackCards(els.skillBuiltinPackList, state.packs.filter((pack) => pack.builtin), "没有内置 Pack。");
+  renderPackCards(els.skillCustomPackList, state.packs.filter((pack) => !pack.builtin), "还没有自定义 Pack，可导入 .skillpack.json。");
+}
+
+function renderPackCards(host, packs, emptyText) {
+  host.replaceChildren();
+  if (!packs.length) {
+    const empty = document.createElement("p");
+    empty.className = "panel-empty";
+    empty.textContent = emptyText;
+    host.append(empty);
+    return;
+  }
+  for (const pack of packs) {
+    host.append(renderPackCard(pack));
+  }
+}
+
+function renderPackCard(pack) {
+  const card = document.createElement("article");
+  card.className = "skill-pack-card";
+  card.dataset.packId = pack.packId;
+
+  const body = document.createElement("div");
+  body.className = "skill-pack-card-body";
+  const title = document.createElement("h4");
+  title.textContent = pack.name || pack.packId;
+  const description = document.createElement("p");
+  description.textContent = pack.description || "";
+  body.append(title, description);
+
+  const skills = Array.isArray(pack.skills) ? pack.skills : [];
+  const skillList = document.createElement("ul");
+  skillList.className = "skill-pack-skills";
+  for (const entry of skills) {
+    const li = document.createElement("li");
+    li.textContent = entry.name || entry.skillId || "";
+    skillList.append(li);
+  }
+  body.append(skillList);
+
+  const tags = document.createElement("div");
+  tags.className = "skill-card-tags";
+  const typeTag = document.createElement("span");
+  typeTag.className = "skill-tag";
+  typeTag.textContent = pack.builtin ? "内置 Pack" : "自定义 Pack";
+  const countTag = document.createElement("span");
+  countTag.className = "skill-tag";
+  countTag.textContent = `${skills.length} 个 Skill`;
+  tags.append(typeTag, countTag);
+  body.append(tags);
+
+  const actions = document.createElement("div");
+  actions.className = "skill-card-actions";
+  const install = document.createElement("button");
+  install.type = "button";
+  install.className = "seek-primary-button";
+  install.dataset.packInstall = pack.packId;
+  install.textContent = "安装到项目";
+  actions.append(install);
+  const exportButton = document.createElement("button");
+  exportButton.type = "button";
+  exportButton.className = "secondary-button";
+  exportButton.dataset.packExport = pack.packId;
+  exportButton.textContent = "导出";
+  actions.append(exportButton);
+  if (!pack.builtin) {
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "danger-button";
+    remove.dataset.packDelete = pack.packId;
+    remove.textContent = "删除";
+    actions.append(remove);
+  }
+
+  card.append(body, actions);
+  return card;
+}
+
+function openPacksHost() {
+  if (!els.skillPacksHost) return;
+  closeSkillBuilder();
+  closeSkillRunHost();
+  els.skillPacksHost.hidden = false;
+  loadPacks();
+}
+
+function closePacksHost() {
+  if (els.skillPacksHost) els.skillPacksHost.hidden = true;
+}
+
+function onPackListClick(event) {
+  const target = event.target instanceof Element ? event.target : event.target?.parentElement;
+  const installButton = target?.closest("button[data-pack-install]");
+  if (installButton) {
+    installPack(installButton.dataset.packInstall);
+    return;
+  }
+  const exportButton = target?.closest("button[data-pack-export]");
+  if (exportButton) {
+    exportPack(exportButton.dataset.packExport);
+    return;
+  }
+  const deleteButton = target?.closest("button[data-pack-delete]");
+  if (deleteButton) {
+    deletePack(deleteButton.dataset.packDelete);
+  }
+}
+
+async function installPack(packId) {
+  const pack = state.packs.find((item) => item.packId === packId);
+  const projectId = getActiveProjectId();
+  if (!projectId) {
+    showToast("请先打开一个项目再安装 Pack。");
+    return;
+  }
+  try {
+    const response = await apiFetch(`${PROJECT_API}/${projectId}/skill-packs/${encodeURIComponent(packId)}/install`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    const data = await parseJsonResponse(response);
+    showToast(`已安装 Pack「${pack?.name || packId}」，启用 ${data.skills?.enabledSkills?.length || 0} 个 Skill。`);
+  } catch (error) {
+    showToast(`安装失败：${error.message || error}`);
+  }
+}
+
+async function exportPack(packId) {
+  try {
+    const response = await apiFetch(SKILL_API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "export_pack", packId }),
+    });
+    const data = await parseJsonResponse(response);
+    downloadTextFile(JSON.stringify(data.pack, null, 2), `${packId}.skillpack.json`, "application/json");
+  } catch (error) {
+    showToast(`导出失败：${error.message || error}`);
+  }
+}
+
+async function importPackFromFile(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const config = JSON.parse(text);
+    const response = await apiFetch(SKILL_API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "import_pack", pack: config, onConflict: "error" }),
+    });
+    const data = await parseJsonResponse(response);
+    showPackImportSummary(data);
+    await loadPacks();
+    await loadSkills();
+  } catch (error) {
+    showPackImportSummary({ ok: false, error: error.message || String(error) });
+  }
+}
+
+function showPackImportSummary(summary) {
+  if (!els.skillPackImportSummary) return;
+  els.skillPackImportSummary.replaceChildren();
+  els.skillPackImportSummary.hidden = false;
+  const box = document.createElement("div");
+  box.className = "skill-pack-summary";
+  if (summary.ok) {
+    const title = document.createElement("strong");
+    title.textContent = `导入 Pack：${summary.name || summary.packId || ""}`;
+    box.append(title);
+    const installed = document.createElement("p");
+    installed.textContent = `已安装 Skills：${(summary.installedSkills || []).join("、") || "无"}`;
+    box.append(installed);
+    if (summary.skippedSkills?.length) {
+      const skipped = document.createElement("p");
+      skipped.textContent = `跳过（已存在）：${summary.skippedSkills.join("、")}`;
+      box.append(skipped);
+    }
+    if (summary.unresolvedReferences?.length) {
+      const unresolved = document.createElement("p");
+      unresolved.className = "skill-pack-warning";
+      unresolved.textContent = `未解析引用：${summary.unresolvedReferences.join("、")}`;
+      box.append(unresolved);
+    }
+    const tools = (summary.toolPermissions || []).flatMap((item) => item.allowedTools || []);
+    const approvalTools = tools.filter((tool) => tool.requiresApproval).map((tool) => tool.tool);
+    if (approvalTools.length) {
+      const warn = document.createElement("p");
+      warn.className = "skill-pack-warning";
+      warn.textContent = `需要人工确认的工具：${approvalTools.join("、")}`;
+      box.append(warn);
+    }
+  } else {
+    const error = document.createElement("p");
+    error.className = "skill-pack-warning";
+    error.textContent = `导入失败：${summary.error || "未知错误"}`;
+    box.append(error);
+  }
+  els.skillPackImportSummary.append(box);
+}
+
+async function deletePack(packId) {
+  const pack = state.packs.find((item) => item.packId === packId);
+  if (!pack) return;
+  if (!window.confirm(`删除自定义 Pack「${pack.name || packId}」？（不会删除 Pack 内的 Skill。）`)) return;
+  try {
+    const response = await apiFetch(SKILL_API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "delete_pack", packId }),
+    });
+    await parseJsonResponse(response);
+    await loadPacks();
+  } catch (error) {
+    showToast(`删除失败：${error.message || error}`);
+  }
+}
+
 function renderRecentRuns() {
   if (!els.skillRecentRunList) return;
   els.skillRecentRunList.replaceChildren();
@@ -1191,6 +1456,15 @@ function renderProjectSkillBindingForm(projectId, binding, container) {
   });
 
   defaultSelect.addEventListener("change", () => saveProjectSkillBinding(projectId));
+
+  const enabledPacks = Array.isArray(binding.enabledPacks) ? binding.enabledPacks : [];
+  if (enabledPacks.length) {
+    const packs = document.createElement("p");
+    packs.className = "project-skill-recent";
+    packs.dataset.projectSkillBinding = "packs";
+    packs.textContent = `已安装 Packs：${enabledPacks.join("、")}`;
+    container.append(packs);
+  }
 
   if (binding.recentSkills?.length) {
     const recent = document.createElement("p");

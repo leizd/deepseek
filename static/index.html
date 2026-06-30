@@ -392,9 +392,11 @@
         <label class="sr-only" for="skillSearchInput">搜索 Skill</label>
         <input id="skillSearchInput" type="search" placeholder="搜索 Skill" autocomplete="off" />
         <button class="seek-primary-button" id="skillNewButton" type="button">New Skill</button>
+        <button class="secondary-button" id="skillPacksButton" type="button">Packs</button>
         <button class="secondary-button" id="skillImportButton" type="button">导入 JSON</button>
         <button class="secondary-button" id="skillExportAllButton" type="button">导出全部</button>
         <input id="skillImportInput" type="file" accept="application/json,.json" hidden />
+        <input id="skillPackImportInput" type="file" accept="application/json,.json" hidden />
       </div>
 
       <section class="skill-builder-host" id="skillBuilderHost" hidden>
@@ -513,6 +515,33 @@
             <button class="seek-save-button" id="skillBuilderSaveButton" type="submit">Save Skill</button>
           </div>
         </form>
+      </section>
+
+      <section class="skill-packs-host" id="skillPacksHost" hidden>
+        <div class="skill-packs-header">
+          <div>
+            <h3>Skill Packs</h3>
+            <p id="skillPacksSource">成套管理、导入、导出、安装和复用一组 Skills。</p>
+          </div>
+          <button class="icon-button panel-close-button" id="skillPacksCloseButton" type="button" aria-label="Close Skill Packs">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M18 6 6 18M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <div class="skill-packs-toolbar">
+          <button class="secondary-button" id="skillPackImportButton" type="button">导入 Pack</button>
+          <p class="skill-packs-hint" id="skillPacksHint">内置 Pack 引用已发布的 Skills；导出的 Pack 自包含完整 Skill 配置。仅支持本地导入。</p>
+        </div>
+        <div class="skill-pack-import-summary" id="skillPackImportSummary" hidden></div>
+        <section class="skill-section">
+          <h3>内置 Packs</h3>
+          <div class="skill-pack-list" id="skillBuiltinPackList"></div>
+        </section>
+        <section class="skill-section">
+          <h3>自定义 Packs</h3>
+          <div class="skill-pack-list" id="skillCustomPackList"></div>
+        </section>
       </section>
 
       <div class="skill-run-host" id="skillRunHost" hidden>
