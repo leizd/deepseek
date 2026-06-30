@@ -1,6 +1,6 @@
 # 安全说明
 
-适用版本：v2.6.1。
+适用版本：v2.6.2。
 
 ## 威胁模型
 
@@ -81,6 +81,8 @@ v1.8.0 新增的 `.request-queue/queue.sqlite3` 用于 API 网关韧性：云端
 v0.7.2 起 function calling 只开放固定白名单工具，模型不能自定义任意命令。`python_eval` 在隔离 Python 子进程中运行，只允许数学表达式 AST、受控函数、无导入、无文件和网络访问，并设置 2 秒超时；它适合做阶乘、组合数、简单数值检查，不是通用代码执行环境。
 
 `search_files` 只读取本地 `.local-rag`、`.file-cache` 和 `.projects` 索引。它不会扫描任意磁盘路径，也不会把文件原文发给第三方嵌入服务；检索结果仍然会随 DeepSeek 请求发送给模型，因此项目文档和附件应视为会进入本轮模型上下文。
+
+检索锚点：`fetch_url` 的 SSRF 防护会拦截内网或元数据地址，包括 `localhost`、`.local`、私有网段、回环地址、链路本地地址、保留地址、无法解析的 host，以及云元数据地址 `169.254.169.254`。这些规则由 Tool Policy 的静态 URL safety 与 `fetch_url` DNS 后校验共同执行。
 
 `fetch_url` 和 `POST /api/fetch-url` 用于搜索结果二次精读。后端只允许 `http` / `https`，会拒绝 `localhost`、`.local`、私有网段、回环地址、链路本地地址、保留地址和无法解析的 host，降低 SSRF 风险。读取上限为 2 MB，正文缓存写入 `.search-cache`。抓取到的网页内容依旧是不可信文本，可能包含 prompt injection。
 

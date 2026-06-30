@@ -26,6 +26,12 @@ import { setupServiceWorker } from "./settings.js";
 import { preferredSpeechVoice, speechChunks, speechTextFromMessage } from "./speech_text.js";
 import { readChatStream } from "./stream.js";
 import {
+  closeSkillWorkbench,
+  initSkillWorkbench,
+  isSkillPanelOpen,
+  renderProjectSkillBinding,
+} from "./skills.js";
+import {
   agentExecutionReport,
   agentNotesSnapshot,
   agentRunSummary,
@@ -355,6 +361,11 @@ const projectDocumentsTitle = document.querySelector("#projectDocumentsTitle");
 const projectDocumentList = document.querySelector("#projectDocumentList");
 const projectUploadButton = document.querySelector("#projectUploadButton");
 const projectUploadInput = document.querySelector("#projectUploadInput");
+const projectSkills = document.querySelector("#projectSkills");
+const projectSkillsBody = document.querySelector("#projectSkillsBody");
+const skillPanel = document.querySelector("#skillPanel");
+const skillButton = document.querySelector("#skillButton");
+const closeSkillPanelButton = document.querySelector("#closeSkillPanelButton");
 const closeSettingsButton = document.querySelector("#closeSettingsButton");
 const settingsPanel = document.querySelector("#settingsPanel");
 const seekPanel = document.querySelector("#seekPanel");
@@ -463,6 +474,27 @@ export function bootstrap() {
   startReminderPolling();
   renderHistoryList();
   renderSeekPanel();
+  initSkillWorkbench({
+    apiFetch,
+    showToast,
+    beforeOpenPanel: () => {
+      closeHistory();
+      closeSettings();
+      closeSeekPanel();
+      closeProjectPanel();
+      closeSearchPanel();
+      closeFilePreview();
+      closeMemoryPanel();
+      closeDiagnosticsPanel();
+      closeActivityPanel();
+    },
+    onPanelStateChange: syncBackdrop,
+  onProjectOpen: ({ projectId }) => {
+    if (projectId) setActiveProject(projectId);
+    openProjectPanel();
+  },
+  getActiveProjectId: () => state.activeProjectId,
+});
   render();
   renderOfflineMode();
   renderVoiceInputButton();
@@ -1189,6 +1221,7 @@ function hasClosablePanelOpen() {
       settingsPanel?.classList.contains("open") ||
       seekPanel?.classList.contains("open") ||
       projectPanel?.classList.contains("open") ||
+      isSkillPanelOpen() ||
       searchPanel?.classList.contains("open") ||
       filePreviewPanel?.classList.contains("open") ||
       memoryPanel?.classList.contains("open") ||
@@ -1229,6 +1262,15 @@ function commandPaletteItems() {
       label: "打开 Seek 助手",
       description: "切换或管理自定义 Seek",
       run: () => openSeekPanel(),
+    },
+    {
+      type: "command",
+      id: "open-skills",
+      label: "打开 Skill 工作台",
+      description: "浏览、运行和绑定 Skill",
+      run: () => {
+        document.querySelector("#skillButton")?.click();
+      },
     },
     {
       type: "command",
@@ -3079,6 +3121,12 @@ function renderProjectPanel() {
 
   const project = activeProject();
   projectDocuments.hidden = !project;
+  if (projectSkills) projectSkills.hidden = !project;
+  if (project && projectSkillsBody) {
+    renderProjectSkillBinding(project.id, projectSkillsBody);
+  } else if (projectSkillsBody) {
+    projectSkillsBody.replaceChildren();
+  }
   projectDocumentList.replaceChildren();
   if (!project) return;
   projectDocumentsTitle.textContent = `${project.name} · 文档库`;
@@ -8421,6 +8469,7 @@ function openHistory() {
   closeSettings();
   closeSeekPanel();
   closeProjectPanel();
+  closeSkillWorkbench();
   closeSearchPanel();
   closeFilePreview();
   closeMemoryPanel();
@@ -8456,6 +8505,7 @@ function openSettings() {
   closeMemoryPanel();
   closeDiagnosticsPanel();
   closeActivityPanel();
+  closeSkillWorkbench();
   settingsPanel.classList.add("open");
   settingsPanel.setAttribute("aria-hidden", "false");
   activateFocusTrap(settingsPanel);
@@ -8474,6 +8524,7 @@ function openSeekPanel() {
   closeHistory();
   closeSettings();
   closeProjectPanel();
+  closeSkillWorkbench();
   closeSearchPanel();
   closeFilePreview();
   closeMemoryPanel();
@@ -8499,6 +8550,7 @@ function openProjectPanel() {
   closeHistory();
   closeSettings();
   closeSeekPanel();
+  closeSkillWorkbench();
   closeSearchPanel();
   closeFilePreview();
   closeMemoryPanel();
@@ -11817,6 +11869,7 @@ function syncPanelTriggerStates() {
   setPanelTriggerState(activeSeekChip, seekPanel, seekPanel?.classList.contains("open"));
   setPanelTriggerState(projectButton, projectPanel, projectPanel?.classList.contains("open"));
   setPanelTriggerState(activeProjectChip, projectPanel, projectPanel?.classList.contains("open"));
+  setPanelTriggerState(skillButton, skillPanel, isSkillPanelOpen());
   document.querySelectorAll?.("button[data-activity-message]")?.forEach((button) => {
     button.setAttribute("aria-controls", activityPanel?.id || "");
     button.setAttribute(
@@ -11854,13 +11907,14 @@ function syncBackdrop() {
   const hasSettings = settingsPanel.classList.contains("open");
   const hasSeek = seekPanel?.classList.contains("open");
   const hasProject = projectPanel?.classList.contains("open");
+  const hasSkill = isSkillPanelOpen();
   const hasPreview = filePreviewPanel?.classList.contains("open") && !shouldUseSideFileReaderPanel();
   const hasMemory = memoryPanel?.classList.contains("open");
   const hasDiagnostics = diagnosticsPanel?.classList.contains("open");
   const hasSearch = searchPanel?.classList.contains("open");
   const hasActivity = activityPanel?.classList.contains("open") && !shouldUseSideActivityPanel();
   const hasLightbox = isImageLightboxOpen();
-  setBackdropVisible(Boolean(hasHistoryModal || hasSettings || hasSeek || hasProject || hasPreview || hasMemory || hasDiagnostics || hasSearch || hasActivity || hasLightbox));
+  setBackdropVisible(Boolean(hasHistoryModal || hasSettings || hasSeek || hasProject || hasSkill || hasPreview || hasMemory || hasDiagnostics || hasSearch || hasActivity || hasLightbox));
   syncPanelTriggerStates();
 }
 

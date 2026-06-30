@@ -301,6 +301,15 @@
           <span>项目空间</span>
         </button>
 
+        <button class="history-row-button" id="skillButton" type="button" aria-label="打开 Skill 工作台">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 2 2 7l10 5 10-5-10-5Z" />
+            <path d="M2 17l10 5 10-5" />
+            <path d="M2 12l10 5 10-5" />
+          </svg>
+          <span>Skill 工作台</span>
+        </button>
+
         <button class="history-row-button" id="exportChatButton" type="button" aria-label="导出当前对话">
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M12 3v12" />
@@ -357,6 +366,82 @@
         </div>
         <div class="projectDocumentList" id="projectDocumentList"></div>
       </div>
+      <div class="project-skills" id="projectSkills" hidden>
+        <div class="project-skills-header">
+          <strong>项目 Skill 绑定</strong>
+          <p>选择本项目默认启用的 Skill。</p>
+        </div>
+        <div class="project-skills-body" id="projectSkillsBody"></div>
+      </div>
+    </aside>
+
+    <aside class="skill-panel" id="skillPanel" aria-label="Skill 工作台" aria-hidden="true">
+      <div class="skill-panel-header">
+        <div>
+          <h2>Skill 工作台</h2>
+          <p>浏览内置 / 自定义 Skill，按 schema 运行并管理产物。</p>
+        </div>
+        <button class="icon-button panel-close-button" id="closeSkillPanelButton" type="button" aria-label="关闭 Skill 工作台">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M18 6 6 18M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+
+      <div class="skill-panel-toolbar">
+        <label class="sr-only" for="skillSearchInput">搜索 Skill</label>
+        <input id="skillSearchInput" type="search" placeholder="搜索 Skill" autocomplete="off" />
+        <button class="secondary-button" id="skillImportButton" type="button">导入 JSON</button>
+        <button class="secondary-button" id="skillExportAllButton" type="button">导出全部</button>
+        <input id="skillImportInput" type="file" accept="application/json,.json" hidden />
+      </div>
+
+      <div class="skill-run-host" id="skillRunHost" hidden>
+        <form class="skill-run-form" id="skillRunForm">
+          <h3 id="skillRunTitle">运行 Skill</h3>
+          <div id="skillRunFields"></div>
+          <div class="skill-run-meta">
+            <label>
+              <span>项目</span>
+              <select id="skillRunProjectSelect"></select>
+            </label>
+            <label>
+              <span>模式</span>
+              <select id="skillRunModeSelect">
+                <option value="offline">离线 smoke</option>
+                <option value="online">在线调用</option>
+              </select>
+            </label>
+          </div>
+          <div class="skill-run-actions">
+            <button class="secondary-button" id="skillRunCancelButton" type="button">取消</button>
+            <button class="seek-save-button" id="skillRunSubmitButton" type="submit">运行</button>
+          </div>
+        </form>
+        <div class="skill-run-result" id="skillRunResult" hidden>
+          <h4>运行结果</h4>
+          <div id="skillRunResultBody"></div>
+          <div class="skill-run-result-actions" id="skillRunResultActions" hidden>
+            <a class="secondary-button" id="skillRunSavedItemsLink" href="#">查看 Saved Items</a>
+            <a class="secondary-button" id="skillRunArtifactsLink" href="#">查看 Artifacts</a>
+          </div>
+        </div>
+      </div>
+
+      <section class="skill-section">
+        <h3>内置 Skills</h3>
+        <div class="skill-card-list" id="skillBuiltinList"></div>
+      </section>
+
+      <section class="skill-section">
+        <h3>自定义 Skills</h3>
+        <div class="skill-card-list" id="skillCustomList"></div>
+      </section>
+
+      <section class="skill-section">
+        <h3>最近运行</h3>
+        <div class="skill-run-list" id="skillRecentRunList"></div>
+      </section>
     </aside>
 
     <aside class="settings-panel" id="settingsPanel" aria-label="设置" aria-hidden="true">

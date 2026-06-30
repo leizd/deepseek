@@ -1,14 +1,14 @@
 {
   "schemaVersion": "offline-eval-suite.v1",
-  "version": "2.6.1",
-  "commit": "259c681",
-  "generatedAt": "2026-06-29T12:12:56Z",
+  "version": "2.6.2",
+  "commit": "3e801e4",
+  "generatedAt": "2026-06-30T01:36:08Z",
   "environment": {
     "os": "Windows",
     "python": "3.13.5",
     "ci": false
   },
-  "gitSha": "259c681",
+  "gitSha": "3e801e4",
   "gitDirty": true,
   "status": "PASS",
   "paths": {
@@ -26,10 +26,10 @@
     "recallAt5": 1.0,
     "mrr": 0.9167,
     "citationAccuracy": 0.8333,
-    "keywordCoverage": 1.0,
+    "keywordCoverage": 0.9167,
     "latency": {
-      "avgMs": 46.32,
-      "p95Ms": 49.04
+      "avgMs": 30.28,
+      "p95Ms": 31.91
     }
   },
   "toolPolicy": {
@@ -38,8 +38,8 @@
     "passRate": 1.0,
     "injectionDefensePassRate": 1.0,
     "latency": {
-      "avgMs": 0.04,
-      "p95Ms": 0.09
+      "avgMs": 0.03,
+      "p95Ms": 0.06
     }
   },
   "injection": {
@@ -71,8 +71,8 @@
       }
     },
     "latency": {
-      "avgMs": 0.04,
-      "p95Ms": 0.07
+      "avgMs": 0.03,
+      "p95Ms": 0.04
     }
   },
   "agent": {

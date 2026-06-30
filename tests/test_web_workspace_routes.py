@@ -5,6 +5,7 @@ import http.client
 import json
 import threading
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import deepseek_infra.web.server as server_module
@@ -70,6 +71,8 @@ def test_workspace_routes_are_registered() -> None:
         "/api/project-files",
         "/api/workspace/projects",
         "/api/workspace/projects/{project_id}",
+        "/api/workspace/projects/{project_id}/skills",
+        "/api/workspace/projects/{project_id}/skill-runs",
         "/api/workspace/projects/{project_id}/conversations",
         "/api/workspace/projects/{project_id}/saved-items",
         "/api/workspace/projects/{project_id}/saved-items/{saved_id}",
@@ -120,6 +123,52 @@ def test_workspace_exports_auth_enforced() -> None:
     payload = json.loads(data.decode("utf-8"))
     assert status == 401
     assert payload["code"] == ErrorCode.UNAUTHORIZED.value
+
+
+def test_workspace_project_skills_endpoints(tmp_settings: Path) -> None:
+    with _running_server() as server:
+        status, created_raw, _ = _request(
+            server,
+            "POST",
+            "/api/workspace/projects",
+            body=json.dumps({"name": "Skill Binding Project"}).encode("utf-8"),
+            headers=_auth_headers(),
+        )
+        assert status == 200
+        created = json.loads(created_raw.decode("utf-8"))
+        project_id = created["project"]["id"]
+
+        status, binding_raw, _ = _request(
+            server,
+            "GET",
+            f"/api/workspace/projects/{project_id}/skills",
+            headers=_auth_headers(),
+        )
+        assert status == 200
+        binding = json.loads(binding_raw.decode("utf-8"))
+        assert binding["skills"]["enabledSkills"] == []
+
+        status, updated_raw, _ = _request(
+            server,
+            "PATCH",
+            f"/api/workspace/projects/{project_id}/skills",
+            body=json.dumps({"enabledSkills": ["skill_study_tutor"], "defaultSkill": "skill_study_tutor"}).encode("utf-8"),
+            headers={**_auth_headers(), "Content-Type": "application/json"},
+        )
+        assert status == 200
+        updated = json.loads(updated_raw.decode("utf-8"))
+        assert updated["skills"]["enabledSkills"] == ["skill_study_tutor"]
+        assert updated["skills"]["defaultSkill"] == "skill_study_tutor"
+
+        status, runs_raw, _ = _request(
+            server,
+            "GET",
+            f"/api/workspace/projects/{project_id}/skill-runs",
+            headers=_auth_headers(),
+        )
+        assert status == 200
+        runs = json.loads(runs_raw.decode("utf-8"))
+        assert "skillRuns" in runs
 
 
 # --- legacy projects action API ---

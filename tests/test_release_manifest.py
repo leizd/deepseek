@@ -38,6 +38,7 @@ def test_build_manifest_has_required_fields(tmp_path: Path) -> None:
     assert manifest["qualityGates"]["agentEval"] == "PASS"
     assert manifest["qualityGates"]["workspaceCore"] == "PASS"
     assert manifest["qualityGates"]["skillSystem"] == "PASS"
+    assert manifest["qualityGates"]["skillWorkbench"] == "PASS"
     assert manifest["artifact"] == "deepseek-infra-2.2.9.zip"
     assert manifest["sha256"] == "deadbeef"
     assert manifest["bytes"] == len(b"zip-bytes")
@@ -46,8 +47,9 @@ def test_build_manifest_has_required_fields(tmp_path: Path) -> None:
     assert "docs/evidence/headless-mcp-bridge.json" in manifest["evidence"]
     assert "docs/evidence/a2a-third-party-peer.json" in manifest["evidence"]
     assert "docs/evidence/edge-router-smoke.json" in manifest["evidence"]
-    assert "docs/evidence/workspace-v2.6.1.json" in manifest["evidence"]
-    assert "docs/evidence/skills-v2.6.1.json" in manifest["evidence"]
+    assert "docs/evidence/workspace-v2.6.2.json" in manifest["evidence"]
+    assert "docs/evidence/skills-v2.6.2.json" in manifest["evidence"]
+    assert "docs/evidence/skills-ui-v2.6.2.json" in manifest["evidence"]
     assert "evals/reports/security-latest.json" in manifest["evidence"]
     assert "docs/EVIDENCE_INDEX.md" in manifest["evidence"]
 

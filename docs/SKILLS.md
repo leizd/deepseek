@@ -1,8 +1,8 @@
 # Skill System
 
-Applicable version: v2.6.1.
+Applicable version: v2.6.2.
 
-DeepSeek Infra v2.6.1 defines a Skill as:
+DeepSeek Infra v2.6.2 defines a Skill as:
 
 ```text
 Skill = Prompt + Tools + Input Schema + Output Schema + Memory Policy + Artifact Policy + Project Binding
@@ -81,15 +81,36 @@ Project Skill state is stored in `.projects/<projectId>/project.json`:
 
 Project export includes Skill bindings, Skill run history, saved Skill outputs, and Skill artifact metadata.
 
+## Skill Workbench UI
+
+v2.6.2 adds a local Skill Workbench in the main Web UI:
+
+- Open the `Skills` entry in the sidebar to browse built-in and custom Skills.
+- Use the workbench toolbar to search, import Skill JSON, export custom Skills, and enable or disable custom Skills.
+- Select `Run` on a Skill to open the Skill Run Panel. The panel maps `inputSchema.properties` into form controls, marks required fields, and submits `projectId`, `offline`, and `persist` parameters through the Skill Web API.
+- Open a project to manage `enabledSkills`, `defaultSkill`, and `recentSkills`. Skill runs submitted with a project id update project history and preserve Skill-produced saved items and artifacts.
+- After a run, the result preview displays output content, `skillRunId`, linked Saved Items, and linked Artifacts so the output is managed as Workspace data instead of only chat text.
+
+Frontend integration files:
+
+```text
+static/index.html
+static/modules/skills.js
+static/modules/chat.js
+static/styles.css
+```
+
 ## Evidence
 
 Run the local offline checks:
 
 ```bash
 python scripts/smoke_skills.py --offline
+python scripts/smoke_skills_ui.py --offline
 python evals/runners/run_skill_eval.py --strict
 ```
 
-The release evidence file is `docs/evidence/skills-v2.6.1.json`.
+The release evidence file is `docs/evidence/skills-v2.6.2.json`.
+The Skill Workbench UI evidence file is `docs/evidence/skills-ui-v2.6.2.json`.
 
 Required checks: `skillApiRoutes`, `builtinSkillsLoad`, `customSkillCreate`, `inputSchemaValidation`, `toolPermissionGate`, `artifactPolicy`, `projectBinding`, and `skillExport`.

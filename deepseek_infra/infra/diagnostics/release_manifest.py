@@ -44,8 +44,9 @@ DEFAULT_EVIDENCE_PATHS = (
     "docs/evidence/edge-router-smoke.json",
     "docs/evidence/continue-dev-mcp.json",
     "docs/evidence/openai-compatible-sdks.json",
-    "docs/evidence/workspace-v2.6.1.json",
-    "docs/evidence/skills-v2.6.1.json",
+    "docs/evidence/workspace-v2.6.2.json",
+    "docs/evidence/skills-v2.6.2.json",
+    "docs/evidence/skills-ui-v2.6.2.json",
     "evals/reports/latest.json",
     "evals/reports/agent-latest.json",
     "evals/reports/baseline-compare-latest.json",
@@ -62,6 +63,7 @@ DEFAULT_QUALITY_GATES = {
     "securityCorpus": "PASS",
     "workspaceCore": "PASS",
     "skillSystem": "PASS",
+    "skillWorkbench": "PASS",
 }
 
 

@@ -2,6 +2,24 @@
 
 本项目使用类似 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的分组方式维护变更记录。未发布内容记录在 `[Unreleased]`，正式发版时迁移到具体版本。
 
+## [2.6.2] - Skill Workbench UI
+
+**主题：Skill System 前端工作台。** 继 v2.6.1 补齐 Skill Web API 后，本版本把 Skill 能力接入本地 Web UI，支持内置 / 自定义 Skill 浏览、运行、项目绑定、运行结果预览与 Workspace 产物回链。
+
+### 新增
+
+- **Skill Workbench UI**：新增 Skill 列表、内置 Skill / 自定义 Skill 展示、启用 / 禁用、导入 / 导出入口。
+- **Skill Run Panel**：根据 `inputSchema` 生成运行表单，支持 projectId、model、offline、persist 等运行参数。
+- **Project Skill Binding**：项目页支持 enabledSkills、defaultSkill、recentSkills 展示与更新。
+- **Skill Artifact Preview**：Skill 运行结果回链到 Saved Items / Artifact Hub，并支持项目导出。
+- **Skill UI evidence**：新增 `scripts/smoke_skills_ui.py`、`docs/evidence/skills-ui-v2.6.2.json` 与 `skill_ui_evidence` / `skillWorkbench` release gate。
+
+### 变更
+
+- README 截图与 roadmap 加入 Skill Workbench。
+- `docs/SKILLS.md` 增加前端使用说明和 UI 操作流。
+- CI 将 `static/modules/skills.js` 纳入 `node --check`，release-readiness 生成 Workspace / Skill System / Skill UI 三类 evidence 后再跑 preflight。
+
 ## [2.6.1] - Skill API Integration Patch
 
 **主题：Skill System 收口补丁。** 补齐 Skill System 的 HTTP API 集成，把 2.6.0 已落地的 registry / runner / artifact / evidence 能力接到 Web 层，并同步发布证据。

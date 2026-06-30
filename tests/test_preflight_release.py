@@ -48,6 +48,7 @@ def _skeleton(tmp_path: Path, version: str, *, release_exclusions: bool = True) 
     _write_workspace_evidence(evidence_dir / f"workspace-v{version}.json", version)
     _write_semantic_cache_onnx_evidence(evidence_dir / f"semantic-cache-onnx-v{version}.json", version)
     _write_skill_system_evidence(evidence_dir / f"skills-v{version}.json", version)
+    _write_skill_ui_evidence(evidence_dir / f"skills-ui-v{version}.json", version)
     (root / "evals").mkdir()
     (root / "evals" / "README.md").write_text(f"适用版本：v{version}。\n", encoding="utf-8")
     reports = root / "evals" / "reports"
@@ -266,6 +267,35 @@ def _write_skill_system_evidence(path: Path, version: str, *, status: str = "PAS
         "version": version,
         "commit": "abc1234",
         "generatedAt": "2026-06-29T00:00:00Z",
+        "environment": {"os": "Linux", "python": "3.12", "ci": True},
+        "status": status,
+        "checks": checks,
+    }
+    if omit_metadata:
+        payload.pop(omit_metadata, None)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _write_skill_ui_evidence(path: Path, version: str, *, status: str = "PASS", omit_check: str = "", omit_metadata: str = "") -> None:
+    checks = {
+        "skillWorkbenchEntrypoint": "PASS",
+        "skillRunSchemaForm": "PASS",
+        "skillApiActions": "PASS",
+        "projectSkillBindingUi": "PASS",
+        "skillRunResultLinks": "PASS",
+        "skillPanelLifecycle": "PASS",
+        "skillPanelStyles": "PASS",
+        "skillAppShellCache": "PASS",
+        "skillUiAssets": "PASS",
+        "skillJsSyntax": "PASS",
+        "ciSyntaxGate": "PASS",
+    }
+    if omit_check:
+        checks.pop(omit_check, None)
+    payload: dict[str, Any] = {
+        "version": version,
+        "commit": "abc1234",
+        "generatedAt": "2026-06-30T00:00:00Z",
         "environment": {"os": "Linux", "python": "3.12", "ci": True},
         "status": status,
         "checks": checks,
@@ -504,12 +534,12 @@ def test_preflight_fails_on_edge_router_smoke_missing_metadata(tmp_path: Path) -
 
 def test_preflight_warns_on_stale_optional_evidence_version(tmp_path: Path) -> None:
     preflight = _load_preflight()
-    root = _skeleton(tmp_path, "2.6.1")
+    root = _skeleton(tmp_path, "2.6.2")
     _write_edge_router_evidence(root / "docs" / "evidence" / "edge-router-smoke.json", "2.6.0")
-    result = next(r for r in preflight.run_preflight(root, "2.6.1") if r.name == "edge_router_smoke_evidence")
+    result = next(r for r in preflight.run_preflight(root, "2.6.2") if r.name == "edge_router_smoke_evidence")
     assert result.status == "warn"
     assert "refresh this optional evidence" in result.detail
-    assert preflight.main(["--root", str(root), "--version", "2.6.1"]) == 0
+    assert preflight.main(["--root", str(root), "--version", "2.6.2"]) == 0
 
 
 def _skeleton_with_compat(tmp_path: Path, version: str, *, claude_status: str, cursor_status: str) -> Path:
@@ -716,51 +746,76 @@ def test_preflight_passes_on_openai_compatible_sdk_evidence_complete(tmp_path: P
 
 def test_preflight_fails_on_missing_workspace_core_evidence(tmp_path: Path) -> None:
     preflight = _load_preflight()
-    root = _skeleton(tmp_path, "2.6.1")
-    (root / "docs" / "evidence" / "workspace-v2.6.1.json").unlink()
-    result = next(r for r in preflight.run_preflight(root, "2.6.1") if r.name == "workspace_core_evidence")
+    root = _skeleton(tmp_path, "2.6.2")
+    (root / "docs" / "evidence" / "workspace-v2.6.2.json").unlink()
+    result = next(r for r in preflight.run_preflight(root, "2.6.2") if r.name == "workspace_core_evidence")
     assert result.status == "fail"
     assert "smoke_workspace.py" in result.detail
 
 
 def test_preflight_fails_on_workspace_core_missing_required_check(tmp_path: Path) -> None:
     preflight = _load_preflight()
-    root = _skeleton(tmp_path, "2.6.1")
-    _write_workspace_evidence(root / "docs" / "evidence" / "workspace-v2.6.1.json", "2.6.1", omit_check="projectExportZip")
-    result = next(r for r in preflight.run_preflight(root, "2.6.1") if r.name == "workspace_core_evidence")
+    root = _skeleton(tmp_path, "2.6.2")
+    _write_workspace_evidence(root / "docs" / "evidence" / "workspace-v2.6.2.json", "2.6.2", omit_check="projectExportZip")
+    result = next(r for r in preflight.run_preflight(root, "2.6.2") if r.name == "workspace_core_evidence")
     assert result.status == "fail"
     assert "projectExportZip" in result.detail
 
 
 def test_preflight_passes_on_workspace_core_evidence_complete(tmp_path: Path) -> None:
     preflight = _load_preflight()
-    root = _skeleton(tmp_path, "2.6.1")
-    result = next(r for r in preflight.run_preflight(root, "2.6.1") if r.name == "workspace_core_evidence")
+    root = _skeleton(tmp_path, "2.6.2")
+    result = next(r for r in preflight.run_preflight(root, "2.6.2") if r.name == "workspace_core_evidence")
     assert result.status == "pass"
 
 
 def test_preflight_fails_on_missing_skill_system_evidence(tmp_path: Path) -> None:
     preflight = _load_preflight()
-    root = _skeleton(tmp_path, "2.6.1")
-    (root / "docs" / "evidence" / "skills-v2.6.1.json").unlink()
-    result = next(r for r in preflight.run_preflight(root, "2.6.1") if r.name == "skill_system_evidence")
+    root = _skeleton(tmp_path, "2.6.2")
+    (root / "docs" / "evidence" / "skills-v2.6.2.json").unlink()
+    result = next(r for r in preflight.run_preflight(root, "2.6.2") if r.name == "skill_system_evidence")
     assert result.status == "fail"
     assert "smoke_skills.py" in result.detail
 
 
 def test_preflight_fails_on_skill_system_missing_required_check(tmp_path: Path) -> None:
     preflight = _load_preflight()
-    root = _skeleton(tmp_path, "2.6.1")
-    _write_skill_system_evidence(root / "docs" / "evidence" / "skills-v2.6.1.json", "2.6.1", omit_check="skillApiRoutes")
-    result = next(r for r in preflight.run_preflight(root, "2.6.1") if r.name == "skill_system_evidence")
+    root = _skeleton(tmp_path, "2.6.2")
+    _write_skill_system_evidence(root / "docs" / "evidence" / "skills-v2.6.2.json", "2.6.2", omit_check="skillApiRoutes")
+    result = next(r for r in preflight.run_preflight(root, "2.6.2") if r.name == "skill_system_evidence")
     assert result.status == "fail"
     assert "skillApiRoutes" in result.detail
 
 
 def test_preflight_passes_on_skill_system_evidence_complete(tmp_path: Path) -> None:
     preflight = _load_preflight()
-    root = _skeleton(tmp_path, "2.6.1")
-    result = next(r for r in preflight.run_preflight(root, "2.6.1") if r.name == "skill_system_evidence")
+    root = _skeleton(tmp_path, "2.6.2")
+    result = next(r for r in preflight.run_preflight(root, "2.6.2") if r.name == "skill_system_evidence")
+    assert result.status == "pass"
+
+
+def test_preflight_fails_on_missing_skill_ui_evidence(tmp_path: Path) -> None:
+    preflight = _load_preflight()
+    root = _skeleton(tmp_path, "2.6.2")
+    (root / "docs" / "evidence" / "skills-ui-v2.6.2.json").unlink()
+    result = next(r for r in preflight.run_preflight(root, "2.6.2") if r.name == "skill_ui_evidence")
+    assert result.status == "fail"
+    assert "smoke_skills_ui.py" in result.detail
+
+
+def test_preflight_fails_on_skill_ui_missing_required_check(tmp_path: Path) -> None:
+    preflight = _load_preflight()
+    root = _skeleton(tmp_path, "2.6.2")
+    _write_skill_ui_evidence(root / "docs" / "evidence" / "skills-ui-v2.6.2.json", "2.6.2", omit_check="skillRunSchemaForm")
+    result = next(r for r in preflight.run_preflight(root, "2.6.2") if r.name == "skill_ui_evidence")
+    assert result.status == "fail"
+    assert "skillRunSchemaForm" in result.detail
+
+
+def test_preflight_passes_on_skill_ui_evidence_complete(tmp_path: Path) -> None:
+    preflight = _load_preflight()
+    root = _skeleton(tmp_path, "2.6.2")
+    result = next(r for r in preflight.run_preflight(root, "2.6.2") if r.name == "skill_ui_evidence")
     assert result.status == "pass"
 
 
@@ -782,33 +837,33 @@ def _write_semantic_cache_onnx_evidence(path: Path, version: str, *, status: str
 
 def test_preflight_warns_on_missing_semantic_cache_onnx_evidence(tmp_path: Path) -> None:
     preflight = _load_preflight()
-    root = _skeleton(tmp_path, "2.6.1")
-    (root / "docs" / "evidence" / "semantic-cache-onnx-v2.6.1.json").unlink()
-    result = next(r for r in preflight.run_preflight(root, "2.6.1") if r.name == "semantic_cache_onnx_evidence")
+    root = _skeleton(tmp_path, "2.6.2")
+    (root / "docs" / "evidence" / "semantic-cache-onnx-v2.6.2.json").unlink()
+    result = next(r for r in preflight.run_preflight(root, "2.6.2") if r.name == "semantic_cache_onnx_evidence")
     assert result.status == "warn"
-    assert preflight.main(["--root", str(root), "--version", "2.6.1"]) == 0
+    assert preflight.main(["--root", str(root), "--version", "2.6.2"]) == 0
 
 
 def test_preflight_fails_on_semantic_cache_onnx_non_pass_status(tmp_path: Path) -> None:
     preflight = _load_preflight()
-    root = _skeleton(tmp_path, "2.6.1")
-    _write_semantic_cache_onnx_evidence(root / "docs" / "evidence" / "semantic-cache-onnx-v2.6.1.json", "2.6.1", status="FAIL")
-    result = next(r for r in preflight.run_preflight(root, "2.6.1") if r.name == "semantic_cache_onnx_evidence")
+    root = _skeleton(tmp_path, "2.6.2")
+    _write_semantic_cache_onnx_evidence(root / "docs" / "evidence" / "semantic-cache-onnx-v2.6.2.json", "2.6.2", status="FAIL")
+    result = next(r for r in preflight.run_preflight(root, "2.6.2") if r.name == "semantic_cache_onnx_evidence")
     assert result.status == "fail"
     assert "expected PASS" in result.detail
 
 
 def test_preflight_fails_on_semantic_cache_onnx_missing_metadata(tmp_path: Path) -> None:
     preflight = _load_preflight()
-    root = _skeleton(tmp_path, "2.6.1")
-    _write_semantic_cache_onnx_evidence(root / "docs" / "evidence" / "semantic-cache-onnx-v2.6.1.json", "2.6.1", omit_metadata="environment")
-    result = next(r for r in preflight.run_preflight(root, "2.6.1") if r.name == "evidence_metadata:semantic_cache_onnx")
+    root = _skeleton(tmp_path, "2.6.2")
+    _write_semantic_cache_onnx_evidence(root / "docs" / "evidence" / "semantic-cache-onnx-v2.6.2.json", "2.6.2", omit_metadata="environment")
+    result = next(r for r in preflight.run_preflight(root, "2.6.2") if r.name == "evidence_metadata:semantic_cache_onnx")
     assert result.status == "fail"
     assert "environment" in result.detail
 
 
 def test_preflight_passes_on_semantic_cache_onnx_evidence_complete(tmp_path: Path) -> None:
     preflight = _load_preflight()
-    root = _skeleton(tmp_path, "2.6.1")
-    result = next(r for r in preflight.run_preflight(root, "2.6.1") if r.name == "semantic_cache_onnx_evidence")
+    root = _skeleton(tmp_path, "2.6.2")
+    result = next(r for r in preflight.run_preflight(root, "2.6.2") if r.name == "semantic_cache_onnx_evidence")
     assert result.status == "pass"

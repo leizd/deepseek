@@ -48,6 +48,7 @@ const APP_SHELL = [
   "/modules/normalize.js",
   "/modules/settings.js",
   "/modules/panels.js",
+  "/modules/skills.js",
   "/modules/reminder_parse.js",
   "/modules/speech_text.js",
   "/modules/stream.js",

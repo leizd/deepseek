@@ -1,8 +1,8 @@
 {
   "schemaVersion": "offline-eval-compare.v1",
-  "version": "2.6.1",
-  "commit": "259c681",
-  "generatedAt": "2026-06-29T12:12:59Z",
+  "version": "2.6.2",
+  "commit": "3e801e4",
+  "generatedAt": "2026-06-30T01:36:17Z",
   "environment": {
     "os": "Windows",
     "python": "3.13.5",
@@ -14,8 +14,8 @@
     "gitSha": "v2.2.6-baseline"
   },
   "current": {
-    "version": "2.6.1",
-    "gitSha": "259c681"
+    "version": "2.6.2",
+    "gitSha": "3e801e4"
   },
   "checks": [
     {
