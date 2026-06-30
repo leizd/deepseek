@@ -2,6 +2,25 @@
 
 本项目使用类似 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的分组方式维护变更记录。未发布内容记录在 `[Unreleased]`，正式发版时迁移到具体版本。
 
+## [2.6.3] - Custom Skill Builder
+
+**Theme: Custom Skill authoring.** After v2.6.2 made Skills usable from the Workbench, this release upgrades custom Skill creation from JSON import to a visual builder with validation and offline dry-run.
+
+### Added
+
+- **Custom Skill Builder**: guided authoring for base metadata, systemPrompt, inputSchema, outputSchema, allowedTools, memoryPolicy, artifactPolicy, and projectBinding.
+- **Visual Schema Editor**: creates `inputSchema` fields for string, textarea, number, integer, enum, and boolean inputs.
+- **Tool Permission Picker**: selects `allowedTools` by capability and risk label, with server-side schema validation before save.
+- **Clone Built-in Skill**: clones built-in Skills into custom editable Skills.
+- **Preview / Validate / Dry Run**: previews final Skill JSON, validates the schema, and performs offline dry-run before save.
+- **Skill Builder Evidence**: adds `scripts/smoke_skill_builder.py` and `docs/evidence/skill-builder-v2.6.3.json` to release readiness.
+
+### Changed
+
+- Replaced the old custom Skill `window.prompt` edit flow with the full builder panel.
+- Added `validate` and `dry_run` actions to `POST /api/skills` for local authoring flows.
+- Expanded docs/SKILLS.md with Custom Skill Builder usage notes.
+
 ## [2.6.2] - Skill Workbench UI
 
 **主题：Skill System 前端工作台。** 继 v2.6.1 补齐 Skill Web API 后，本版本把 Skill 能力接入本地 Web UI，支持内置 / 自定义 Skill 浏览、运行、项目绑定、运行结果预览与 Workspace 产物回链。

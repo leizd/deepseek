@@ -178,3 +178,51 @@ def test_skill_run_path_executes_offline(tmp_settings: Path) -> None:
     assert status == 200
     assert payload["ok"] is True
     assert payload["skillId"] == "skill_research_brief"
+
+
+def test_skills_validate_and_dry_run_authoring_actions(tmp_settings: Path) -> None:
+    skill = _custom_skill()
+
+    with _running_server() as server:
+        status, validated, _ = _request(
+            server,
+            "POST",
+            "/api/skills",
+            payload={"action": "validate", "skill": skill},
+            headers=_auth_headers(),
+        )
+        assert status == 200
+        assert validated["ok"] is True
+        assert validated["skill"]["skillId"] == skill["skillId"]
+
+        status, dry_run, _ = _request(
+            server,
+            "POST",
+            "/api/skills",
+            payload={"action": "dry_run", "skill": skill, "input": {"topic": "builder"}},
+            headers=_auth_headers(),
+        )
+
+    assert status == 200
+    assert dry_run["ok"] is True
+    assert dry_run["dryRun"] is True
+    assert dry_run["skillRunId"] == "dry-run"
+    assert dry_run["policy"]["allowedTools"] == ["search_files"]
+    assert "builder" in dry_run["output"]["content"]
+
+
+def test_skills_validate_rejects_unknown_builder_tool(tmp_settings: Path) -> None:
+    skill = _custom_skill()
+    skill["allowedTools"] = ["unknown_builder_tool"]
+
+    with _running_server() as server:
+        status, payload, _ = _request(
+            server,
+            "POST",
+            "/api/skills",
+            payload={"action": "validate", "skill": skill},
+            headers=_auth_headers(),
+        )
+
+    assert status == 400
+    assert "unknown_builder_tool" in payload["error"]

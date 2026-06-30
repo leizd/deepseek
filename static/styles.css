@@ -6243,7 +6243,7 @@ body.file-reader-side-open.file-reader-pdf-open .file-original-region-toolbar .f
 
 .skill-panel-toolbar {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
   gap: 10px;
   margin-bottom: 16px;
 }
@@ -6266,6 +6266,249 @@ body.file-reader-side-open.file-reader-pdf-open .file-original-region-toolbar .f
   min-height: 42px;
   border-radius: 999px;
   padding: 0 14px;
+}
+
+.skill-builder-host {
+  margin: 0 0 20px;
+}
+
+.skill-builder-host[hidden] {
+  display: none;
+}
+
+.skill-builder-form {
+  display: grid;
+  gap: 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  background: var(--bg-sunken);
+  padding: 16px;
+}
+
+.skill-builder-header,
+.skill-builder-section-header,
+.skill-builder-preview-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.skill-builder-header h3,
+.skill-builder-section h4 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 16px;
+  font-weight: 760;
+}
+
+.skill-builder-header p,
+.skill-builder-section-header p {
+  margin: 4px 0 0;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.skill-builder-grid,
+.skill-builder-policy-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.skill-builder-policy-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.skill-builder-field,
+.skill-builder-field-row label {
+  display: grid;
+  gap: 7px;
+}
+
+.skill-builder-field span,
+.skill-builder-field-row span {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.skill-builder-field input,
+.skill-builder-field textarea,
+.skill-builder-field select,
+.skill-builder-field-row input,
+.skill-builder-field-row select {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border-default);
+  border-radius: 12px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  outline: none;
+}
+
+.skill-builder-field input,
+.skill-builder-field select,
+.skill-builder-field-row input,
+.skill-builder-field-row select {
+  min-height: 40px;
+  padding: 0 12px;
+}
+
+.skill-builder-field textarea {
+  min-height: 92px;
+  resize: vertical;
+  padding: 10px 12px;
+  line-height: 1.55;
+}
+
+.skill-builder-section,
+.skill-builder-field-row,
+.skill-builder-preview {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--bg-elevated);
+  padding: 12px;
+}
+
+.skill-builder-field-list {
+  display: grid;
+  gap: 10px;
+}
+
+.skill-builder-field-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 0.7fr 0.7fr;
+  gap: 10px;
+  align-items: end;
+}
+
+.skill-builder-field-grid.compact {
+  grid-template-columns: 1fr 1fr 0.65fr auto;
+}
+
+.skill-builder-field-row-description {
+  display: grid;
+}
+
+.skill-tool-picker {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.skill-tool-option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 54px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--bg-sunken);
+  padding: 9px 10px;
+}
+
+.skill-tool-option strong,
+.skill-tool-option small {
+  display: block;
+  min-width: 0;
+}
+
+.skill-tool-option strong {
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.skill-tool-option small {
+  margin-top: 2px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.skill-tool-option em,
+.skill-builder-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  color: var(--text-tertiary);
+  padding: 0 9px;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.skill-tool-option em[data-risk="safe"],
+.skill-tool-option em[data-risk="read-only"] {
+  color: var(--success);
+}
+
+.skill-tool-option em[data-risk="network"],
+.skill-tool-option em[data-risk="filesystem"],
+.skill-tool-option em[data-risk="requires approval"] {
+  color: var(--warning);
+}
+
+.skill-artifact-types {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.skill-builder-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.skill-builder-preview[hidden] {
+  display: none;
+}
+
+.skill-builder-preview pre {
+  max-height: 280px;
+  overflow: auto;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.skill-builder-error {
+  margin: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--bg-elevated);
+  padding: 10px 12px;
+  color: var(--danger);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.skill-builder-error[data-kind="ok"] {
+  color: var(--success);
+}
+
+.skill-builder-error[hidden] {
+  display: none;
+}
+
+.skill-builder-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .skill-run-host {
@@ -8707,7 +8950,12 @@ body.file-reader-side-open.file-reader-pdf-open .file-original-region-toolbar .f
   }
 
   .skill-card,
-  .skill-run-meta {
+  .skill-run-meta,
+  .skill-builder-grid,
+  .skill-builder-policy-grid,
+  .skill-builder-field-grid,
+  .skill-builder-field-grid.compact,
+  .skill-tool-picker {
     grid-template-columns: 1fr;
   }
 

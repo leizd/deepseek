@@ -1,8 +1,8 @@
 # Skill System
 
-Applicable version: v2.6.2.
+Applicable version: v2.6.3.
 
-DeepSeek Infra v2.6.2 defines a Skill as:
+DeepSeek Infra v2.6.3 defines a Skill as:
 
 ```text
 Skill = Prompt + Tools + Input Schema + Output Schema + Memory Policy + Artifact Policy + Project Binding
@@ -43,7 +43,7 @@ POST /api/skills
 POST /api/skills/{skill_id}/run
 ```
 
-Common actions: `list`, `builtin`, `get`, `create`, `update`, `disable`, `enable`, `delete`, `import`, `export`, `run`.
+Common actions: `list`, `builtin`, `get`, `create`, `update`, `disable`, `enable`, `delete`, `import`, `export`, `validate`, `dry_run`, `run`.
 
 ## Runner
 
@@ -83,7 +83,7 @@ Project export includes Skill bindings, Skill run history, saved Skill outputs, 
 
 ## Skill Workbench UI
 
-v2.6.2 adds a local Skill Workbench in the main Web UI:
+v2.6.3 adds a local Skill Workbench in the main Web UI:
 
 - Open the `Skills` entry in the sidebar to browse built-in and custom Skills.
 - Use the workbench toolbar to search, import Skill JSON, export custom Skills, and enable or disable custom Skills.
@@ -100,6 +100,25 @@ static/modules/chat.js
 static/styles.css
 ```
 
+## Custom Skill Builder
+
+v2.6.3 adds a Custom Skill Builder inside the Skill Workbench so users can author Skills without hand-writing JSON:
+
+- `New Skill` opens a guided builder for `skillId`, `name`, `description`, `version`, `systemPrompt`, policies, schema fields, and tools.
+- `Clone` on a built-in Skill creates a custom editable copy, preserving the source prompt, schemas, tool grants, memory policy, artifact policy, and project binding.
+- The visual schema editor supports `string`, `textarea`, `number`, `integer`, `enum`, and `boolean` fields. Each field can set key, title, description, required state, default, enum options, and max length.
+- The Tool Permission Picker exposes known local tools with risk labels such as `safe`, `read-only`, `filesystem`, `network`, and `requires approval`. Saving still runs through backend schema validation, and execution still narrows tools through Tool Policy.
+- `Preview JSON` shows the final Skill config, `Validate Schema` calls `POST /api/skills` with `action=validate`, and `Dry Run Offline` calls `action=dry_run` with generated sample input before the Skill is saved.
+- `Save Skill` creates or updates a custom Skill; `Save & Run` saves and immediately opens the existing run form.
+- Evidence screenshots are tracked at `docs/assets/skill-builder.png` and `docs/assets/skill-builder-dry-run.png`.
+
+The authoring API actions are intentionally local-only and do not download third-party Skills:
+
+```json
+{ "action": "validate", "skill": { "...": "..." } }
+{ "action": "dry_run", "skill": { "...": "..." }, "input": { "...": "..." } }
+```
+
 ## Evidence
 
 Run the local offline checks:
@@ -107,10 +126,12 @@ Run the local offline checks:
 ```bash
 python scripts/smoke_skills.py --offline
 python scripts/smoke_skills_ui.py --offline
+python scripts/smoke_skill_builder.py --offline
 python evals/runners/run_skill_eval.py --strict
 ```
 
-The release evidence file is `docs/evidence/skills-v2.6.2.json`.
-The Skill Workbench UI evidence file is `docs/evidence/skills-ui-v2.6.2.json`.
+The release evidence file is `docs/evidence/skills-v2.6.3.json`.
+The Skill Workbench UI evidence file is `docs/evidence/skills-ui-v2.6.3.json`.
+The Custom Skill Builder evidence file is `docs/evidence/skill-builder-v2.6.3.json`.
 
 Required checks: `skillApiRoutes`, `builtinSkillsLoad`, `customSkillCreate`, `inputSchemaValidation`, `toolPermissionGate`, `artifactPolicy`, `projectBinding`, and `skillExport`.

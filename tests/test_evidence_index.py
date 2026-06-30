@@ -32,20 +32,27 @@ def test_evidence_index_lists_gui_and_third_party_entries() -> None:
 
 def test_evidence_index_lists_workspace_core() -> None:
     index = Path("docs/EVIDENCE_INDEX.md").read_text(encoding="utf-8")
-    assert "docs/evidence/workspace-v2.6.2.json" in index
+    assert "docs/evidence/workspace-v2.6.3.json" in index
     assert "scripts/smoke_workspace.py" in index
     assert "Workspace Core" in index
 
 
 def test_evidence_index_lists_skill_system() -> None:
     index = Path("docs/EVIDENCE_INDEX.md").read_text(encoding="utf-8")
-    assert "docs/evidence/skills-v2.6.2.json" in index
+    assert "docs/evidence/skills-v2.6.3.json" in index
     assert "scripts/smoke_skills.py" in index
     assert "Skill System" in index
 
 
 def test_evidence_index_lists_skill_workbench_ui() -> None:
     index = Path("docs/EVIDENCE_INDEX.md").read_text(encoding="utf-8")
-    assert "docs/evidence/skills-ui-v2.6.2.json" in index
+    assert "docs/evidence/skills-ui-v2.6.3.json" in index
     assert "scripts/smoke_skills_ui.py" in index
     assert "Skill Workbench UI" in index
+
+
+def test_evidence_index_lists_skill_builder() -> None:
+    index = Path("docs/EVIDENCE_INDEX.md").read_text(encoding="utf-8")
+    assert "docs/evidence/skill-builder-v2.6.3.json" in index
+    assert "scripts/smoke_skill_builder.py" in index
+    assert "Skill Builder" in index

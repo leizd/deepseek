@@ -56,6 +56,10 @@ def build_stages(args: argparse.Namespace) -> list[tuple[str, list[str]]]:
         skills_ui_cmd = [_py(), str(REPO_ROOT / "scripts" / "smoke_skills_ui.py"), "--offline", "--out", args.skills_ui_out]
         stages.append(("skill_workbench_ui", skills_ui_cmd))
 
+    if not args.skip_skill_builder:
+        skill_builder_cmd = [_py(), str(REPO_ROOT / "scripts" / "smoke_skill_builder.py"), "--offline", "--out", args.skill_builder_out]
+        stages.append(("skill_builder", skill_builder_cmd))
+
     if not args.skip_evals:
         stages.append(
             (
@@ -186,6 +190,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--workspace-out", default=str(REPO_ROOT / "docs" / "evidence" / f"workspace-v{APP_VERSION}.json"))
     parser.add_argument("--skills-out", default=str(REPO_ROOT / "docs" / "evidence" / f"skills-v{APP_VERSION}.json"))
     parser.add_argument("--skills-ui-out", default=str(REPO_ROOT / "docs" / "evidence" / f"skills-ui-v{APP_VERSION}.json"))
+    parser.add_argument("--skill-builder-out", default=str(REPO_ROOT / "docs" / "evidence" / f"skill-builder-v{APP_VERSION}.json"))
     parser.add_argument("--skip-doctor", action="store_true")
     parser.add_argument("--skip-workspace", action="store_true")
     parser.add_argument("--skip-evals", action="store_true")
@@ -194,6 +199,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--skip-compare", action="store_true")
     parser.add_argument("--skip-skills", action="store_true")
     parser.add_argument("--skip-skills-ui", action="store_true")
+    parser.add_argument("--skip-skill-builder", action="store_true")
     parser.add_argument("--skip-mcp", action="store_true")
     parser.add_argument("--skip-a2a", action="store_true")
     parser.add_argument("--json", action="store_true", help="Emit a machine-readable JSON summary instead of running shells verbosely.")

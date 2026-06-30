@@ -1,7 +1,22 @@
-/** Skill Workbench UI — v2.6.2 frontend integration. */
+/** Skill Workbench UI and Custom Skill Builder - v2.6.3 frontend integration. */
 
 const SKILL_API = "/api/skills";
 const PROJECT_API = "/api/workspace/projects";
+const FIELD_TYPES = ["string", "textarea", "number", "integer", "enum", "boolean"];
+const ARTIFACT_TYPES = ["md", "docx", "pdf", "pptx"];
+const TOOL_OPTIONS = [
+  { id: "search_files", label: "File search", risk: "read-only", description: "Search cached project and local files." },
+  { id: "read_file_chunk", label: "Read file chunk", risk: "read-only", description: "Read bounded file snippets." },
+  { id: "list_project_files", label: "List project files", risk: "read-only", description: "Inspect project file inventory." },
+  { id: "web_search", label: "Web search", risk: "network", description: "Search the web through the approved tool runtime." },
+  { id: "fetch_url", label: "Read URL", risk: "network", description: "Fetch URL content with SSRF protections." },
+  { id: "create_document", label: "Create document", risk: "filesystem", description: "Generate document artifacts." },
+  { id: "create_pptx", label: "Create PPT", risk: "filesystem", description: "Generate slide deck artifacts." },
+  { id: "create_mindmap", label: "Create mindmap", risk: "filesystem", description: "Generate mindmap artifacts." },
+  { id: "python_eval", label: "Math sandbox", risk: "requires approval", description: "Run constrained Python/math snippets." },
+  { id: "recall_memory", label: "Recall memory", risk: "read-only", description: "Read memory context when policy allows it." },
+  { id: "suggest_memory", label: "Suggest memory", risk: "safe", description: "Suggest memory candidates without committing them." },
+];
 
 let apiFetch = globalApiFetch;
 let showToast = defaultShowToast;
@@ -25,6 +40,11 @@ const state = {
   search: "",
   runningSkillId: "",
   recentRuns: [],
+  builder: {
+    mode: "create",
+    originalSkillId: "",
+    saveAndRun: false,
+  },
 };
 
 const els = {};
@@ -61,9 +81,39 @@ function cacheElements() {
     "closeSkillPanelButton",
     "skillButton",
     "skillSearchInput",
+    "skillNewButton",
     "skillImportButton",
     "skillExportAllButton",
     "skillImportInput",
+    "skillBuilderHost",
+    "skillBuilderForm",
+    "skillBuilderTitle",
+    "skillBuilderSource",
+    "skillBuilderCloseButton",
+    "skillBuilderIdInput",
+    "skillBuilderNameInput",
+    "skillBuilderVersionInput",
+    "skillBuilderDescriptionInput",
+    "skillBuilderPromptInput",
+    "skillBuilderFieldList",
+    "skillBuilderAddFieldButton",
+    "skillBuilderOutputModeSelect",
+    "skillBuilderToolPicker",
+    "skillBuilderMemoryScopeSelect",
+    "skillBuilderMemoryReadInput",
+    "skillBuilderMemoryWriteInput",
+    "skillBuilderArtifactAutoSaveInput",
+    "skillBuilderArtifactTypes",
+    "skillBuilderProjectBindingInput",
+    "skillBuilderPreview",
+    "skillBuilderPreviewTitle",
+    "skillBuilderPreviewBody",
+    "skillBuilderError",
+    "skillBuilderPreviewButton",
+    "skillBuilderValidateButton",
+    "skillBuilderDryRunButton",
+    "skillBuilderSaveRunButton",
+    "skillBuilderSaveButton",
     "skillBuiltinList",
     "skillCustomList",
     "skillRecentRunList",
@@ -95,6 +145,7 @@ function bindEvents() {
     state.search = (els.skillSearchInput.value || "").trim().toLowerCase();
     renderSkillPanel();
   });
+  els.skillNewButton?.addEventListener("click", () => openSkillBuilder({ mode: "create" }));
   els.skillImportButton?.addEventListener("click", () => {
     if (els.skillImportInput) {
       els.skillImportInput.value = "";
@@ -105,6 +156,15 @@ function bindEvents() {
   els.skillExportAllButton?.addEventListener("click", exportAllCustomSkills);
   els.skillBuiltinList?.addEventListener("click", onSkillListClick);
   els.skillCustomList?.addEventListener("click", onSkillListClick);
+  els.skillBuilderCloseButton?.addEventListener("click", closeSkillBuilder);
+  els.skillBuilderAddFieldButton?.addEventListener("click", () => addBuilderField());
+  els.skillBuilderForm?.addEventListener("submit", onSkillBuilderSubmit);
+  els.skillBuilderPreviewButton?.addEventListener("click", previewBuilderConfig);
+  els.skillBuilderValidateButton?.addEventListener("click", validateBuilderConfig);
+  els.skillBuilderDryRunButton?.addEventListener("click", dryRunBuilderConfig);
+  els.skillBuilderSaveRunButton?.addEventListener("click", () => saveBuilderConfig({ runAfterSave: true }));
+  els.skillBuilderFieldList?.addEventListener("click", onBuilderFieldListClick);
+  els.skillBuilderFieldList?.addEventListener("change", onBuilderFieldListChange);
   els.skillRunCancelButton?.addEventListener("click", closeSkillRunHost);
   els.skillRunForm?.addEventListener("submit", onSkillRunSubmit);
   els.skillRunProjectSelect?.addEventListener("change", () => {
@@ -118,6 +178,8 @@ function bindEvents() {
     event.preventDefault();
     openProjectPath("artifacts", state.activeProjectId);
   });
+  renderBuilderToolPicker();
+  renderBuilderArtifactTypes();
 }
 
 function openSkillPanel() {
@@ -133,6 +195,7 @@ function openSkillPanel() {
 
 function closeSkillPanel() {
   if (!els.skillPanel) return;
+  closeSkillBuilder();
   els.skillPanel.classList.remove("open");
   els.skillPanel.setAttribute("aria-hidden", "true");
   onPanelStateChange();
@@ -140,6 +203,7 @@ function closeSkillPanel() {
 
 function openSkillRunHost(skill) {
   if (!els.skillRunHost || !skill) return;
+  closeSkillBuilder();
   els.skillRunHost.hidden = false;
   els.skillRunTitle.textContent = `运行 · ${skill.name || skill.skillId}`;
   els.skillRunTitle.dataset.skillId = skill.skillId;
@@ -423,6 +487,13 @@ function renderSkillCard(skill) {
   exportButton.textContent = "导出";
   actions.append(exportButton);
 
+  const clone = document.createElement("button");
+  clone.type = "button";
+  clone.className = "secondary-button";
+  clone.dataset.skillClone = skill.skillId;
+  clone.textContent = skill.builtin ? "克隆" : "复制";
+  actions.append(clone);
+
   if (!skill.builtin) {
     const edit = document.createElement("button");
     edit.type = "button";
@@ -461,6 +532,11 @@ function onSkillListClick(event) {
     exportSkill(exportButton.dataset.skillExport);
     return;
   }
+  const cloneButton = target?.closest("button[data-skill-clone]");
+  if (cloneButton) {
+    cloneSkill(cloneButton.dataset.skillClone);
+    return;
+  }
   const editButton = target?.closest("button[data-skill-edit]");
   if (editButton) {
     editSkill(editButton.dataset.skillEdit);
@@ -470,6 +546,459 @@ function onSkillListClick(event) {
   if (deleteButton) {
     deleteSkill(deleteButton.dataset.skillDelete);
   }
+}
+
+function defaultBuilderSkill() {
+  return {
+    skillId: `skill_custom_${Date.now().toString(36)}`,
+    name: "My Custom Skill",
+    description: "A reusable custom Skill.",
+    version: "1.0.0",
+    systemPrompt: "You are a focused Skill. Follow the input schema, use only allowed tools, and return concise markdown.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        topic: {
+          type: "string",
+          title: "Topic",
+          description: "What should this Skill work on?",
+          maxLength: 500,
+        },
+      },
+      required: ["topic"],
+      additionalProperties: false,
+    },
+    outputSchema: defaultOutputSchema("content"),
+    allowedTools: ["search_files"],
+    memoryPolicy: { scope: "project", read: true, write: false },
+    artifactPolicy: { autoSave: true, types: ["md"] },
+    projectBinding: { enabled: true },
+    exampleInputs: [{ topic: "Example topic" }],
+  };
+}
+
+function openSkillBuilder({ mode = "create", skill = null } = {}) {
+  if (!els.skillBuilderHost) return;
+  closeSkillRunHost();
+  state.builder.mode = mode;
+  state.builder.originalSkillId = mode === "edit" ? (skill?.skillId || "") : "";
+  state.builder.saveAndRun = false;
+  const source = skill ? cloneForBuilder(skill, mode) : defaultBuilderSkill();
+  populateBuilderForm(source, mode);
+  els.skillBuilderHost.hidden = false;
+  els.skillBuilderHost.scrollIntoView({ block: "start", behavior: "smooth" });
+}
+
+function cloneForBuilder(skill, mode) {
+  const clone = JSON.parse(JSON.stringify(skill || defaultBuilderSkill()));
+  delete clone.builtin;
+  delete clone.createdAt;
+  delete clone.updatedAt;
+  delete clone.disabled;
+  if (mode === "clone") {
+    clone.skillId = nextCloneSkillId(clone.skillId || "skill_custom");
+    clone.name = `${clone.name || "Custom Skill"} Copy`;
+    clone.description = clone.description || "Cloned custom Skill.";
+  }
+  return clone;
+}
+
+function nextCloneSkillId(skillId) {
+  const base = String(skillId || "skill_custom").replace(/[^A-Za-z0-9_:-]/g, "_").slice(0, 60);
+  const candidate = `${base}_custom`;
+  if (!state.skills.some((item) => item.skillId === candidate)) return candidate;
+  return `${base}_${Date.now().toString(36)}`.slice(0, 80);
+}
+
+function populateBuilderForm(skill, mode) {
+  if (!els.skillBuilderForm) return;
+  const title = mode === "edit" ? "Edit Custom Skill" : mode === "clone" ? "Clone as Custom Skill" : "New Custom Skill";
+  els.skillBuilderTitle.textContent = title;
+  els.skillBuilderSource.textContent =
+    mode === "clone"
+      ? "Start from a built-in Skill, then change schema, tools and policies before saving as custom."
+      : "Create a reusable Skill from prompt, schema, tools and workspace policy.";
+  els.skillBuilderIdInput.value = skill.skillId || "";
+  els.skillBuilderIdInput.readOnly = mode === "edit";
+  els.skillBuilderNameInput.value = skill.name || "";
+  els.skillBuilderVersionInput.value = skill.version || "1.0.0";
+  els.skillBuilderDescriptionInput.value = skill.description || "";
+  els.skillBuilderPromptInput.value = skill.systemPrompt || "";
+  els.skillBuilderOutputModeSelect.value = outputModeFromSchema(skill.outputSchema || {});
+  els.skillBuilderMemoryScopeSelect.value = skill.memoryPolicy?.scope || "none";
+  els.skillBuilderMemoryReadInput.checked = Boolean(skill.memoryPolicy?.read);
+  els.skillBuilderMemoryWriteInput.checked = Boolean(skill.memoryPolicy?.write);
+  els.skillBuilderArtifactAutoSaveInput.checked = Boolean(skill.artifactPolicy?.autoSave);
+  els.skillBuilderProjectBindingInput.checked = Boolean(skill.projectBinding?.enabled);
+  setCheckedValues("builder-tool", skill.allowedTools || []);
+  setCheckedValues("builder-artifact", skill.artifactPolicy?.types || []);
+  renderBuilderFields(skill.inputSchema || {});
+  hideBuilderMessage();
+  hideBuilderPreview();
+}
+
+function closeSkillBuilder() {
+  if (els.skillBuilderHost) els.skillBuilderHost.hidden = true;
+  hideBuilderMessage();
+}
+
+function renderBuilderToolPicker() {
+  if (!els.skillBuilderToolPicker) return;
+  els.skillBuilderToolPicker.replaceChildren();
+  for (const tool of TOOL_OPTIONS) {
+    const label = document.createElement("label");
+    label.className = "skill-tool-option";
+    label.innerHTML = `
+      <input type="checkbox" data-builder-tool value="${tool.id}" />
+      <span>
+        <strong>${tool.label}</strong>
+        <small>${tool.description}</small>
+      </span>
+      <em data-risk="${tool.risk}">${tool.risk}</em>
+    `;
+    els.skillBuilderToolPicker.append(label);
+  }
+}
+
+function renderBuilderArtifactTypes() {
+  if (!els.skillBuilderArtifactTypes) return;
+  els.skillBuilderArtifactTypes.replaceChildren();
+  for (const type of ARTIFACT_TYPES) {
+    const label = document.createElement("label");
+    label.className = "skill-builder-chip";
+    label.innerHTML = `<input type="checkbox" data-builder-artifact value="${type}" /> ${type}`;
+    els.skillBuilderArtifactTypes.append(label);
+  }
+}
+
+function setCheckedValues(kind, values) {
+  const selected = new Set(values || []);
+  const selector = kind === "builder-tool" ? "[data-builder-tool]" : "[data-builder-artifact]";
+  for (const input of els.skillBuilderHost?.querySelectorAll(selector) || []) {
+    input.checked = selected.has(input.value);
+  }
+}
+
+function renderBuilderFields(schema) {
+  if (!els.skillBuilderFieldList) return;
+  els.skillBuilderFieldList.replaceChildren();
+  const properties = schema.properties || {};
+  const required = new Set(schema.required || []);
+  for (const [key, prop] of Object.entries(properties)) {
+    addBuilderField({
+      key,
+      title: prop.title || key,
+      description: prop.description || "",
+      type: fieldTypeFromSchema(prop),
+      required: required.has(key),
+      defaultValue: prop.default ?? "",
+      enumOptions: Array.isArray(prop.enum) ? prop.enum.join(", ") : "",
+      maxLength: prop.maxLength || "",
+    });
+  }
+  if (!Object.keys(properties).length) addBuilderField();
+}
+
+function addBuilderField(field = {}) {
+  if (!els.skillBuilderFieldList) return;
+  const row = document.createElement("article");
+  row.className = "skill-builder-field-row";
+  row.dataset.builderFieldRow = "true";
+  row.innerHTML = `
+    <div class="skill-builder-field-grid">
+      <label><span>Key</span><input data-builder-field-key type="text" placeholder="topic" /></label>
+      <label><span>Title</span><input data-builder-field-title type="text" placeholder="Topic" /></label>
+      <label><span>Type</span><select data-builder-field-type></select></label>
+      <label><span>Required</span><select data-builder-field-required><option value="true">required</option><option value="false">optional</option></select></label>
+    </div>
+    <label class="skill-builder-field-row-description"><span>Description</span><input data-builder-field-description type="text" placeholder="Help text shown in run form" /></label>
+    <div class="skill-builder-field-grid compact">
+      <label><span>Default</span><input data-builder-field-default type="text" /></label>
+      <label data-builder-enum-wrap><span>Enum options</span><input data-builder-field-enum type="text" placeholder="quick, standard, deep" /></label>
+      <label><span>Max length</span><input data-builder-field-max type="number" min="1" step="1" /></label>
+      <button class="danger-button" data-builder-field-remove type="button">Remove</button>
+    </div>
+  `;
+  const typeSelect = row.querySelector("[data-builder-field-type]");
+  for (const type of FIELD_TYPES) {
+    const option = document.createElement("option");
+    option.value = type;
+    option.textContent = type;
+    typeSelect.append(option);
+  }
+  row.querySelector("[data-builder-field-key]").value = field.key || "";
+  row.querySelector("[data-builder-field-title]").value = field.title || "";
+  row.querySelector("[data-builder-field-type]").value = field.type || "string";
+  row.querySelector("[data-builder-field-required]").value = field.required === false ? "false" : "true";
+  row.querySelector("[data-builder-field-description]").value = field.description || "";
+  row.querySelector("[data-builder-field-default]").value = field.defaultValue ?? "";
+  row.querySelector("[data-builder-field-enum]").value = field.enumOptions || "";
+  row.querySelector("[data-builder-field-max]").value = field.maxLength || "";
+  updateBuilderFieldRow(row);
+  els.skillBuilderFieldList.append(row);
+}
+
+function onBuilderFieldListClick(event) {
+  const target = event.target instanceof Element ? event.target : event.target?.parentElement;
+  const remove = target?.closest("[data-builder-field-remove]");
+  if (!remove) return;
+  remove.closest("[data-builder-field-row]")?.remove();
+  if (!els.skillBuilderFieldList?.querySelector("[data-builder-field-row]")) addBuilderField();
+}
+
+function onBuilderFieldListChange(event) {
+  const target = event.target instanceof Element ? event.target : null;
+  const row = target?.closest("[data-builder-field-row]");
+  if (row) updateBuilderFieldRow(row);
+}
+
+function updateBuilderFieldRow(row) {
+  const type = row.querySelector("[data-builder-field-type]")?.value || "string";
+  const enumWrap = row.querySelector("[data-builder-enum-wrap]");
+  if (enumWrap) enumWrap.hidden = type !== "enum";
+}
+
+function fieldTypeFromSchema(prop) {
+  if (Array.isArray(prop.enum)) return "enum";
+  if (prop.type === "string" && Number(prop.maxLength || 0) > 120) return "textarea";
+  if (FIELD_TYPES.includes(prop.type)) return prop.type;
+  return "string";
+}
+
+function outputModeFromSchema(schema) {
+  return schema.properties?.title ? "title_content" : "content";
+}
+
+function defaultOutputSchema(mode) {
+  const properties = {
+    content: { type: "string" },
+    mode: { type: "string" },
+  };
+  const required = ["content"];
+  if (mode === "title_content") {
+    properties.title = { type: "string" };
+    required.unshift("title");
+  }
+  return { type: "object", properties, required, additionalProperties: true };
+}
+
+function buildSkillConfigFromBuilder() {
+  const skillId = (els.skillBuilderIdInput?.value || "").trim();
+  const fields = collectBuilderFields();
+  return {
+    skillId,
+    name: (els.skillBuilderNameInput?.value || "").trim(),
+    description: (els.skillBuilderDescriptionInput?.value || "").trim(),
+    version: (els.skillBuilderVersionInput?.value || "1.0.0").trim(),
+    systemPrompt: (els.skillBuilderPromptInput?.value || "").trim(),
+    inputSchema: buildInputSchema(fields),
+    outputSchema: defaultOutputSchema(els.skillBuilderOutputModeSelect?.value || "content"),
+    allowedTools: selectedBuilderValues("[data-builder-tool]"),
+    memoryPolicy: {
+      scope: els.skillBuilderMemoryScopeSelect?.value || "none",
+      read: Boolean(els.skillBuilderMemoryReadInput?.checked),
+      write: Boolean(els.skillBuilderMemoryWriteInput?.checked),
+    },
+    artifactPolicy: {
+      autoSave: Boolean(els.skillBuilderArtifactAutoSaveInput?.checked),
+      types: selectedBuilderValues("[data-builder-artifact]"),
+    },
+    projectBinding: { enabled: Boolean(els.skillBuilderProjectBindingInput?.checked) },
+    exampleInputs: [sampleInputFromFields(fields)],
+  };
+}
+
+function collectBuilderFields() {
+  const fields = [];
+  for (const row of els.skillBuilderFieldList?.querySelectorAll("[data-builder-field-row]") || []) {
+    const key = (row.querySelector("[data-builder-field-key]")?.value || "").trim();
+    if (!key) continue;
+    const type = row.querySelector("[data-builder-field-type]")?.value || "string";
+    fields.push({
+      key,
+      title: (row.querySelector("[data-builder-field-title]")?.value || key).trim(),
+      description: (row.querySelector("[data-builder-field-description]")?.value || "").trim(),
+      type,
+      required: row.querySelector("[data-builder-field-required]")?.value !== "false",
+      defaultValue: row.querySelector("[data-builder-field-default]")?.value ?? "",
+      enumOptions: (row.querySelector("[data-builder-field-enum]")?.value || "").split(",").map((item) => item.trim()).filter(Boolean),
+      maxLength: Number(row.querySelector("[data-builder-field-max]")?.value || 0),
+    });
+  }
+  return fields;
+}
+
+function buildInputSchema(fields) {
+  const properties = {};
+  const required = [];
+  for (const field of fields) {
+    const prop = builderFieldToSchema(field);
+    properties[field.key] = prop;
+    if (field.required) required.push(field.key);
+  }
+  return { type: "object", properties, required, additionalProperties: false };
+}
+
+function builderFieldToSchema(field) {
+  const prop = {
+    type: field.type === "textarea" || field.type === "enum" ? "string" : field.type,
+    title: field.title || field.key,
+  };
+  if (field.description) prop.description = field.description;
+  if (field.type === "enum") prop.enum = field.enumOptions.length ? field.enumOptions : ["option"];
+  if (field.type === "textarea") prop.maxLength = field.maxLength || 2000;
+  if (field.maxLength && (field.type === "string" || field.type === "textarea")) prop.maxLength = field.maxLength;
+  const defaultValue = parseBuilderDefault(field);
+  if (defaultValue !== undefined) prop.default = defaultValue;
+  return prop;
+}
+
+function parseBuilderDefault(field) {
+  const value = field.defaultValue;
+  if (value === "") return undefined;
+  if (field.type === "number") return Number(value);
+  if (field.type === "integer") return parseInt(value, 10);
+  if (field.type === "boolean") return value === "true" || value === "1" || value.toLowerCase() === "yes";
+  return value;
+}
+
+function selectedBuilderValues(selector) {
+  return Array.from(els.skillBuilderHost?.querySelectorAll(selector) || [])
+    .filter((input) => input.checked)
+    .map((input) => input.value);
+}
+
+function sampleInputFromFields(fields) {
+  const input = {};
+  for (const field of fields) {
+    if (!field.required && field.defaultValue === "") continue;
+    const defaultValue = parseBuilderDefault(field);
+    if (defaultValue !== undefined) {
+      input[field.key] = defaultValue;
+    } else if (field.type === "boolean") {
+      input[field.key] = true;
+    } else if (field.type === "number") {
+      input[field.key] = 1.5;
+    } else if (field.type === "integer") {
+      input[field.key] = 1;
+    } else if (field.type === "enum") {
+      input[field.key] = field.enumOptions[0] || "option";
+    } else {
+      input[field.key] = `Sample ${field.title || field.key}`;
+    }
+  }
+  return input;
+}
+
+function previewBuilderConfig() {
+  try {
+    const config = buildSkillConfigFromBuilder();
+    showBuilderPreview("Skill JSON Preview", config);
+    setBuilderMessage("Preview generated locally.", "ok");
+  } catch (error) {
+    setBuilderMessage(error.message || String(error), "error");
+  }
+}
+
+async function validateBuilderConfig() {
+  const config = buildSkillConfigFromBuilder();
+  try {
+    const response = await apiFetch(SKILL_API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "validate", skill: config }),
+    });
+    const data = await parseJsonResponse(response);
+    showBuilderPreview("Validated Skill JSON", data.skill || config);
+    setBuilderMessage("Schema validation passed.", "ok");
+    return data.skill || config;
+  } catch (error) {
+    setBuilderMessage(`Validation failed: ${error.message || error}`, "error");
+    throw error;
+  }
+}
+
+async function dryRunBuilderConfig() {
+  const config = await validateBuilderConfig();
+  const input = sampleInputFromFields(collectBuilderFields());
+  try {
+    const response = await apiFetch(SKILL_API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "dry_run", skill: config, input, offline: true, persist: false }),
+    });
+    const data = await parseJsonResponse(response);
+    showBuilderPreview("Dry Run Offline Result", { input, output: data.output, policy: data.policy });
+    setBuilderMessage("Offline dry-run passed.", "ok");
+  } catch (error) {
+    setBuilderMessage(`Dry run failed: ${error.message || error}`, "error");
+  }
+}
+
+async function onSkillBuilderSubmit(event) {
+  event.preventDefault();
+  await saveBuilderConfig({ runAfterSave: false });
+}
+
+async function saveBuilderConfig({ runAfterSave = false } = {}) {
+  const config = buildSkillConfigFromBuilder();
+  const mode = state.builder.mode;
+  const action = mode === "edit" ? "update" : "create";
+  const payload = action === "update"
+    ? { action, skillId: state.builder.originalSkillId || config.skillId, patch: config }
+    : { action, skill: config, overwrite: false };
+  try {
+    const response = await apiFetch(SKILL_API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await parseJsonResponse(response);
+    await loadSkills();
+    const saved = data.skill || config;
+    setBuilderMessage(`Saved ${saved.name || saved.skillId}.`, "ok");
+    if (runAfterSave) {
+      closeSkillBuilder();
+      openSkillRunHost(saved);
+    }
+  } catch (error) {
+    setBuilderMessage(`Save failed: ${error.message || error}`, "error");
+  }
+}
+
+function showBuilderPreview(title, payload) {
+  if (!els.skillBuilderPreview || !els.skillBuilderPreviewBody) return;
+  els.skillBuilderPreview.hidden = false;
+  if (els.skillBuilderPreviewTitle) els.skillBuilderPreviewTitle.textContent = title;
+  els.skillBuilderPreviewBody.textContent = `${JSON.stringify(payload, null, 2)}\n`;
+}
+
+function hideBuilderPreview() {
+  if (els.skillBuilderPreview) els.skillBuilderPreview.hidden = true;
+  if (els.skillBuilderPreviewBody) els.skillBuilderPreviewBody.textContent = "";
+}
+
+function setBuilderMessage(message, kind = "error") {
+  if (!els.skillBuilderError) return;
+  els.skillBuilderError.hidden = false;
+  els.skillBuilderError.dataset.kind = kind;
+  els.skillBuilderError.textContent = message;
+}
+
+function hideBuilderMessage() {
+  if (!els.skillBuilderError) return;
+  els.skillBuilderError.hidden = true;
+  els.skillBuilderError.textContent = "";
+}
+
+function cloneSkill(skillId) {
+  const skill = state.skills.find((item) => item.skillId === skillId);
+  if (skill) openSkillBuilder({ mode: "clone", skill });
+}
+
+function editSkill(skillId) {
+  const skill = state.skills.find((item) => item.skillId === skillId);
+  if (skill) openSkillBuilder({ mode: "edit", skill });
 }
 
 async function toggleSkill(skillId) {
@@ -556,24 +1085,6 @@ async function importSkillFromFile(event) {
   } finally {
     if (els.skillImportInput) els.skillImportInput.value = "";
   }
-}
-
-function editSkill(skillId) {
-  const skill = state.skills.find((item) => item.skillId === skillId);
-  if (!skill) return;
-  const updatedName = window.prompt("Skill 名称", skill.name || "");
-  if (updatedName === null) return;
-  const updatedDescription = window.prompt("Skill 简介", skill.description || "");
-  if (updatedDescription === null) return;
-  const patch = { name: updatedName, description: updatedDescription };
-  apiFetch(SKILL_API, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action: "update", skillId, patch }),
-  })
-    .then(parseJsonResponse)
-    .then(() => loadSkills())
-    .catch((error) => showToast(`更新失败：${error.message || error}`));
 }
 
 async function deleteSkill(skillId) {

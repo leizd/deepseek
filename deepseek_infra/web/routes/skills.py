@@ -10,6 +10,10 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from deepseek_infra.core.errors import AppError, ErrorCode
+from deepseek_infra.core.utils import utc_now_iso
+from deepseek_infra.infra.skills.permissions import skill_allowed_tools
+from deepseek_infra.infra.skills.schema import SkillSchemaError, validate_instance, validate_skill_config
+from deepseek_infra.infra.skills.templates import offline_skill_content
 from deepseek_infra.web.http_utils import json_response, read_json_body, require_api_auth, truthy
 
 
@@ -43,6 +47,8 @@ def create_skills_router(deps: SkillsRouteDeps) -> APIRouter:
             return json_response({"ok": True, "skill": deps.get_skill(_skill_id(payload), include_disabled=True)})
         if action == "create":
             return json_response({"ok": True, "skill": deps.create_custom_skill(_skill_config(payload), overwrite=_bool(payload, "overwrite"))})
+        if action == "validate":
+            return json_response({"ok": True, "skill": _validate_skill_config(_skill_config(payload))})
         if action == "update":
             return json_response({"ok": True, "skill": deps.update_skill(_skill_id(payload), _skill_patch(payload))})
         if action == "disable":
@@ -57,6 +63,8 @@ def create_skills_router(deps: SkillsRouteDeps) -> APIRouter:
             return json_response({"ok": True, "skill": deps.export_skill_config(_skill_id(payload))})
         if action == "run":
             return json_response(_run_skill(deps, payload, skill_id=_skill_id(payload)))
+        if action == "dry_run":
+            return json_response(_dry_run_skill_config(payload))
         raise AppError("Unsupported Skill action", code=ErrorCode.INVALID_PAYLOAD)
 
     @router.post("/api/skills/{skill_id}/run")
@@ -113,6 +121,44 @@ def _run_skill(deps: SkillsRouteDeps, payload: dict[str, Any], *, skill_id: str)
         model=str(payload.get("model") or ""),
         persist=_bool(payload, "persist", default=True),
     )
+
+
+def _validate_skill_config(config: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return validate_skill_config(config)
+    except SkillSchemaError as exc:
+        raise AppError(str(exc), code=ErrorCode.INVALID_PAYLOAD) from exc
+
+
+def _dry_run_skill_config(payload: dict[str, Any]) -> dict[str, Any]:
+    skill = _validate_skill_config(_skill_config(payload))
+    input_data = _run_input(payload)
+    input_violations = validate_instance(input_data, skill.get("inputSchema") or {}, label="input")
+    if input_violations:
+        raise AppError("Skill input failed schema validation: " + "; ".join(input_violations), code=ErrorCode.INVALID_PAYLOAD)
+    output = {
+        "content": offline_skill_content(skill, input_data, project_context=""),
+        "mode": "offline",
+    }
+    output_violations = validate_instance(output, skill.get("outputSchema") or {}, label="output")
+    if output_violations:
+        raise AppError("Skill output failed schema validation: " + "; ".join(output_violations), code=ErrorCode.INVALID_PAYLOAD)
+    return {
+        "ok": True,
+        "skillRunId": "dry-run",
+        "skillId": skill["skillId"],
+        "projectId": "",
+        "status": "completed",
+        "input": input_data,
+        "output": output,
+        "artifacts": [],
+        "savedItems": [],
+        "traceId": "",
+        "startedAt": utc_now_iso(),
+        "completedAt": utc_now_iso(),
+        "policy": {"allowedTools": skill_allowed_tools(skill)},
+        "dryRun": True,
+    }
 
 
 def _bool(payload: dict[str, Any], key: str, *, default: bool = False) -> bool:

@@ -391,10 +391,129 @@
       <div class="skill-panel-toolbar">
         <label class="sr-only" for="skillSearchInput">搜索 Skill</label>
         <input id="skillSearchInput" type="search" placeholder="搜索 Skill" autocomplete="off" />
+        <button class="seek-primary-button" id="skillNewButton" type="button">New Skill</button>
         <button class="secondary-button" id="skillImportButton" type="button">导入 JSON</button>
         <button class="secondary-button" id="skillExportAllButton" type="button">导出全部</button>
         <input id="skillImportInput" type="file" accept="application/json,.json" hidden />
       </div>
+
+      <section class="skill-builder-host" id="skillBuilderHost" hidden>
+        <form class="skill-builder-form" id="skillBuilderForm">
+          <div class="skill-builder-header">
+            <div>
+              <h3 id="skillBuilderTitle">Custom Skill Builder</h3>
+              <p id="skillBuilderSource">Create a reusable Skill from prompt, schema, tools and workspace policy.</p>
+            </div>
+            <button class="icon-button panel-close-button" id="skillBuilderCloseButton" type="button" aria-label="Close Skill Builder">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M18 6 6 18M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+
+          <div class="skill-builder-grid">
+            <label class="skill-builder-field">
+              <span>skillId</span>
+              <input id="skillBuilderIdInput" type="text" maxlength="80" placeholder="skill_my_custom_skill" autocomplete="off" required />
+            </label>
+            <label class="skill-builder-field">
+              <span>Name</span>
+              <input id="skillBuilderNameInput" type="text" maxlength="120" placeholder="My Custom Skill" autocomplete="off" required />
+            </label>
+            <label class="skill-builder-field">
+              <span>Version</span>
+              <input id="skillBuilderVersionInput" type="text" maxlength="40" value="1.0.0" autocomplete="off" required />
+            </label>
+          </div>
+
+          <label class="skill-builder-field">
+            <span>Description</span>
+            <textarea id="skillBuilderDescriptionInput" rows="3" maxlength="600" placeholder="What this Skill helps with" required></textarea>
+          </label>
+
+          <label class="skill-builder-field">
+            <span>System Prompt</span>
+            <textarea id="skillBuilderPromptInput" rows="7" maxlength="20000" placeholder="Define role, workflow, quality bar and output expectations" required></textarea>
+          </label>
+
+          <section class="skill-builder-section">
+            <div class="skill-builder-section-header">
+              <div>
+                <h4>Input Schema</h4>
+                <p>Visual fields become JSON Schema properties and power the run form.</p>
+              </div>
+              <button class="secondary-button" id="skillBuilderAddFieldButton" type="button">Add Field</button>
+            </div>
+            <div class="skill-builder-field-list" id="skillBuilderFieldList"></div>
+          </section>
+
+          <section class="skill-builder-section">
+            <div class="skill-builder-section-header">
+              <div>
+                <h4>Output Format</h4>
+                <p>Keep the default content object for offline dry-run and Workspace artifacts.</p>
+              </div>
+            </div>
+            <label class="skill-builder-field">
+              <span>Output schema</span>
+              <select id="skillBuilderOutputModeSelect">
+                <option value="content">Content object</option>
+                <option value="title_content">Title + content object</option>
+              </select>
+            </label>
+          </section>
+
+          <section class="skill-builder-section">
+            <div class="skill-builder-section-header">
+              <div>
+                <h4>Tool Permissions</h4>
+                <p>Allowed tools still pass through the unified Tool Policy gate.</p>
+              </div>
+            </div>
+            <div class="skill-tool-picker" id="skillBuilderToolPicker"></div>
+          </section>
+
+          <div class="skill-builder-policy-grid">
+            <section class="skill-builder-section">
+              <h4>Memory Policy</h4>
+              <label class="skill-builder-field">
+                <span>Scope</span>
+                <select id="skillBuilderMemoryScopeSelect">
+                  <option value="none">none</option>
+                  <option value="project">project</option>
+                  <option value="global">global</option>
+                </select>
+              </label>
+              <label class="skill-builder-check"><input id="skillBuilderMemoryReadInput" type="checkbox" /> Read memory</label>
+              <label class="skill-builder-check"><input id="skillBuilderMemoryWriteInput" type="checkbox" /> Write memory</label>
+            </section>
+
+            <section class="skill-builder-section">
+              <h4>Artifact Policy</h4>
+              <label class="skill-builder-check"><input id="skillBuilderArtifactAutoSaveInput" type="checkbox" checked /> Auto-save output</label>
+              <div class="skill-artifact-types" id="skillBuilderArtifactTypes"></div>
+              <label class="skill-builder-check"><input id="skillBuilderProjectBindingInput" type="checkbox" checked /> Bind to projects</label>
+            </section>
+          </div>
+
+          <div class="skill-builder-preview" id="skillBuilderPreview" hidden>
+            <div class="skill-builder-preview-header">
+              <strong id="skillBuilderPreviewTitle">Skill JSON Preview</strong>
+            </div>
+            <pre id="skillBuilderPreviewBody"></pre>
+          </div>
+
+          <p class="skill-builder-error" id="skillBuilderError" hidden></p>
+
+          <div class="skill-builder-actions">
+            <button class="secondary-button" id="skillBuilderPreviewButton" type="button">Preview JSON</button>
+            <button class="secondary-button" id="skillBuilderValidateButton" type="button">Validate Schema</button>
+            <button class="secondary-button" id="skillBuilderDryRunButton" type="button">Dry Run Offline</button>
+            <button class="secondary-button" id="skillBuilderSaveRunButton" type="button">Save & Run</button>
+            <button class="seek-save-button" id="skillBuilderSaveButton" type="submit">Save Skill</button>
+          </div>
+        </form>
+      </section>
 
       <div class="skill-run-host" id="skillRunHost" hidden>
         <form class="skill-run-form" id="skillRunForm">

@@ -1,6 +1,6 @@
 # DeepSeek Infra
 
-![版本](https://img.shields.io/badge/version-2.6.2-blue)
+![版本](https://img.shields.io/badge/version-2.6.3-blue)
 ![Python](https://img.shields.io/badge/python-3.10%2B-green)
 ![Coverage Gate](https://img.shields.io/badge/coverage%20gate-80%25-brightgreen)
 ![许可证](https://img.shields.io/badge/license-MIT-black)
@@ -198,7 +198,7 @@ curl http://127.0.0.1:8000/v1/models -H "Authorization: Bearer <本地访问 tok
 
 与之配套的**质量评测**在 [evals/](evals/)（全部离线可跑）：`python evals/runners/run_offline_eval_suite.py --include-agent --strict` 会统一留下 [latest eval report](evals/reports/latest.md)，当前 baseline 为 RAG Recall@5 1.000 / Citation Accuracy 0.8333、26 个固定攻防用例的 **Tool Policy Pass Rate 1.000 / Prompt Injection Defense Pass 1.000**，以及对抗注入小语料的 `block_rate` / `false_positive_rate` / `bypass_rate` 硬门禁；`run_agent_eval.py --strict` 额外生成 [Agent Eval report](evals/reports/agent-latest.md)，低于 Tool Call Accuracy 0.90 / Agent Success Rate 0.85 / Prompt Regression Pass Rate 0.90 会阻断 CI。`run_security_corpus.py --strict` 生成 [Security Corpus report](evals/reports/security-latest.md)，覆盖 prompt injection、tool policy attack、benign false-positive、SSRF、路径越界与密钥外泄语料。详见 [evals/README.md](evals/README.md)、[docs/EVAL_REPORTS.md](docs/EVAL_REPORTS.md) 与 [docs/AGENT_EVAL.md](docs/AGENT_EVAL.md)。本地安全能力复现最小命令集见 [docs/SECURITY_SMOKE.md](docs/SECURITY_SMOKE.md)。
 
-**发版前一键体检（v2.6.2）**：先 `python scripts/doctor.py --offline` 做运行时体检（Python / 依赖 / .env / 数据目录权限 / static / 端口 / token，PASS / WARNING / FAIL），再运行 `python scripts/smoke_workspace.py --offline --out docs/evidence/workspace-v2.6.2.json` 与 `python scripts/smoke_skills.py --offline --out docs/evidence/skills-v2.6.2.json` 与 `python scripts/smoke_skills_ui.py --offline --out docs/evidence/skills-ui-v2.6.2.json` 生成 Workspace Core / Skill System / Skill Workbench UI evidence；协议与生态 evidence 仍可按需刷新：`python scripts/smoke_mcp_headless_bridge.py`、`python scripts/smoke_a2a_external_peer.py`、第三方 A2A smoke、Edge Router smoke、OpenAI-compatible SDK smoke。随后 `python scripts/preflight_release.py --version 2.6.2` 校验版本徽章 / CHANGELOG / Docker tag / 文档与 eval 报告版本同步，并检查 coverage 80%、offline eval、Agent Eval、baseline compare、injection strict、security corpus、Workspace Core、Skill System、A2A third-party、Edge Router smoke、Continue.dev MCP、OpenAI-compatible SDK 与 GUI interop 的质量证据，最后 `python scripts/smoke_release.py --offline` 一键编排 doctor + Workspace Core smoke + Skill System smoke + Skill Workbench UI smoke + strict eval + security corpus + Agent Eval + baseline compare（`--with-server --base-url ... --token ...` 额外跑 MCP / A2A smoke）。发布产物会同时生成 `.sha256` 与带 `qualityGates.workspaceCore=PASS`、`qualityGates.skillSystem=PASS`、`qualityGates.skillWorkbench=PASS` 的 `.manifest.json` 作为 release evidence。详见 [docs/WORKSPACE.md](docs/WORKSPACE.md)、[docs/SKILLS.md](docs/SKILLS.md)、[docs/RUNTIME_DOCTOR.md](docs/RUNTIME_DOCTOR.md) 与 [docs/RELEASE_READINESS.md](docs/RELEASE_READINESS.md)。
+**Release preflight (v2.6.3)**: Run `python scripts/doctor.py --offline`, `python scripts/smoke_workspace.py --offline --out docs/evidence/workspace-v2.6.3.json`, `python scripts/smoke_skills.py --offline --out docs/evidence/skills-v2.6.3.json`, `python scripts/smoke_skills_ui.py --offline --out docs/evidence/skills-ui-v2.6.3.json`, and `python scripts/smoke_skill_builder.py --offline --out docs/evidence/skill-builder-v2.6.3.json`; then run `python scripts/preflight_release.py --version 2.6.3` and `python scripts/smoke_release.py --offline`. Release manifest quality gates include `workspaceCore`, `skillSystem`, `skillWorkbench`, and `skillBuilder`.
 
 ## 快速开始
 
@@ -556,6 +556,15 @@ python scripts/release.py --clean-workspace
 - [x] Project 面板展示 enabledSkills、defaultSkill、recentSkills，并通过 Workspace API 保存绑定
 - [x] Skill 运行结果预览回链 Saved Items / Artifact Hub，产物 metadata 保留 `skillRunId`
 - [x] 新增 `scripts/smoke_skills_ui.py --offline` 与 `docs/evidence/skills-ui-v2.6.2.json`，CI / preflight / release manifest 纳入 `skillWorkbench` gate
+
+### v2.6.3: Custom Skill Builder
+- [x] Add Custom Skill Builder with guided fields for base metadata, systemPrompt, inputSchema, outputSchema, allowedTools, memoryPolicy, artifactPolicy, and projectBinding.
+- [x] Add Visual Schema Editor for string / textarea / number / integer / enum / boolean fields and generated `inputSchema`.
+- [x] Add Tool Permission Picker with tool capability and risk labels, backed by server-side schema validation.
+- [x] Support Clone as Custom Skill and replace the old `window.prompt` edit flow with the builder panel.
+- [x] Add Preview JSON / Validate Schema / Dry Run Offline / Save / Save & Run flows.
+- [x] Add `scripts/smoke_skill_builder.py --offline` and `docs/evidence/skill-builder-v2.6.3.json`, with CI / preflight / release manifest `skillBuilder` gate.
+
 ## 文档
 
 - [CHANGELOG.md](CHANGELOG.md) — 逐版本变更记录。
