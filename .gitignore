@@ -34,6 +34,7 @@ evals/reports/*
 !evals/reports/security-latest.json
 !evals/reports/security-latest.md
 !evals/reports/skill-latest.json
+!evals/reports/skills-v*.json
 
 .coverage
 .mypy_cache/
