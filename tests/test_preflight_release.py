@@ -52,6 +52,7 @@ def _skeleton(tmp_path: Path, version: str, *, release_exclusions: bool = True) 
     _write_skill_builder_evidence(evidence_dir / f"skill-builder-v{version}.json", version)
     _write_skill_packs_evidence(evidence_dir / f"skill-packs-v{version}.json", version)
     _write_skill_eval_dashboard_evidence(evidence_dir / f"skill-eval-dashboard-v{version}.json", version)
+    _write_skill_versioning_evidence(evidence_dir / f"skill-versioning-v{version}.json", version)
     (root / "evals").mkdir()
     (root / "evals" / "README.md").write_text(f"适用版本：v{version}。\n", encoding="utf-8")
     reports = root / "evals" / "reports"
@@ -395,6 +396,37 @@ def _write_skill_eval_dashboard_evidence(path: Path, version: str, *, status: st
         "skillEvalAssets": "PASS",
         "skillEvalRunner": "PASS",
         "skillEvalJsSyntax": "PASS",
+        "ciReleaseGate": "PASS",
+    }
+    if omit_check:
+        checks.pop(omit_check, None)
+    payload: dict[str, Any] = {
+        "version": version,
+        "commit": "abc1234",
+        "generatedAt": "2026-06-30T00:00:00Z",
+        "environment": {"os": "Linux", "python": "3.12", "ci": True},
+        "status": status,
+        "checks": checks,
+    }
+    if omit_metadata:
+        payload.pop(omit_metadata, None)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _write_skill_versioning_evidence(path: Path, version: str, *, status: str = "PASS", omit_check: str = "", omit_metadata: str = "") -> None:
+    checks = {
+        "skillVersionSnapshot": "PASS",
+        "skillDiff": "PASS",
+        "skillRollback": "PASS",
+        "schemaMigrationPlan": "PASS",
+        "packVersionInstall": "PASS",
+        "packRollback": "PASS",
+        "evalAwareUpgradeGate": "PASS",
+        "projectBindingMigration": "PASS",
+        "versioningApiActions": "PASS",
+        "versioningUi": "PASS",
+        "versioningAssets": "PASS",
+        "versioningJsSyntax": "PASS",
         "ciReleaseGate": "PASS",
     }
     if omit_check:
@@ -953,65 +985,94 @@ def test_preflight_passes_on_skill_builder_evidence_complete(tmp_path: Path) -> 
 
 def test_preflight_fails_on_missing_skill_packs_evidence(tmp_path: Path) -> None:
     preflight = _load_preflight()
-    root = _skeleton(tmp_path, "2.6.5")
-    (root / "docs" / "evidence" / "skill-packs-v2.6.5.json").unlink()
-    result = next(r for r in preflight.run_preflight(root, "2.6.5") if r.name == "skill_packs_evidence")
+    root = _skeleton(tmp_path, "2.6.6")
+    (root / "docs" / "evidence" / "skill-packs-v2.6.6.json").unlink()
+    result = next(r for r in preflight.run_preflight(root, "2.6.6") if r.name == "skill_packs_evidence")
     assert result.status == "fail"
     assert "smoke_skill_packs.py" in result.detail
 
 
 def test_preflight_fails_on_skill_packs_missing_required_check(tmp_path: Path) -> None:
     preflight = _load_preflight()
-    root = _skeleton(tmp_path, "2.6.5")
-    _write_skill_packs_evidence(root / "docs" / "evidence" / "skill-packs-v2.6.5.json", "2.6.5", omit_check="skillIdConflictHandling")
-    result = next(r for r in preflight.run_preflight(root, "2.6.5") if r.name == "skill_packs_evidence")
+    root = _skeleton(tmp_path, "2.6.6")
+    _write_skill_packs_evidence(root / "docs" / "evidence" / "skill-packs-v2.6.6.json", "2.6.6", omit_check="skillIdConflictHandling")
+    result = next(r for r in preflight.run_preflight(root, "2.6.6") if r.name == "skill_packs_evidence")
     assert result.status == "fail"
     assert "skillIdConflictHandling" in result.detail
 
 
 def test_preflight_passes_on_skill_packs_evidence_complete(tmp_path: Path) -> None:
     preflight = _load_preflight()
-    root = _skeleton(tmp_path, "2.6.5")
-    result = next(r for r in preflight.run_preflight(root, "2.6.5") if r.name == "skill_packs_evidence")
+    root = _skeleton(tmp_path, "2.6.6")
+    result = next(r for r in preflight.run_preflight(root, "2.6.6") if r.name == "skill_packs_evidence")
     assert result.status == "pass"
 
 
 def test_preflight_fails_on_missing_skill_eval_dashboard_evidence(tmp_path: Path) -> None:
     preflight = _load_preflight()
-    root = _skeleton(tmp_path, "2.6.5")
-    (root / "docs" / "evidence" / "skill-eval-dashboard-v2.6.5.json").unlink()
-    result = next(r for r in preflight.run_preflight(root, "2.6.5") if r.name == "skill_eval_dashboard_evidence")
+    root = _skeleton(tmp_path, "2.6.6")
+    (root / "docs" / "evidence" / "skill-eval-dashboard-v2.6.6.json").unlink()
+    result = next(r for r in preflight.run_preflight(root, "2.6.6") if r.name == "skill_eval_dashboard_evidence")
     assert result.status == "fail"
     assert "smoke_skill_eval_dashboard.py" in result.detail
 
 
 def test_preflight_fails_on_skill_eval_dashboard_missing_required_check(tmp_path: Path) -> None:
     preflight = _load_preflight()
-    root = _skeleton(tmp_path, "2.6.5")
+    root = _skeleton(tmp_path, "2.6.6")
     _write_skill_eval_dashboard_evidence(
-        root / "docs" / "evidence" / "skill-eval-dashboard-v2.6.5.json",
-        "2.6.5",
+        root / "docs" / "evidence" / "skill-eval-dashboard-v2.6.6.json",
+        "2.6.6",
         omit_check="regressionCompare",
     )
-    result = next(r for r in preflight.run_preflight(root, "2.6.5") if r.name == "skill_eval_dashboard_evidence")
+    result = next(r for r in preflight.run_preflight(root, "2.6.6") if r.name == "skill_eval_dashboard_evidence")
     assert result.status == "fail"
     assert "regressionCompare" in result.detail
 
 
 def test_preflight_passes_on_skill_eval_dashboard_evidence_complete(tmp_path: Path) -> None:
     preflight = _load_preflight()
-    root = _skeleton(tmp_path, "2.6.5")
-    result = next(r for r in preflight.run_preflight(root, "2.6.5") if r.name == "skill_eval_dashboard_evidence")
+    root = _skeleton(tmp_path, "2.6.6")
+    result = next(r for r in preflight.run_preflight(root, "2.6.6") if r.name == "skill_eval_dashboard_evidence")
     assert result.status == "pass"
 
 
 def test_preflight_fails_on_missing_skill_eval_report(tmp_path: Path) -> None:
     preflight = _load_preflight()
-    root = _skeleton(tmp_path, "2.6.5")
-    (root / "evals" / "reports" / "skills-v2.6.5.json").unlink()
-    result = next(r for r in preflight.run_preflight(root, "2.6.5") if r.name == "quality_gate_evidence")
+    root = _skeleton(tmp_path, "2.6.6")
+    (root / "evals" / "reports" / "skills-v2.6.6.json").unlink()
+    result = next(r for r in preflight.run_preflight(root, "2.6.6") if r.name == "quality_gate_evidence")
     assert result.status == "fail"
-    assert "skills-v2.6.5.json" in result.detail
+    assert "skills-v2.6.6.json" in result.detail
+
+
+def test_preflight_fails_on_missing_skill_versioning_evidence(tmp_path: Path) -> None:
+    preflight = _load_preflight()
+    root = _skeleton(tmp_path, "2.6.6")
+    (root / "docs" / "evidence" / "skill-versioning-v2.6.6.json").unlink()
+    result = next(r for r in preflight.run_preflight(root, "2.6.6") if r.name == "skill_versioning_evidence")
+    assert result.status == "fail"
+    assert "smoke_skill_versioning.py" in result.detail
+
+
+def test_preflight_fails_on_skill_versioning_missing_required_check(tmp_path: Path) -> None:
+    preflight = _load_preflight()
+    root = _skeleton(tmp_path, "2.6.6")
+    _write_skill_versioning_evidence(
+        root / "docs" / "evidence" / "skill-versioning-v2.6.6.json",
+        "2.6.6",
+        omit_check="evalAwareUpgradeGate",
+    )
+    result = next(r for r in preflight.run_preflight(root, "2.6.6") if r.name == "skill_versioning_evidence")
+    assert result.status == "fail"
+    assert "evalAwareUpgradeGate" in result.detail
+
+
+def test_preflight_passes_on_skill_versioning_evidence_complete(tmp_path: Path) -> None:
+    preflight = _load_preflight()
+    root = _skeleton(tmp_path, "2.6.6")
+    result = next(r for r in preflight.run_preflight(root, "2.6.6") if r.name == "skill_versioning_evidence")
+    assert result.status == "pass"
 
 
 def _write_semantic_cache_onnx_evidence(path: Path, version: str, *, status: str = "PASS", omit_metadata: str = "") -> None:

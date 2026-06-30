@@ -76,6 +76,10 @@ def build_stages(args: argparse.Namespace) -> list[tuple[str, list[str]]]:
         ]
         stages.append(("skill_eval_dashboard", skill_eval_cmd))
 
+    if not args.skip_skill_versioning:
+        skill_versioning_cmd = [_py(), str(REPO_ROOT / "scripts" / "smoke_skill_versioning.py"), "--offline", "--out", args.skill_versioning_out]
+        stages.append(("skill_versioning", skill_versioning_cmd))
+
     if not args.skip_evals:
         stages.append(
             (
@@ -210,6 +214,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--skill-packs-out", default=str(REPO_ROOT / "docs" / "evidence" / f"skill-packs-v{APP_VERSION}.json"))
     parser.add_argument("--skill-eval-dashboard-out", default=str(REPO_ROOT / "docs" / "evidence" / f"skill-eval-dashboard-v{APP_VERSION}.json"))
     parser.add_argument("--skill-eval-report-out", default=str(REPO_ROOT / "evals" / "reports" / f"skills-v{APP_VERSION}.json"))
+    parser.add_argument("--skill-versioning-out", default=str(REPO_ROOT / "docs" / "evidence" / f"skill-versioning-v{APP_VERSION}.json"))
     parser.add_argument("--skip-doctor", action="store_true")
     parser.add_argument("--skip-workspace", action="store_true")
     parser.add_argument("--skip-evals", action="store_true")
@@ -221,6 +226,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--skip-skill-builder", action="store_true")
     parser.add_argument("--skip-skill-packs", action="store_true")
     parser.add_argument("--skip-skill-eval-dashboard", action="store_true")
+    parser.add_argument("--skip-skill-versioning", action="store_true")
     parser.add_argument("--skip-mcp", action="store_true")
     parser.add_argument("--skip-a2a", action="store_true")
     parser.add_argument("--json", action="store_true", help="Emit a machine-readable JSON summary instead of running shells verbosely.")

@@ -1,4 +1,4 @@
-/** Skill Workbench UI, Custom Skill Builder, Skill Packs and Eval Dashboard - v2.6.5 frontend integration. */
+/** Skill Workbench UI, Builder, Packs, Eval Dashboard, and Versioning - v2.6.6 frontend integration. */
 
 const SKILL_API = "/api/skills";
 const PROJECT_API = "/api/workspace/projects";
@@ -39,6 +39,9 @@ const state = {
   packs: [],
   evalReport: null,
   evalCases: [],
+  skillVersions: [],
+  packVersions: [],
+  versionTarget: { kind: "skill", id: "" },
   activeProjectId: "",
   search: "",
   runningSkillId: "",
@@ -136,6 +139,16 @@ function cacheElements() {
     "skillEvalExportJsonButton",
     "skillEvalExportMarkdownButton",
     "skillEvalCopySummaryButton",
+    "skillVersionsButton",
+    "skillVersionsHost",
+    "skillVersionsCloseButton",
+    "skillVersionSkillSelect",
+    "skillVersionCompareButton",
+    "skillVersionMigrationButton",
+    "skillVersionRollbackButton",
+    "skillVersionList",
+    "skillVersionDiff",
+    "skillPackVersionList",
     "skillEvalSummary",
     "skillEvalCaseForm",
     "skillEvalCaseSkillSelect",
@@ -184,6 +197,12 @@ function bindEvents() {
   els.skillNewButton?.addEventListener("click", () => openSkillBuilder({ mode: "create" }));
   els.skillPacksButton?.addEventListener("click", openPacksHost);
   els.skillEvalButton?.addEventListener("click", openEvalHost);
+  els.skillVersionsButton?.addEventListener("click", openVersionHost);
+  els.skillVersionsCloseButton?.addEventListener("click", closeVersionHost);
+  els.skillVersionSkillSelect?.addEventListener("change", () => loadSkillVersions(els.skillVersionSkillSelect.value || ""));
+  els.skillVersionCompareButton?.addEventListener("click", compareSkillVersions);
+  els.skillVersionMigrationButton?.addEventListener("click", showSkillMigrationPlan);
+  els.skillVersionRollbackButton?.addEventListener("click", rollbackSkillVersion);
   els.skillEvalCloseButton?.addEventListener("click", closeEvalHost);
   els.skillEvalRunButton?.addEventListener("click", runSkillEval);
   els.skillEvalExportJsonButton?.addEventListener("click", exportSkillEvalJson);
@@ -242,6 +261,7 @@ function openSkillPanel() {
   closeSkillRunHost();
   closePacksHost();
   closeEvalHost();
+  closeVersionHost();
   loadSkills();
   loadProjects();
   loadPacks();
@@ -255,6 +275,7 @@ function closeSkillPanel() {
   closeSkillBuilder();
   closePacksHost();
   closeEvalHost();
+  closeVersionHost();
   els.skillPanel.classList.remove("open");
   els.skillPanel.setAttribute("aria-hidden", "true");
   onPanelStateChange();
@@ -265,6 +286,7 @@ function openSkillRunHost(skill) {
   closeSkillBuilder();
   closePacksHost();
   closeEvalHost();
+  closeVersionHost();
   els.skillRunHost.hidden = false;
   els.skillRunTitle.textContent = `运行 · ${skill.name || skill.skillId}`;
   els.skillRunTitle.dataset.skillId = skill.skillId;
@@ -556,6 +578,13 @@ function renderSkillCard(skill) {
   clone.textContent = skill.builtin ? "克隆" : "复制";
   actions.append(clone);
 
+  const history = document.createElement("button");
+  history.type = "button";
+  history.className = "secondary-button";
+  history.dataset.skillHistory = skill.skillId;
+  history.textContent = "History";
+  actions.append(history);
+
   if (!skill.builtin) {
     const edit = document.createElement("button");
     edit.type = "button";
@@ -597,6 +626,11 @@ function onSkillListClick(event) {
   const cloneButton = target?.closest("button[data-skill-clone]");
   if (cloneButton) {
     cloneSkill(cloneButton.dataset.skillClone);
+    return;
+  }
+  const historyButton = target?.closest("button[data-skill-history]");
+  if (historyButton) {
+    openVersionHost({ skillId: historyButton.dataset.skillHistory });
     return;
   }
   const editButton = target?.closest("button[data-skill-edit]");
@@ -644,6 +678,7 @@ function openSkillBuilder({ mode = "create", skill = null } = {}) {
   closeSkillRunHost();
   closePacksHost();
   closeEvalHost();
+  closeVersionHost();
   state.builder.mode = mode;
   state.builder.originalSkillId = mode === "edit" ? (skill?.skillId || "") : "";
   state.builder.saveAndRun = false;
@@ -1168,13 +1203,253 @@ async function deleteSkill(skillId) {
   }
 }
 
-// --- Skill Eval Dashboard (v2.6.5) -------------------------------------------
+// --- Skill Versioning & Migration (v2.6.6) -----------------------------------
+
+function openVersionHost(target = {}) {
+  if (!els.skillVersionsHost) return;
+  closeSkillBuilder();
+  closeSkillRunHost();
+  closePacksHost();
+  closeEvalHost();
+  els.skillVersionsHost.hidden = false;
+  populateVersionSkillSelect(target.skillId || "");
+  const selectedSkill = els.skillVersionSkillSelect?.value || "";
+  if (selectedSkill) loadSkillVersions(selectedSkill);
+  if (target.packId) {
+    loadPackVersions(target.packId);
+  } else {
+    renderPackVersionList();
+  }
+}
+
+function closeVersionHost() {
+  if (els.skillVersionsHost) els.skillVersionsHost.hidden = true;
+}
+
+function populateVersionSkillSelect(preferredSkillId = "") {
+  if (!els.skillVersionSkillSelect) return;
+  els.skillVersionSkillSelect.replaceChildren();
+  for (const skill of state.skills) {
+    const option = document.createElement("option");
+    option.value = skill.skillId;
+    option.textContent = `${skill.name || skill.skillId} @ ${skill.version || "?"}`;
+    if (skill.skillId === preferredSkillId) option.selected = true;
+    els.skillVersionSkillSelect.append(option);
+  }
+  if (!els.skillVersionSkillSelect.value && state.skills[0]) {
+    els.skillVersionSkillSelect.value = state.skills[0].skillId;
+  }
+}
+
+async function loadSkillVersions(skillId) {
+  if (!skillId) return;
+  state.versionTarget = { kind: "skill", id: skillId };
+  try {
+    const response = await apiFetch(SKILL_API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "list_versions", skillId }),
+    });
+    const data = await parseJsonResponse(response);
+    state.skillVersions = Array.isArray(data.versions) ? data.versions : [];
+    renderVersionHistory();
+  } catch (error) {
+    renderVersionMessage(`Version history failed: ${error.message || error}`);
+  }
+}
+
+async function loadPackVersions(packId) {
+  if (!packId) return;
+  state.versionTarget = { kind: "pack", id: packId };
+  try {
+    const response = await apiFetch(SKILL_API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "list_pack_versions", packId }),
+    });
+    const data = await parseJsonResponse(response);
+    state.packVersions = Array.isArray(data.versions) ? data.versions : [];
+    renderPackVersionList(packId);
+  } catch (error) {
+    renderPackVersionList(packId, `Pack versions failed: ${error.message || error}`);
+  }
+}
+
+function renderVersionHistory() {
+  if (!els.skillVersionList) return;
+  els.skillVersionList.replaceChildren();
+  if (!state.skillVersions.length) {
+    const empty = document.createElement("p");
+    empty.className = "panel-empty";
+    empty.textContent = "No revisions yet. Save this custom Skill to create the first snapshot.";
+    els.skillVersionList.append(empty);
+    return;
+  }
+  for (const revision of state.skillVersions.slice().reverse()) {
+    const row = document.createElement("article");
+    row.className = "skill-version-row";
+    row.dataset.revisionId = revision.revisionId || "";
+    row.dataset.version = revision.version || "";
+    const title = document.createElement("strong");
+    title.textContent = `${revision.version || "?"}${revision.current ? " (current)" : ""}`;
+    const meta = document.createElement("span");
+    meta.textContent = `${revision.revisionId || ""} | ${revision.event || "revision"} | ${revision.createdAt || ""}`;
+    const summary = document.createElement("p");
+    summary.textContent = revision.changeSummary || "";
+    row.append(title, meta, summary);
+    els.skillVersionList.append(row);
+  }
+}
+
+function renderVersionMessage(message) {
+  if (!els.skillVersionDiff) return;
+  els.skillVersionDiff.replaceChildren();
+  const box = document.createElement("pre");
+  box.textContent = message;
+  els.skillVersionDiff.append(box);
+}
+
+function selectedVersionRange() {
+  const versions = state.skillVersions.filter((item) => item.version);
+  const historical = versions.filter((item) => !item.current);
+  const from = historical[0]?.version || versions[0]?.version || "current";
+  const to = historical[historical.length - 1]?.version || "current";
+  return { from, to };
+}
+
+async function compareSkillVersions() {
+  const skillId = els.skillVersionSkillSelect?.value || state.versionTarget.id;
+  if (!skillId) return;
+  const { from, to } = selectedVersionRange();
+  try {
+    const response = await apiFetch(SKILL_API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "diff_versions", skillId, from, to }),
+    });
+    const data = await parseJsonResponse(response);
+    renderVersionDiff(data.diff || data);
+  } catch (error) {
+    renderVersionMessage(`Compare failed: ${error.message || error}`);
+  }
+}
+
+async function showSkillMigrationPlan() {
+  const skillId = els.skillVersionSkillSelect?.value || state.versionTarget.id;
+  if (!skillId) return;
+  const { from, to } = selectedVersionRange();
+  try {
+    const response = await apiFetch(SKILL_API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "migration_plan", skillId, from, to }),
+    });
+    const data = await parseJsonResponse(response);
+    renderVersionDiff(data.migrationPlan || data);
+  } catch (error) {
+    renderVersionMessage(`Migration plan failed: ${error.message || error}`);
+  }
+}
+
+async function rollbackSkillVersion() {
+  const skillId = els.skillVersionSkillSelect?.value || state.versionTarget.id;
+  if (!skillId) return;
+  const { from } = selectedVersionRange();
+  const skill = state.skills.find((item) => item.skillId === skillId);
+  if (skill?.builtin) {
+    showToast("Built-in Skills are read-only. Clone first, then rollback the custom Skill.");
+    return;
+  }
+  if (!window.confirm(`Rollback ${skillId} to ${from}?`)) return;
+  try {
+    const response = await apiFetch(SKILL_API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "rollback_skill", skillId, version: from }),
+    });
+    await parseJsonResponse(response);
+    await loadSkills();
+    await loadSkillVersions(skillId);
+    showToast(`Rolled back ${skillId} to ${from}`);
+  } catch (error) {
+    showToast(`Rollback failed: ${error.message || error}`);
+  }
+}
+
+function renderVersionDiff(payload) {
+  if (!els.skillVersionDiff) return;
+  els.skillVersionDiff.replaceChildren();
+  const box = document.createElement("pre");
+  box.textContent = JSON.stringify(payload, null, 2);
+  els.skillVersionDiff.append(box);
+}
+
+function renderPackVersionList(packId = "", error = "") {
+  if (!els.skillPackVersionList) return;
+  els.skillPackVersionList.replaceChildren();
+  if (error) {
+    const row = document.createElement("p");
+    row.className = "panel-empty";
+    row.textContent = error;
+    els.skillPackVersionList.append(row);
+    return;
+  }
+  const packs = packId ? state.packs.filter((item) => item.packId === packId) : state.packs;
+  if (!packs.length) {
+    const empty = document.createElement("p");
+    empty.className = "panel-empty";
+    empty.textContent = "No Skill Packs loaded.";
+    els.skillPackVersionList.append(empty);
+    return;
+  }
+  for (const pack of packs) {
+    const row = document.createElement("article");
+    row.className = "skill-pack-version-row";
+    const title = document.createElement("strong");
+    title.textContent = `${pack.name || pack.packId} @ ${pack.version || "?"}`;
+    const meta = document.createElement("span");
+    const versions = pack.packId === packId ? state.packVersions.map((item) => item.version).filter(Boolean) : [];
+    meta.textContent = versions.length ? `versions: ${versions.join(", ")}` : `${pack.packId}`;
+    const actions = document.createElement("div");
+    actions.className = "skill-card-actions";
+    const load = document.createElement("button");
+    load.type = "button";
+    load.className = "secondary-button";
+    load.textContent = "Load History";
+    load.addEventListener("click", () => loadPackVersions(pack.packId));
+    const gate = document.createElement("button");
+    gate.type = "button";
+    gate.className = "secondary-button";
+    gate.textContent = "Upgrade Gate";
+    gate.addEventListener("click", () => runPackUpgradeGate(pack.packId));
+    actions.append(load, gate);
+    row.append(title, meta, actions);
+    els.skillPackVersionList.append(row);
+  }
+}
+
+async function runPackUpgradeGate(packId) {
+  try {
+    const response = await apiFetch(SKILL_API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "upgrade_pack", packId, version: "current", projectId: getActiveProjectId() || "" }),
+    });
+    const data = await parseJsonResponse(response);
+    renderVersionDiff(data.evalAwareUpgradeGate || data);
+  } catch (error) {
+    renderVersionMessage(`Upgrade gate failed: ${error.message || error}`);
+  }
+}
+
+// --- Skill Eval Dashboard (v2.6.6) -------------------------------------------
 
 function openEvalHost() {
   if (!els.skillEvalHost) return;
   closeSkillBuilder();
   closeSkillRunHost();
   closePacksHost();
+  closeVersionHost();
   els.skillEvalHost.hidden = false;
   populateEvalSkillSelect();
   loadEvalCases();
@@ -1545,6 +1820,12 @@ function renderPackCard(pack) {
   exportButton.dataset.packExport = pack.packId;
   exportButton.textContent = "导出";
   actions.append(exportButton);
+  const history = document.createElement("button");
+  history.type = "button";
+  history.className = "secondary-button";
+  history.dataset.packHistory = pack.packId;
+  history.textContent = "History";
+  actions.append(history);
   if (!pack.builtin) {
     const remove = document.createElement("button");
     remove.type = "button";
@@ -1563,6 +1844,7 @@ function openPacksHost() {
   closeSkillBuilder();
   closeSkillRunHost();
   closeEvalHost();
+  closeVersionHost();
   els.skillPacksHost.hidden = false;
   loadPacks();
 }
@@ -1581,6 +1863,11 @@ function onPackListClick(event) {
   const exportButton = target?.closest("button[data-pack-export]");
   if (exportButton) {
     exportPack(exportButton.dataset.packExport);
+    return;
+  }
+  const historyButton = target?.closest("button[data-pack-history]");
+  if (historyButton) {
+    openVersionHost({ packId: historyButton.dataset.packHistory });
     return;
   }
   const deleteButton = target?.closest("button[data-pack-delete]");

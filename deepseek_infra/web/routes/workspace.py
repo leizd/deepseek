@@ -107,15 +107,27 @@ def create_workspace_router(deps: WorkspaceRouteDeps) -> APIRouter:
         enabled = [str(item) for item in raw_enabled] if isinstance(raw_enabled, list) else []
         default = str(payload.get("defaultSkill") or "")
         raw_packs = payload.get("enabledPacks")
-        enabled_packs = [str(item) for item in raw_packs] if isinstance(raw_packs, list) else None
+        enabled_packs = [str(item.get("packId") if isinstance(item, dict) else item) for item in raw_packs] if isinstance(raw_packs, list) else None
+        raw_pack_versions = payload.get("enabledPackVersions")
+        enabled_pack_versions = [item for item in raw_pack_versions if isinstance(item, dict)] if isinstance(raw_pack_versions, list) else None
         return json_response(
-            {"ok": True, "skills": set_project_skill_binding(project_id, enabled, default_skill=default, enabled_packs=enabled_packs)}
+            {
+                "ok": True,
+                "skills": set_project_skill_binding(
+                    project_id,
+                    enabled,
+                    default_skill=default,
+                    enabled_packs=enabled_packs,
+                    enabled_pack_versions=enabled_pack_versions,
+                ),
+            }
         )
 
     @router.post("/api/workspace/projects/{project_id}/skill-packs/{pack_id}/install")
     async def api_workspace_project_pack_install(request: Request, project_id: str, pack_id: str) -> JSONResponse:
         require_api_auth(request)
-        return json_response({"ok": True, "skills": enable_pack_for_project(project_id, pack_id)})
+        payload = await read_json_body(request) if int(request.headers.get("Content-Length") or "0") > 0 else {}
+        return json_response({"ok": True, "skills": enable_pack_for_project(project_id, pack_id, version=str(payload.get("version") or ""))})
 
     @router.get("/api/workspace/projects/{project_id}/skill-runs")
     async def api_workspace_project_skill_runs_list(request: Request, project_id: str) -> JSONResponse:

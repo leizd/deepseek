@@ -21,7 +21,7 @@ def _runtime_root() -> Path:
     not safe to write to.
 
     ``DEEPSEEK_INFRA_ROOT`` is preferred; ``DEEPSEEK_MOBILE_ROOT`` is kept for
-    backward compatibility (v2.1.6 → future).
+    backward compatibility (v2.1.6 -> future).
     """
     env_root = (
         os.environ.get("DEEPSEEK_INFRA_ROOT", "").strip()
@@ -309,7 +309,7 @@ class SchedulerSettings:
 
     Defaults are deliberately *generous* so the live path stays transparent under
     normal/test load (``rate_per_second=0`` means unlimited); tighten via env to make
-    the limits bite. ``max_queue_depth`` bounds waiting+in-flight — once exceeded the
+    the limits bite. ``max_queue_depth`` bounds waiting+in-flight 鈥?once exceeded the
     scheduler sheds load (fast 503) instead of growing unboundedly.
     """
 
@@ -339,7 +339,7 @@ class MCPSettings:
     (``POST /mcp``, local-auth gated) and re-exposes the local tool runtime as
     standard MCP ``tools`` plus optional ``resources`` (generated artifacts) and
     ``prompts``. ``capability`` picks the Tool Policy capability profile granted to
-    MCP clients — every ``tools/call`` still goes through the full policy gate
+    MCP clients 鈥?every ``tools/call`` still goes through the full policy gate
     (schema / SSRF / path / sensitive guards), so an external MCP client never gets
     more than that slice. The outbound MCP *client* (connecting external MCP
     servers) is opt-in and off by default.
@@ -417,15 +417,15 @@ class SkillsSettings:
 @dataclass(frozen=True, slots=True)
 class Settings:
     root: Path = ROOT
-    app_version: str = "2.6.5"
+    app_version: str = "2.6.6"
     deepseek_url: str = "https://api.deepseek.com/chat/completions"
     tavily_url: str = "https://api.tavily.com/search"
     deepseek_timeout_seconds: int = 180
     multi_agent_timeout_seconds: int = 3900
     tavily_timeout_seconds: int = 45
-    # 多 Agent 一次运行的累计 token 上限（prompt+completion，跨所有 worker+综合）。默认设
-    # 得很高，只作失控保护网，正常运行不会触达；综合阶段永远不受其影响。可经环境变量
-    # MULTI_AGENT_TOKEN_BUDGET 收紧；设为 0 表示不限制。
+    # Cumulative token safety cap for one multi-agent run (prompt + completion
+    # across all workers and synthesis). Keep high by default; set
+    # MULTI_AGENT_TOKEN_BUDGET=0 to disable the cap.
     multi_agent_token_budget: int = 2_000_000
     deepseek_api_key: str = ""
     tavily_api_key: str = ""
@@ -451,9 +451,9 @@ class Settings:
             }
         )
     )
-    # 多 Agent 各角色用的模型，默认全部 deepseek-v4-pro（保持历史行为）。可用环境变量
-    # AGENT_MODEL_PLANNER / _RESEARCHER / _CODER / _REASONER / _CRITIC 单独降级到
-    # deepseek-v4-flash（更便宜更快，但不带 thinking 深度推理）。
+    # Per-role multi-agent model choices. Defaults keep historical behavior on
+    # deepseek-v4-pro; AGENT_MODEL_PLANNER / _RESEARCHER / _CODER / _REASONER /
+    # _CRITIC can opt a role into deepseek-v4-flash where thinking is not needed.
     agent_models: Mapping[str, str] = field(
         default_factory=lambda: MappingProxyType(
             {

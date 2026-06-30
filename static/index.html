@@ -394,6 +394,7 @@
         <button class="seek-primary-button" id="skillNewButton" type="button">New Skill</button>
         <button class="secondary-button" id="skillPacksButton" type="button">Packs</button>
         <button class="secondary-button" id="skillEvalButton" type="button">Eval</button>
+        <button class="secondary-button" id="skillVersionsButton" type="button">Versions</button>
         <button class="secondary-button" id="skillImportButton" type="button">导入 JSON</button>
         <button class="secondary-button" id="skillExportAllButton" type="button">导出全部</button>
         <input id="skillImportInput" type="file" accept="application/json,.json" hidden />
@@ -623,6 +624,38 @@
         <section class="skill-eval-section">
           <h4>Pack Scores</h4>
           <div class="skill-eval-table" id="skillEvalPackList"></div>
+        </section>
+      </section>
+
+      <section class="skill-version-host" id="skillVersionsHost" hidden>
+        <div class="skill-version-header">
+          <div>
+            <h3>Skill Version History</h3>
+            <p>Review revisions, compare schema and tool grants, plan migrations, and rollback local custom Skills or Packs.</p>
+          </div>
+          <button class="icon-button panel-close-button" id="skillVersionsCloseButton" type="button" aria-label="Close Skill Versions">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M18 6 6 18M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <div class="skill-version-toolbar">
+          <label>
+            <span>Skill</span>
+            <select id="skillVersionSkillSelect"></select>
+          </label>
+          <button class="secondary-button" id="skillVersionCompareButton" type="button">Compare</button>
+          <button class="secondary-button" id="skillVersionMigrationButton" type="button">Migration Plan</button>
+          <button class="danger-button" id="skillVersionRollbackButton" type="button">Rollback</button>
+        </div>
+
+        <div class="skill-version-list" id="skillVersionList"></div>
+        <div class="skill-version-diff" id="skillVersionDiff"></div>
+
+        <section class="skill-version-section">
+          <h4>Pack Versions</h4>
+          <div class="skill-pack-version-list" id="skillPackVersionList"></div>
         </section>
       </section>
 

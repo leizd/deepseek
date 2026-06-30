@@ -9,6 +9,7 @@ from deepseek_infra.infra.data import projects
 from deepseek_infra.infra.observability import observability
 from deepseek_infra.infra.skills import eval as skill_eval
 from deepseek_infra.infra.skills import evidence, permissions, registry
+from deepseek_infra.infra.skills import versioning as skill_versioning
 from deepseek_infra.infra.skills.runner import run_skill
 
 
@@ -136,3 +137,69 @@ def test_skill_eval_case_crud_uses_runtime_skills_dir(tmp_settings: Path) -> Non
     assert saved["caseId"] == "case_user_eval"
     assert any(case["caseId"] == "case_user_eval" for case in cases)
     assert deleted["deleted"] == "case_user_eval"
+
+
+def test_skill_version_history_diff_migration_and_rollback(tmp_settings: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(observability, "TRACE_ENABLED", False)
+    created = registry.create_custom_skill(_custom_skill())
+    project = projects.create_project("Skill Version Project")
+    projects.set_project_skill_binding(project["id"], [created["skillId"]], default_skill=created["skillId"])
+
+    updated_schema = {
+        "type": "object",
+        "properties": {
+            "subject": {"type": "string", "default": "general"},
+            "level": {"type": "string", "default": "beginner"},
+        },
+        "required": ["subject", "level"],
+        "additionalProperties": False,
+    }
+    updated = registry.update_skill(
+        created["skillId"],
+        {
+            "version": "1.1.0",
+            "inputSchema": updated_schema,
+            "allowedTools": ["search_files", "fetch_url"],
+            "changeSummary": "Rename topic to subject and add level",
+        },
+    )
+
+    versions = skill_versioning.list_skill_versions(created["skillId"])
+    diff = skill_versioning.diff_skill_versions(created["skillId"], "1.0.0", "1.1.0")
+    plan = skill_versioning.migration_plan(created["skillId"], "1.0.0", "1.1.0")
+    rolled_back = skill_versioning.rollback_skill(created["skillId"], "1.0.0")
+
+    assert updated["version"] == "1.1.0"
+    assert {"1.0.0", "1.1.0"} <= {item["version"] for item in versions}
+    assert diff["toolGrantDiff"]["added"] == ["fetch_url"]
+    assert any(item["field"] == "inputSchema" and item["changed"] for item in diff["fields"])
+    assert any(item["type"] == "inputFieldRenamed" for item in plan["changes"])
+    assert plan["safe"] is True
+    assert plan["migrationTargets"]["projectBindings"] == 1
+    assert rolled_back["skill"]["version"] == "1.0.0"
+    assert registry.get_skill(created["skillId"], include_disabled=True)["version"] == "1.0.0"
+
+
+def test_pack_versioning_upgrade_gate_and_project_binding(tmp_settings: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(observability, "TRACE_ENABLED", False)
+    imported = registry.import_pack(
+        {
+            "packId": "pack_unit_versioned",
+            "name": "Versioned Pack",
+            "description": "Pack lifecycle test.",
+            "version": "1.0.0",
+            "skills": [_custom_skill()],
+        },
+        overwrite=True,
+    )
+    project = projects.create_project("Pack Version Project")
+
+    versions = skill_versioning.list_pack_versions(imported["packId"])
+    gate = skill_versioning.eval_aware_upgrade_gate(kind="pack", item_id=imported["packId"])
+    upgraded = skill_versioning.upgrade_pack(imported["packId"], "1.0.0", project_id=project["id"])
+
+    assert any(item["version"] == "1.0.0" for item in versions)
+    assert gate["status"] in {"PASS", "REVIEW"}
+    assert upgraded["ok"] is True
+    assert upgraded["projectBinding"]["enabledPackVersions"][0]["packId"] == "pack_unit_versioned"
+    assert upgraded["projectBinding"]["enabledPackVersions"][0]["version"] == "1.0.0"

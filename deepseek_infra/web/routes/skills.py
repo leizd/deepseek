@@ -13,6 +13,7 @@ from deepseek_infra.core.config import APP_VERSION
 from deepseek_infra.core.errors import AppError, ErrorCode
 from deepseek_infra.core.utils import utc_now_iso
 from deepseek_infra.infra.skills import eval as skill_eval
+from deepseek_infra.infra.skills import versioning as skill_versioning
 from deepseek_infra.infra.skills.pack import tool_permission_summary
 from deepseek_infra.infra.skills.permissions import skill_allowed_tools
 from deepseek_infra.infra.skills.schema import SkillSchemaError, validate_instance, validate_skill_config
@@ -111,6 +112,40 @@ def create_skills_router(deps: SkillsRouteDeps) -> APIRouter:
             return json_response({"ok": True, "case": skill_eval.save_eval_case(_eval_case(payload))})
         if action == "delete_eval_case":
             return json_response(skill_eval.delete_eval_case(_case_id(payload)))
+        if action == "list_versions":
+            return json_response({"ok": True, "versions": skill_versioning.list_skill_versions(_skill_id(payload))})
+        if action == "diff_versions":
+            return json_response({"ok": True, "diff": skill_versioning.diff_skill_versions(_skill_id(payload), _from_version(payload), _to_version(payload))})
+        if action == "rollback_skill":
+            return json_response(skill_versioning.rollback_skill(_skill_id(payload), _version(payload), change_summary=str(payload.get("changeSummary") or "")))
+        if action == "migration_plan":
+            return json_response({"ok": True, "migrationPlan": skill_versioning.migration_plan(_skill_id(payload), _from_version(payload), _to_version(payload))})
+        if action == "list_pack_versions":
+            return json_response({"ok": True, "versions": skill_versioning.list_pack_versions(_pack_id(payload))})
+        if action == "diff_pack_versions":
+            return json_response({"ok": True, "diff": skill_versioning.diff_pack_versions(_pack_id(payload), _from_version(payload), _to_version(payload))})
+        if action == "upgrade_pack":
+            return json_response(
+                skill_versioning.upgrade_pack(
+                    _pack_id(payload),
+                    _optional_version(payload),
+                    project_id=str(payload.get("projectId") or ""),
+                    baseline=payload.get("baseline") if isinstance(payload.get("baseline"), dict) else None,
+                )
+            )
+        if action == "rollback_pack":
+            return json_response(skill_versioning.rollback_pack(_pack_id(payload), _version(payload), project_id=str(payload.get("projectId") or "")))
+        if action == "eval_upgrade_gate":
+            return json_response(
+                {
+                    "ok": True,
+                    "gate": skill_versioning.eval_aware_upgrade_gate(
+                        kind=str(payload.get("kind") or "skill"),
+                        item_id=str(payload.get("itemId") or payload.get("skillId") or payload.get("packId") or ""),
+                        baseline=payload.get("baseline") if isinstance(payload.get("baseline"), dict) else None,
+                    ),
+                }
+            )
         raise AppError("Unsupported Skill action", code=ErrorCode.INVALID_PAYLOAD)
 
     @router.post("/api/skills/{skill_id}/run")
@@ -177,6 +212,27 @@ def _case_id(payload: dict[str, Any]) -> str:
     if not case_id:
         raise AppError("caseId is required", code=ErrorCode.INVALID_PAYLOAD)
     return case_id
+
+
+def _version(payload: dict[str, Any]) -> str:
+    version = _optional_version(payload)
+    if not version:
+        raise AppError("version is required", code=ErrorCode.INVALID_PAYLOAD)
+    return version
+
+
+def _optional_version(payload: dict[str, Any]) -> str:
+    return str(payload.get("version") or payload.get("revisionId") or "").strip()
+
+
+def _from_version(payload: dict[str, Any]) -> str:
+    value = str(payload.get("from") or payload.get("fromVersion") or "current").strip()
+    return value or "current"
+
+
+def _to_version(payload: dict[str, Any]) -> str:
+    value = str(payload.get("to") or payload.get("toVersion") or "current").strip()
+    return value or "current"
 
 
 def _skill_patch(payload: dict[str, Any]) -> dict[str, Any]:

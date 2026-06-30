@@ -73,6 +73,9 @@ def create_custom_skill(config: dict[str, Any], *, overwrite: bool = False) -> d
     skill["updatedAt"] = now
     skill["builtin"] = False
     write_custom_skill(skill)
+    from deepseek_infra.infra.skills import versioning
+
+    versioning.snapshot_skill(skill, change_summary="Created custom Skill", event="create")
     return public_skill(skill)
 
 
@@ -86,7 +89,9 @@ def update_skill(skill_id: str, patch: dict[str, Any]) -> dict[str, Any]:
     current = _read_json(path)
     if not isinstance(current, dict):
         raise AppError("Skill file is corrupt", code=ErrorCode.INVALID_PAYLOAD)
-    merged = {**current, **(patch if isinstance(patch, dict) else {})}
+    change_summary = str(patch.get("changeSummary") or "Updated custom Skill") if isinstance(patch, dict) else "Updated custom Skill"
+    clean_patch = {key: value for key, value in (patch if isinstance(patch, dict) else {}).items() if key != "changeSummary"}
+    merged = {**current, **clean_patch}
     if str(merged.get("skillId") or "") != normalized:
         raise AppError("skillId cannot be changed", code=ErrorCode.INVALID_PAYLOAD)
     skill = normalize_config_for_storage(merged)
@@ -94,6 +99,9 @@ def update_skill(skill_id: str, patch: dict[str, Any]) -> dict[str, Any]:
     skill["updatedAt"] = utc_now_iso()
     skill["builtin"] = False
     write_custom_skill(skill)
+    from deepseek_infra.infra.skills import versioning
+
+    versioning.snapshot_skill(skill, change_summary=change_summary, event="update")
     return public_skill(skill)
 
 
@@ -324,6 +332,9 @@ def import_pack(config: dict[str, Any], *, overwrite: bool = False, on_conflict:
     unresolved = _unresolved_references(pack)
     manifest = _pack_manifest_for_storage(pack)
     write_custom_pack(manifest)
+    from deepseek_infra.infra.skills import versioning
+
+    versioning.snapshot_pack(manifest, change_summary="Imported Skill Pack", event="import")
 
     summary = {
         "ok": True,

@@ -6294,6 +6294,16 @@ body.file-reader-side-open.file-reader-pdf-open .file-original-region-toolbar .f
   display: none;
 }
 
+.skill-version-host {
+  display: grid;
+  gap: 14px;
+  margin: 0 0 20px;
+}
+
+.skill-version-host[hidden] {
+  display: none;
+}
+
 .skill-packs-header {
   display: flex;
   align-items: flex-start;
@@ -6309,7 +6319,8 @@ body.file-reader-side-open.file-reader-pdf-open .file-original-region-toolbar .f
 }
 
 .skill-eval-header,
-.skill-eval-section-header {
+.skill-eval-section-header,
+.skill-version-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -6317,7 +6328,9 @@ body.file-reader-side-open.file-reader-pdf-open .file-original-region-toolbar .f
 }
 
 .skill-eval-header h3,
-.skill-eval-section h4 {
+.skill-eval-section h4,
+.skill-version-header h3,
+.skill-version-section h4 {
   margin: 0;
   color: var(--text-primary);
   font-size: 16px;
@@ -6332,7 +6345,8 @@ body.file-reader-side-open.file-reader-pdf-open .file-original-region-toolbar .f
 }
 
 .skill-eval-header p,
-.skill-eval-section-header p {
+.skill-eval-section-header p,
+.skill-version-header p {
   margin: 4px 0 0;
   color: var(--text-tertiary);
   font-size: 12px;
@@ -6352,6 +6366,35 @@ body.file-reader-side-open.file-reader-pdf-open .file-original-region-toolbar .f
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.skill-version-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  align-items: end;
+  gap: 8px;
+}
+
+.skill-version-toolbar label {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
+.skill-version-toolbar span {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.skill-version-toolbar select {
+  min-width: 0;
+  min-height: 40px;
+  border: 1px solid var(--border-default);
+  border-radius: 12px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  padding: 8px 10px;
 }
 
 .skill-eval-summary {
@@ -6452,7 +6495,9 @@ body.file-reader-side-open.file-reader-pdf-open .file-original-region-toolbar .f
 }
 
 .skill-eval-table,
-.skill-eval-case-list {
+.skill-eval-case-list,
+.skill-version-list,
+.skill-pack-version-list {
   display: grid;
   gap: 8px;
 }
@@ -6526,6 +6571,49 @@ body.file-reader-side-open.file-reader-pdf-open .file-original-region-toolbar .f
 .skill-eval-case-row strong {
   color: var(--text-primary);
   font-size: 13px;
+}
+
+.skill-version-row,
+.skill-pack-version-row,
+.skill-version-section,
+.skill-version-diff {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--bg-sunken);
+  padding: 10px 12px;
+}
+
+.skill-version-row strong,
+.skill-pack-version-row strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skill-version-row span,
+.skill-version-row p,
+.skill-pack-version-row span {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.skill-version-diff pre {
+  max-height: 320px;
+  overflow: auto;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .skill-packs-hint {
@@ -9288,6 +9376,7 @@ body.file-reader-side-open.file-reader-pdf-open .file-original-region-toolbar .f
   .skill-builder-field-grid,
   .skill-builder-field-grid.compact,
   .skill-tool-picker,
+  .skill-version-toolbar,
   .skill-eval-summary,
   .skill-eval-case-grid,
   .skill-eval-row,

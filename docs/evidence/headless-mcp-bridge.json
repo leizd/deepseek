@@ -1,21 +1,21 @@
 {
   "schemaVersion": "headless-mcp-bridge-evidence.v1",
-  "version": "2.6.5",
-  "commit": "4086c59",
-  "generatedAt": "2026-06-30T07:11:56Z",
+  "version": "2.6.6",
+  "commit": "3a4324b",
+  "generatedAt": "2026-06-30T12:24:04Z",
   "environment": {
     "os": "Windows",
     "python": "3.13.5",
     "ci": false
   },
-  "gitSha": "4086c59",
+  "gitSha": "3a4324b",
   "gitDirty": true,
   "status": "PASS",
   "transport": {
     "server": "embedded-or-local-http",
     "bridge": "builtin-stdio-http",
     "mcpUrl": "http://127.0.0.1:8000/mcp",
-    "auth": "disabled"
+    "auth": "bearer"
   },
   "covers": [
     "initialize",

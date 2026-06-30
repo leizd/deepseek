@@ -1,7 +1,7 @@
 # Agent Eval Report
 
-- Version: 2.6.5
-- Generated: 2026-06-30T07:12:53Z
+- Version: 2.6.6
+- Generated: 2026-06-30T12:23:01Z
 - Status: PASS
 
 | Metric | Value |

@@ -2,6 +2,24 @@
 
 本项目使用类似 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的分组方式维护变更记录。未发布内容记录在 `[Unreleased]`，正式发版时迁移到具体版本。
 
+## [2.6.6] - Skill Versioning & Migration
+
+**Theme: Skill lifecycle management.** After v2.6.5 added Skill / Pack quality evaluation, this release adds local version history, diff, migration plans, rollback, versioned Pack installs, and eval-aware upgrade gates.
+
+### Added
+
+- **Skill Version History**: custom Skill create/update/import flows now persist local revision snapshots with `revisionId`, `changeSummary`, `schemaHash`, `promptHash`, and `toolGrantHash`.
+- **Skill Diff & Migration Plan**: `POST /api/skills` supports version listing, diff, rollback, and migration planning for schema changes such as field rename and required field additions.
+- **Pack Versioning**: Skill Packs can list versions, diff revisions, upgrade or rollback local custom Packs, and record `packId`, `version`, and `installedAt` in project bindings.
+- **Eval-aware Upgrade Gate**: Skill / Pack lifecycle actions can run the existing offline eval comparison path before install or upgrade and surface regression risk.
+- **Versioning UI**: Skill Workbench adds a Versions panel for Skill history, compare, migration plan, rollback, and Pack upgrade gate previews.
+- **Versioning Evidence**: adds `scripts/smoke_skill_versioning.py`, `docs/evidence/skill-versioning-v2.6.6.json`, and screenshot assets for release readiness.
+
+### Changed
+
+- Project Skill bindings remain backward-compatible with string `enabledPacks` while adding `enabledPackVersions` metadata.
+- Release readiness, CI, smoke release, and release manifest include the `skillVersioning` quality gate.
+
 ## [2.6.5] - Skill Eval Dashboard
 
 **Theme: Skill quality and regression loop.** After v2.6.4 added local Skill Packs, this release adds offline Skill / Pack evaluation, a Workbench quality dashboard, eval case authoring, report export, and release-gate evidence.

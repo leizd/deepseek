@@ -11,6 +11,7 @@ from typing import Any
 
 from deepseek_infra.core.config import PROJECTS_DIR
 from deepseek_infra.core.errors import AppError, ErrorCode
+from deepseek_infra.core.utils import utc_now_iso
 from deepseek_infra.infra.rag.files import extract_uploaded_file
 
 MAX_PROJECTS = 40
@@ -41,7 +42,7 @@ def create_project(name: str) -> dict[str, Any]:
         "id": f"proj-{secrets.token_hex(6)}",
         "name": normalize_project_name(name),
         "documents": [],
-        "skills": {"enabledPacks": [], "enabledSkills": [], "defaultSkill": "", "recentSkills": []},
+        "skills": {"enabledPacks": [], "enabledPackVersions": [], "enabledSkills": [], "defaultSkill": "", "recentSkills": []},
         "skillRuns": [],
         "savedItems": [],
         "artifacts": [],
@@ -78,6 +79,7 @@ def set_project_skill_binding(
     *,
     default_skill: str = "",
     enabled_packs: list[str] | None = None,
+    enabled_pack_versions: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     project = require_project(project_id)
     enabled = [skill for skill in (normalize_skill_id_for_project(item) for item in enabled_skills) if skill]
@@ -86,8 +88,14 @@ def set_project_skill_binding(
         enabled.insert(0, default)
     existing = normalize_project_skills(project.get("skills"))
     packs = unique_strings(normalize_pack_id_for_project(item) for item in (enabled_packs if enabled_packs is not None else existing.get("enabledPacks", [])))
+    pack_versions = (
+        normalize_project_pack_versions(enabled_pack_versions)
+        if enabled_pack_versions is not None
+        else [item for item in existing.get("enabledPackVersions", []) if item.get("packId") in packs]
+    )
     project["skills"] = {
         "enabledPacks": packs[:40],
+        "enabledPackVersions": pack_versions[:40],
         "enabledSkills": unique_strings(enabled)[:40],
         "defaultSkill": default if default in enabled else "",
         "recentSkills": existing.get("recentSkills", []),
@@ -97,7 +105,7 @@ def set_project_skill_binding(
     return normalize_project_skills(project["skills"])
 
 
-def enable_pack_for_project(project_id: str, pack_id: str) -> dict[str, Any]:
+def enable_pack_for_project(project_id: str, pack_id: str, *, version: str = "") -> dict[str, Any]:
     """Enable all Skills referenced by a Skill Pack on a project.
 
     Resolves the pack through the Skill registry and adds its skillIds to the
@@ -122,7 +130,16 @@ def enable_pack_for_project(project_id: str, pack_id: str) -> dict[str, Any]:
     packs = list(binding.get("enabledPacks") or [])
     if pack.get("packId") not in packs:
         packs.append(str(pack.get("packId") or ""))
-    return set_project_skill_binding(project_id, enabled, default_skill=default, enabled_packs=packs)
+    pack_versions = list(binding.get("enabledPackVersions") or [])
+    pack_versions = [item for item in pack_versions if item.get("packId") != pack.get("packId")]
+    pack_versions.append(
+        {
+            "packId": str(pack.get("packId") or ""),
+            "version": str(version or pack.get("version") or ""),
+            "installedAt": utc_now_iso(),
+        }
+    )
+    return set_project_skill_binding(project_id, enabled, default_skill=default, enabled_packs=packs, enabled_pack_versions=pack_versions)
 
 
 def append_project_skill_run(project_id: str, run: dict[str, Any]) -> dict[str, Any]:
@@ -335,12 +352,17 @@ def normalize_documents(value: Any) -> list[dict[str, Any]]:
 
 def normalize_project_skills(value: Any) -> dict[str, Any]:
     data = value if isinstance(value, dict) else {}
-    packs = unique_strings(normalize_pack_id_for_project(item) for item in data.get("enabledPacks") or [])
+    raw_enabled_packs = data.get("enabledPacks") or []
+    raw_pack_versions = data.get("enabledPackVersions")
+    pack_versions = normalize_project_pack_versions(raw_pack_versions if raw_pack_versions is not None else raw_enabled_packs)
+    explicit_packs = unique_strings(normalize_pack_id_for_project(item) for item in raw_enabled_packs)
+    packs = unique_strings([*explicit_packs, *[item.get("packId", "") for item in pack_versions]])
     enabled = unique_strings(normalize_skill_id_for_project(item) for item in data.get("enabledSkills") or [])
     recent = unique_strings(normalize_skill_id_for_project(item) for item in data.get("recentSkills") or [])
     default = normalize_skill_id_for_project(data.get("defaultSkill"))
     return {
         "enabledPacks": packs[:40],
+        "enabledPackVersions": pack_versions[:40],
         "enabledSkills": enabled[:40],
         "defaultSkill": default if default in enabled else "",
         "recentSkills": recent[:20],
@@ -435,8 +457,28 @@ def normalize_skill_id_for_project(value: Any) -> str:
 
 
 def normalize_pack_id_for_project(value: Any) -> str:
+    if isinstance(value, dict):
+        value = value.get("packId")
     pack_id = str(value or "").strip()
     return pack_id if re.fullmatch(r"[A-Za-z0-9_:-]{3,80}", pack_id) else ""
+
+
+def normalize_project_pack_versions(value: Any) -> list[dict[str, Any]]:
+    rows = value if isinstance(value, list) else []
+    result: list[dict[str, Any]] = []
+    for item in rows:
+        if isinstance(item, dict):
+            pack_id = normalize_pack_id_for_project(item.get("packId"))
+            version = str(item.get("version") or "").strip()[:40]
+            installed_at = str(item.get("installedAt") or item.get("updatedAt") or "").strip()[:80]
+        else:
+            pack_id = normalize_pack_id_for_project(item)
+            version = ""
+            installed_at = ""
+        if not pack_id or any(existing.get("packId") == pack_id for existing in result):
+            continue
+        result.append({"packId": pack_id, "version": version, "installedAt": installed_at})
+    return result
 
 
 def unique_strings(values: Any) -> list[str]:

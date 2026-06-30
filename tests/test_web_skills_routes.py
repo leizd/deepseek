@@ -386,3 +386,132 @@ def test_skills_eval_report_and_case_builder_actions(tmp_settings: Path) -> None
         )
         assert status == 200
         assert deleted["deleted"] == "case_web_eval"
+
+
+def test_skills_versioning_actions(tmp_settings: Path) -> None:
+    skill = _custom_skill()
+    with _running_server() as server:
+        status, created, _ = _request(
+            server,
+            "POST",
+            "/api/skills",
+            payload={"action": "create", "skill": skill},
+            headers=_auth_headers(),
+        )
+        assert status == 200
+        assert created["skill"]["skillId"] == "skill_web_custom"
+
+        updated_skill = dict(skill)
+        updated_skill["version"] = "1.1.0"
+        updated_skill["inputSchema"] = {
+            "type": "object",
+            "properties": {
+                "subject": {"type": "string", "default": "web"},
+                "level": {"type": "string", "default": "beginner"},
+            },
+            "required": ["subject", "level"],
+            "additionalProperties": False,
+        }
+        status, updated, _ = _request(
+            server,
+            "POST",
+            "/api/skills",
+            payload={
+                "action": "update",
+                "skillId": "skill_web_custom",
+                "patch": {
+                    "version": "1.1.0",
+                    "inputSchema": updated_skill["inputSchema"],
+                    "changeSummary": "Web versioning update",
+                },
+            },
+            headers=_auth_headers(),
+        )
+        assert status == 200
+        assert updated["skill"]["version"] == "1.1.0"
+
+        status, versions, _ = _request(
+            server,
+            "POST",
+            "/api/skills",
+            payload={"action": "list_versions", "skillId": "skill_web_custom"},
+            headers=_auth_headers(),
+        )
+        assert status == 200
+        assert {"1.0.0", "1.1.0"} <= {item["version"] for item in versions["versions"]}
+
+        status, diff, _ = _request(
+            server,
+            "POST",
+            "/api/skills",
+            payload={"action": "diff_versions", "skillId": "skill_web_custom", "from": "1.0.0", "to": "1.1.0"},
+            headers=_auth_headers(),
+        )
+        assert status == 200
+        assert diff["diff"]["toolGrantDiff"]["added"] == []
+        assert any(item["field"] == "inputSchema" and item["changed"] for item in diff["diff"]["fields"])
+
+        status, plan, _ = _request(
+            server,
+            "POST",
+            "/api/skills",
+            payload={"action": "migration_plan", "skillId": "skill_web_custom", "from": "1.0.0", "to": "1.1.0"},
+            headers=_auth_headers(),
+        )
+        assert status == 200
+        assert plan["migrationPlan"]["safe"] is True
+
+        status, rollback, _ = _request(
+            server,
+            "POST",
+            "/api/skills",
+            payload={"action": "rollback_skill", "skillId": "skill_web_custom", "version": "1.0.0"},
+            headers=_auth_headers(),
+        )
+        assert status == 200
+        assert rollback["skill"]["version"] == "1.0.0"
+
+
+def test_skills_pack_versioning_actions(tmp_settings: Path) -> None:
+    project = projects.create_project("Pack Version API Project")
+    with _running_server() as server:
+        status, imported, _ = _request(
+            server,
+            "POST",
+            "/api/skills",
+            payload={"action": "import_pack", "pack": _pack_payload()},
+            headers=_auth_headers(),
+        )
+        assert status == 200
+        assert imported["pack"]["packId"] == "pack_web_test"
+
+        status, versions, _ = _request(
+            server,
+            "POST",
+            "/api/skills",
+            payload={"action": "list_pack_versions", "packId": "pack_web_test"},
+            headers=_auth_headers(),
+        )
+        assert status == 200
+        assert any(item["version"] == "1.0.0" for item in versions["versions"])
+
+        status, diff, _ = _request(
+            server,
+            "POST",
+            "/api/skills",
+            payload={"action": "diff_pack_versions", "packId": "pack_web_test", "from": "1.0.0", "to": "current"},
+            headers=_auth_headers(),
+        )
+        assert status == 200
+        assert diff["diff"]["packId"] == "pack_web_test"
+
+        status, upgraded, _ = _request(
+            server,
+            "POST",
+            "/api/skills",
+            payload={"action": "upgrade_pack", "packId": "pack_web_test", "version": "1.0.0", "projectId": project["id"]},
+            headers=_auth_headers(),
+        )
+        assert status == 200
+        assert upgraded["evalAwareUpgradeGate"]["status"] in {"PASS", "REVIEW"}
+        assert upgraded["projectBinding"]["enabledPackVersions"][0]["packId"] == "pack_web_test"
