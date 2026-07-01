@@ -1,4 +1,4 @@
-# A2A Interop — Independent-Process Peer
+# A2A 互操作 — 独立进程 Peer
 
 适用版本：DeepSeek Infra v2.3.0。
 
@@ -6,7 +6,7 @@
 
 > **诚实标注**：本次验证的是独立进程 interop，不是第三方生态 A2A 实现。Peer 使用 Python 标准库（`http.server`）构建，运行在独立端口，有自己的 Agent Card、JSON-RPC endpoint 和 task store。它验证 DeepSeek Infra 的 `A2AClient` 能与一个遵循 A2A JSON-RPC + SSE contract 的外部 server 真正互通。第三方生态 A2A 实现仍待实机。
 
-## Interop Peer
+## 互操作 Peer
 
 | 字段 | 值 |
 | --- | --- |
@@ -36,7 +36,7 @@ from deepseek_infra.infra.agent_runtime.a2a import A2AClient
 
 client = A2AClient("http://127.0.0.1:8002/a2a/agents/interop-peer", timeout_seconds=30)
 
-# Agent Card discovery
+# Agent Card 发现
 import urllib.request, json
 card = json.loads(urllib.request.urlopen("http://127.0.0.1:8002/.well-known/agent-card.json").read())
 

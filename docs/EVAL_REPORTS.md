@@ -1,6 +1,6 @@
-# Eval Reports
+# Eval Reports / 评测报告
 
-适用版本：v2.6.8。
+适用版本：v2.6.9。
 
 v2.2.7 把 RAG、Tool Policy 和 Prompt Injection adversarial eval 从分散 CLI 输出升级为一份可归档、可比较、可上传到 CI artifact 的离线评测报告。v2.4.0 把 Agent Eval、baseline compare 和版本化 security corpus 全部纳入硬门禁：每次 PR 都能看到当前分数、版本信息、数据集规模、阈值和退化判断，且退化会阻断 CI。
 
@@ -71,7 +71,7 @@ python evals/runners/run_offline_eval_suite.py \
 
 `evals/baselines/v2.2.6.json` 固化 v2.2.6 稳定离线评测基线。`compare_eval_baseline.py` 使用以下规则：
 
-| Metric | Warning | Fail |
+| 指标 | 警告 | 失败 |
 | --- | --- | --- |
 | RAG Recall@5 | 有下降但不超过 0.03 | 下降超过 0.03 |
 | Citation Accuracy | 有下降但不超过 0.05 | 下降超过 0.05 |

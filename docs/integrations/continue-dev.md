@@ -1,10 +1,10 @@
-# Continue.dev MCP Integration
+# Continue.dev MCP 集成
 
-适用版本：DeepSeek Infra v2.6.8。
+适用版本：DeepSeek Infra v2.6.9。
 
-本页是可复现配置说明 + GUI 实机验证 runbook。DeepSeek Infra 端的 MCP endpoint 已由本地 client、CI mock server、policy gate、trace diagnostics 覆盖。v2.4.5 已完成 Continue.dev MCP 实机验证，证据见下方 Evidence Template。
+本页是可复现配置说明 + GUI 实机验证操作手册。DeepSeek Infra 端的 MCP endpoint 已由本地 client、CI mock server、policy gate、trace diagnostics 覆盖。v2.4.5 已完成 Continue.dev MCP 实机验证，证据见下方证据模板。
 
-## 1. Start DeepSeek Infra
+## 1. 启动 DeepSeek Infra
 
 开发机快速验证可以临时关闭本地鉴权：
 
@@ -26,7 +26,7 @@ MCP endpoint:
 http://127.0.0.1:8000/mcp
 ```
 
-## 2. Continue.dev MCP Config
+## 2. Continue.dev MCP 配置
 
 Continue.dev 支持通过 `config.json` 或 `config.ts` 配置 MCP server。在 Continue.dev 的配置中加入：
 
@@ -67,7 +67,7 @@ Continue.dev 支持通过 `config.json` 或 `config.ts` 配置 MCP server。在 
 }
 ```
 
-## 3. Alternative: Stdio Bridge
+## 3. 替代方案：Stdio 桥接
 
 如果 Continue.dev 版本只接受 stdio MCP server，可以用 `mcp-remote` 做 stdio → HTTP bridge：
 
@@ -95,24 +95,24 @@ Continue.dev 支持通过 `config.json` 或 `config.ts` 配置 MCP server。在 
 
 `AUTH_DISABLED=1` 时可删除 `--header` 和下一项。
 
-## 4. Verify
+## 4. 验证
 
-1. Reload Continue.dev after editing its MCP config.
-2. Confirm `deepseek-infra` appears in Continue.dev's MCP/tools list.
-3. Run a safe tool such as `data_transform` or `python_eval`.
-4. Confirm DeepSeek Infra is healthy:
+1. 编辑 MCP 配置后重载 Continue.dev。
+2. 确认 `deepseek-infra` 出现在 Continue.dev 的 MCP/tools 列表中。
+3. 执行安全工具，如 `data_transform` 或 `python_eval`。
+4. 确认 DeepSeek Infra 健康：
 
 ```powershell
 python examples/mcp_tool_demo.py --base-url http://127.0.0.1:8000/mcp --token <YOUR_LOCAL_TOKEN>
 ```
 
-Expected local evidence:
+预期本地证据：
 
-- `initialize` reports server `deepseek-infra`
-- `tools/list` returns the local tool catalog
-- `tools/call data_transform` returns structured content
+- `initialize` 报告 server 为 `deepseek-infra`
+- `tools/list` 返回本地工具目录
+- `tools/call data_transform` 返回结构化内容
 
-## 5. GUI Verification Runbook（Continue.dev）
+## 5. GUI 验证操作手册（Continue.dev）
 
 完成以下步骤后，把证据填入下方模板并更新 `docs/COMPATIBILITY.md`。
 
@@ -128,7 +128,7 @@ Expected local evidence:
 
 3. **配置 MCP server**（见上方 §2 或 §3）。
 
-4. **Reload Continue.dev**，确认 `deepseek-infra` 出现在 MCP 工具列表。
+4. **重载 Continue.dev**，确认 `deepseek-infra` 出现在 MCP 工具列表。
 
 5. **验证 tools/list**：在 Continue.dev 中让它列出可用 MCP tools。预期：17 个本地工具（`data_transform`、`fetch_url`、`python_eval`、`search_files` 等）。
 
@@ -145,12 +145,12 @@ Expected local evidence:
 
 9. **截图或记录关键输出**，填入下方证据模板。
 
-### Evidence Template
+### 证据模板
 
 完成验证后，把以下内容贴入 `docs/COMPATIBILITY.md` 的 MCP Client Compatibility 表：
 
 ```markdown
-| Continue.dev | ✅ Tested | integrations/continue-dev.md + evidence/continue-dev-mcp.json | Continue.dev <version>, commit <sha>, OS, date：tools/list + data_transform + fetch_url SSRF blocked + 系统提示无污染 |
+| Continue.dev | ✅ 已验证 | integrations/continue-dev.md + evidence/continue-dev-mcp.json | Continue.dev <version>, commit <sha>, OS, date：tools/list + data_transform + fetch_url SSRF blocked + 系统提示无污染 |
 ```
 
 填写示例（替换尖括号内容）：
@@ -161,24 +161,24 @@ Expected local evidence:
 | DeepSeek Infra commit | `<current-commit>` |
 | 测试日期 | 2026-06-28 |
 | OS | Windows 11 |
-| Config loaded | ✅ `config.json` / `config.ts` |
+| 配置已加载 | ✅ `config.json` / `config.ts` |
 | tools/list | ✅ 17 个本地工具全部列出 |
 | 低风险工具调用 | ✅ `data_transform` count=4 |
 | Tool Policy 拦截 | ✅ `fetch_url` http://127.0.0.1/admin SSRF blocked |
 | 系统提示无污染 | ✅ |
 
-## 6. Troubleshooting
+## 6. 故障排查
 
-| Symptom | Check |
+| 现象 | 排查 |
 | --- | --- |
-| Continue.dev shows no tools | Confirm DeepSeek Infra is running and `MCP_ENABLED=1`. Reload Continue.dev after config change. |
-| 401 / unauthorized | Use the token from `.auth-token`, or start with `AUTH_DISABLED=1` for local-only testing. Verify `Authorization: Bearer` header in config. |
-| Tools list is empty | Check that Continue.dev's MCP config `transport.type` matches your transport (e.g. `streamable-http`). |
-| Tool call denied | The Tool Policy gate is working. For high-risk tools, pass explicit approval metadata or use safe tools first. |
-| connection refused | Verify `python app.py` is running on port 8000. Run `curl http://127.0.0.1:8000/healthz`. |
-| External bridged tool missing | Check `MCP_CLIENT_ENABLED=1`, `MCP_CLIENT_SERVERS`, then open `GET /api/mcp/external/tools`. |
+| Continue.dev 无工具 | 确认 DeepSeek Infra 正在运行且 `MCP_ENABLED=1`。配置变更后重载 Continue.dev。 |
+| 401 / unauthorized | 使用 `.auth-token` 中的 token，或本地测试时以 `AUTH_DISABLED=1` 启动。确认配置中的 `Authorization: Bearer` header。 |
+| 工具列表为空 | 检查 Continue.dev 的 MCP 配置中 `transport.type` 是否与你的传输方式匹配（例如 `streamable-http`）。 |
+| 工具调用被拒 | Tool Policy gate 正在生效。高风险工具需传入显式审批元数据，或先使用安全工具。 |
+| connection refused | 确认 `python app.py` 正在监听 8000 端口。执行 `curl http://127.0.0.1:8000/healthz`。 |
+| 外部桥接工具缺失 | 检查 `MCP_CLIENT_ENABLED=1`、`MCP_CLIENT_SERVERS`，然后访问 `GET /api/mcp/external/tools`。 |
 
-Reference docs:
+参考文档：
 
-- Continue.dev MCP docs: <https://docs.continue.dev/customization/tools#mcp>
-- Model Context Protocol transports: <https://modelcontextprotocol.io/specification>
+- Continue.dev MCP 文档：<https://docs.continue.dev/customization/tools#mcp>
+- Model Context Protocol transports：<https://modelcontextprotocol.io/specification>

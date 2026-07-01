@@ -1,10 +1,10 @@
-# Claude Desktop MCP Integration
+# Claude Desktop MCP 集成
 
-适用版本：DeepSeek Infra v2.6.8。
+适用版本：DeepSeek Infra v2.6.9。
 
-本页是可复现配置说明 + GUI 实机验证 runbook。DeepSeek Infra 端已验证的 MCP endpoint 是 `POST /mcp`（Streamable HTTP / JSON-RPC 2.0），本地鉴权默认需要 Bearer token。v2.4.2 已完成 Claude Desktop GUI 实机验证，证据见下方 Evidence Template。
+本页是可复现配置说明 + GUI 实机验证操作手册。DeepSeek Infra 端已验证的 MCP endpoint 是 `POST /mcp`（Streamable HTTP / JSON-RPC 2.0），本地鉴权默认需要 Bearer token。v2.4.2 已完成 Claude Desktop GUI 实机验证，证据见下方证据模板。
 
-## 1. Start DeepSeek Infra
+## 1. 启动 DeepSeek Infra
 
 开发机快速验证可以临时关闭本地鉴权：
 
@@ -26,7 +26,7 @@ MCP endpoint:
 http://127.0.0.1:8000/mcp
 ```
 
-## 2. Direct Remote MCP Config
+## 2. 直连远程 MCP 配置
 
 如果你的 Claude Desktop 版本支持 remote / Streamable HTTP MCP server，可在 Claude Desktop 的 MCP 配置中加入：
 
@@ -45,7 +45,7 @@ http://127.0.0.1:8000/mcp
 
 如果你用 `AUTH_DISABLED=1` 启动，可以去掉 `headers`。
 
-## 3. Stdio Bridge Fallback
+## 3. Stdio Bridge 回退方案
 
 如果 Claude Desktop 只接受 stdio MCP server，可以用 `mcp-remote` 在本机做一层 stdio → HTTP bridge：
 
@@ -68,23 +68,23 @@ http://127.0.0.1:8000/mcp
 
 `AUTH_DISABLED=1` 时可删除 `--header` 和下一项。
 
-## 4. Verify
+## 4. 验证
 
-1. Restart Claude Desktop after editing its MCP config.
-2. Ask Claude to list available MCP tools or call a safe tool such as `python_eval`.
-3. On the DeepSeek Infra side, verify:
+1. 编辑 MCP 配置后重启 Claude Desktop。
+2. 让 Claude 列出可用的 MCP tools，或调用安全工具，如 `python_eval`。
+3. 在 DeepSeek Infra 端验证：
 
 ```powershell
 python examples/mcp_tool_demo.py --base-url http://127.0.0.1:8000/mcp --token <YOUR_LOCAL_TOKEN>
 ```
 
-Expected local evidence:
+预期本地证据：
 
-- `initialize` reports server `deepseek-infra`
-- `tools/list` returns the local tool catalog
-- `tools/call python_eval` returns structured content
+- `initialize` 报告 server `deepseek-infra`
+- `tools/list` 返回本地工具目录
+- `tools/call python_eval` 返回结构化内容
 
-## 5. GUI Verification Runbook（Claude Desktop）
+## 5. GUI 验证操作手册（Claude Desktop）
 
 完成以下步骤后，把证据填入下方模板并更新 `docs/COMPATIBILITY.md`。
 
@@ -117,7 +117,7 @@ Expected local evidence:
 
 9. **截图或记录关键输出**，填入下方证据模板。
 
-### Evidence Template
+### 证据模板
 
 完成验证后，把以下内容贴入 `docs/COMPATIBILITY.md` 的 MCP Client Compatibility 表：
 
@@ -138,16 +138,16 @@ Expected local evidence:
 | Tool Policy 拦截 | ✅ `fetch_url` http://127.0.0.1/admin SSRF blocked |
 | 系统提示无污染 | ✅ |
 
-## 6. Troubleshooting
+## 6. 故障排除
 
-| Symptom | Check |
+| 现象 | 检查方式 |
 | --- | --- |
-| Claude shows no tools | Confirm DeepSeek Infra is running and `MCP_ENABLED=1`. |
-| 401 / unauthorized | Use the token from `.auth-token`, or start with `AUTH_DISABLED=1` for local-only testing. |
-| Tool call denied | The Tool Policy gate is working. For high-risk tools, pass explicit approval metadata or use safe tools first. |
-| External bridged tool missing | Check `MCP_CLIENT_ENABLED=1`, `MCP_CLIENT_SERVERS`, then open `GET /api/mcp/external/tools`. |
+| Claude 没有显示工具 | 确认 DeepSeek Infra 正在运行且 `MCP_ENABLED=1`。 |
+| 401 / unauthorized | 使用 `.auth-token` 中的 token，或用 `AUTH_DISABLED=1` 启动进行纯本地测试。 |
+| 工具调用被拒绝 | Tool Policy gate 正在工作。对于高风险工具，请传入显式的批准元数据，或先使用安全工具。 |
+| 外部桥接工具缺失 | 检查 `MCP_CLIENT_ENABLED=1`、`MCP_CLIENT_SERVERS`，然后打开 `GET /api/mcp/external/tools`。 |
 
-Reference docs checked on 2026-06-26:
+参考文档（2026-06-26 查阅）：
 
-- Anthropic MCP docs: <https://docs.anthropic.com/en/docs/agents-and-tools/mcp>
-- Model Context Protocol transports: <https://modelcontextprotocol.io/specification>
+- Anthropic MCP 文档：<https://docs.anthropic.com/en/docs/agents-and-tools/mcp>
+- Model Context Protocol 传输协议：<https://modelcontextprotocol.io/specification>

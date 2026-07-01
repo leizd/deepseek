@@ -1,6 +1,6 @@
-# A2A Third-Party Ecosystem Evidence
+# A2A 第三方生态验证
 
-适用版本：DeepSeek Infra v2.6.8。
+适用版本：DeepSeek Infra v2.6.9。
 
 本页从 v2.4.5 起不再只是验证计划，而是 **验证记录 + 复现流程**。v2.3.0 已完成独立进程 A2A peer 互操作验证；v2.3.3 新增 external peer smoke runner；v2.4.5 进一步把 Third-party A2A ecosystem peer 收口为结构化 evidence：`docs/evidence/a2a-third-party-peer.json` 与 `docs/evidence/a2a-third-party-peer.md`。
 
@@ -59,7 +59,7 @@
    task = client.send_message("Hello from DeepSeek Infra")
    ```
 
-## Evidence Schema
+## 证据 Schema
 
 `evals/schemas/a2a_third_party_peer_evidence.schema.json` 固定以下字段：
 
@@ -87,11 +87,11 @@
 
 ## 后续候选实现
 
-### Google A2A reference implementation
+### Google A2A 参考实现
 
 如果公开 reference server 可用，它是最直接的下一步验证目标。目标是保留同一套 smoke 命令，只替换 `--peer-url`，并在 evidence 中记录实现名称、版本、commit 与日期。
 
-### CrewAI / LangGraph A2A adapter
+### CrewAI / LangGraph A2A 适配器
 
 仓库已经保留 `examples/a2a_adapters/` 作为适配路径。若 CrewAI 或 LangGraph 暴露 A2A-compatible endpoint，可以通过 wrapper server 将 Agent Card、JSON-RPC 与 SSE 事件对齐到本 smoke runner。
 

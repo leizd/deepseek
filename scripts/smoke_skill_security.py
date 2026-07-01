@@ -144,7 +144,7 @@ def run_checks(runtime_root: Path) -> tuple[dict[str, str], dict[str, Any]]:
     checks["securityAssets"] = "PASS" if all((REPO_ROOT / path).is_file() for path in asset_paths) else "FAIL"
     syntax = subprocess.run(["node", "--check", "static/modules/skills.js"], cwd=REPO_ROOT, capture_output=True, text=True)
     checks["securityJsSyntax"] = "PASS" if syntax.returncode == 0 else "FAIL"
-    checks["ciReleaseGate"] = "PASS" if "smoke_skill_security.py" in ci and "skill-security-v2.6.8.json" in ci else "FAIL"
+    checks["ciReleaseGate"] = "PASS" if "smoke_skill_security.py" in ci and f"skill-security-v{APP_VERSION}.json" in ci else "FAIL"
 
     details["review"] = review
     details["toolGrantDiff"] = tool_diff["toolGrantDiff"]

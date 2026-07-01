@@ -2,79 +2,97 @@
 
 本项目使用类似 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的分组方式维护变更记录。未发布内容记录在 `[Unreleased]`，正式发版时迁移到具体版本。
 
-## [2.6.8] - Skill Security Review
+## [2.6.9] - Local Skill Catalog
 
-**Theme: Skill trust and signing prep.** After v2.6.7 added usage analytics, this release adds local Skill / Pack security review, trust levels, prompt-risk scanning, tamper-aware manifests, and run-time security metadata.
+**主题：本地 Skill Marketplace-lite。** 继 v2.6.8 增加安全审查、信任状态和 hash manifest 后，本版本新增本地 Skill Catalog，用于发现、搜索、预检、安装、卸载和导出本机 Skills / Packs，不引入远程市场或第三方下载。
 
 ### Added
 
-- **Skill Security Review**: reviews Skills and Packs for trust level, risk score, allowedTools risk, prompt injection indicators, filesystem/network/sensitive capabilities, approval requirements, and latest review timestamp.
-- **Static Prompt Scans**: detects prompt injection, secret exfiltration, secret file access, network exfiltration, hidden tool instructions, and base64-like suspicious text in Skill and Pack metadata.
-- **Trust Store & Blocking**: adds local `trust_skill`, `untrust_skill`, and `block_skill` controls with tamper detection for trusted Skill content hashes.
-- **Signing Prep Manifest**: records content, schema, prompt, and tool-grant hashes with `signed=false` metadata for future local signing / marketplace work.
-- **Security UI**: adds a Skill Workbench Security tab with summary cards, review rows, findings, manifest preview, and trust/block actions.
-- **Security Run Metadata**: Skill run analytics now capture run security level, review id, trusted-at-run state, tool grant hash, blocked reason, and approval requirement.
-- **Security Evidence**: adds `scripts/smoke_skill_security.py`, `docs/evidence/skill-security-v2.6.8.json`, screenshots, and release gate `skillSecurity`.
+- **Local Skill Catalog**：新增 `deepseek_infra/infra/skills/catalog.py`，索引内置 Skill、自定义 Skill、内置 Pack、自定义 Pack 和已导入 Pack。
+- **Catalog Manifest**：聚合 `category`、`tags`、`trustLevel`、`riskScore`、`evalScore`、`installCount`、`requiredTools`、`includedSkills`、`contentHash`、`schemaHash`、`promptHash` 和 `toolGrantHash`。
+- **Catalog API actions**：`POST /api/skills` 新增 `catalog_list`、`catalog_get`、`catalog_search`、`catalog_install`、`catalog_uninstall`、`catalog_refresh` 和 `catalog_export`。
+- **Install Preview Gate**：安装前展示 included Skills、工具权限、安全状态、eval 分数、项目绑定变化；high-risk 未批准和 blocked 条目会被拒绝安装。
+- **Catalog UI**：Skill Workbench 新增 `Catalog` 页签，支持搜索、信任筛选、安装预检、安装到当前项目、跳转安全审查和导出 catalog manifest。
+- **Catalog Evidence**：新增 `scripts/smoke_skill_catalog.py`、`docs/evidence/skill-catalog-v2.6.9.json`、Catalog 截图资产，并将 release manifest / preflight / CI 纳入 `skillCatalog` gate。
 
 ### Changed
 
-- Skill Runner blocks high-risk untrusted Skills unless `securityApproved=true` is supplied, and blocked Skills always fail before execution.
-- Release readiness, CI, smoke release, preflight, and release manifest include Skill Security evidence.
+- README、docs/SKILLS.md、docs/EVIDENCE_INDEX.md、docs/RELEASE_READINESS.md 和实现状态矩阵同步到 v2.6.9。
+- `scripts/smoke_release.py` 增加 `skill_catalog` stage；CI release-readiness job 生成并校验 Catalog evidence。
+
+## [2.6.8] - Skill Security Review
+
+**主题：Skill 信任与签名预备。** 继 v2.6.7 新增使用分析之后，本版本新增本地 Skill / Pack 安全审查、信任等级、提示风险扫描、防篡改清单和运行时安全元数据。
+
+### 新增
+
+- **Skill 安全审查**：审查 Skill 和 Pack 的信任等级、风险评分、allowedTools 风险、prompt injection 指标、文件系统/网络/敏感能力、审批要求以及最近审查时间戳。
+- **静态 Prompt 扫描**：检测 Skill 和 Pack 元数据中的 prompt injection、密钥外泄、密钥文件访问、网络外泄、隐藏工具指令以及类似 base64 的可疑文本。
+- **信任商店与拦截**：新增本地 `trust_skill`、`untrust_skill` 和 `block_skill` 控制项，并对受信任 Skill 内容哈希进行篡改检测。
+- **签名预备清单**：记录内容、schema、prompt 和工具授权哈希，附带 `signed=false` 元数据，为未来的本地签名/市场工作做准备。
+- **安全 UI**：新增 Skill Workbench 安全页签，包含摘要卡片、审查行、发现项、清单预览和信任/拦截操作。
+- **安全运行元数据**：Skill 运行分析现在捕获运行安全等级、审查 ID、运行时信任状态、工具授权哈希、拦截原因和审批要求。
+- **安全证据**：新增 `scripts/smoke_skill_security.py`、`docs/evidence/skill-security-v2.6.8.json`、截图和 release gate `skillSecurity`。
+
+### 变更
+
+- Skill Runner 拦截高风险未信任的 Skill，除非提供 `securityApproved=true`；被拦截的 Skill 在执行前始终失败。
+- 发布就绪、CI、smoke release、preflight 和 release manifest 纳入 Skill Security 证据。
 
 ## [2.6.7] - Skill Run Analytics
 
-**Theme: Skill usage and run history.** After v2.6.6 added Skill / Pack lifecycle management, this release adds local Skill run history, usage analytics, failure diagnostics, trace/artifact links, retention cleanup, and privacy redaction.
+**主题：Skill 使用与运行历史。** 继 v2.6.6 新增 Skill / Pack 生命周期管理之后，本版本新增本地 Skill 运行历史、使用分析、失败诊断、trace/artifact 链接、保留清理和隐私脱敏。
 
-### Added
+### 新增
 
-- **Skill Run History**: records completed and failed Skill runs with skillRunId, skillId, skillVersion, packId, projectId, status, timestamps, latency, offline/model metadata, summaries, artifact/saved item counts, and traceId.
-- **Skill Usage Analytics**: adds local summaries for success/failure rate, average/P50/P90 latency, top Skills/Packs, artifact volume, project binding usage, and 7-day trend.
-- **Failure Diagnostics**: classifies failures such as schema validation, tool policy denial, artifact policy, project binding, LLM/API, timeout, user cancellation, and unknown errors with repair suggestions.
-- **Analytics API Actions**: adds `list_runs`, `get_run`, `delete_run`, `analytics_summary`, `cleanup_runs`, `redact_run`, and `export_runs` to `POST /api/skills`, plus project-level `GET /api/workspace/projects/{projectId}/skill-analytics`.
-- **Runs UI**: adds a Skill Workbench `Runs` tab with summary cards, run list, run detail, trace/artifact/saved item links, export, failed-run cleanup, and privacy redaction controls.
-- **Analytics Evidence**: adds `scripts/smoke_skill_analytics.py`, `docs/evidence/skill-analytics-v2.6.7.json`, screenshots, and release gate `skillAnalytics`.
+- **Skill 运行历史**：记录完成和失败的 Skill 运行，包含 skillRunId、skillId、skillVersion、packId、projectId、状态、时间戳、延迟、离线/模型元数据、摘要、artifact/saved item 数量和 traceId。
+- **Skill 使用分析**：新增本地摘要，包含成功率/失败率、平均/P50/P90 延迟、热门 Skill/Pack、artifact 产出量、项目绑定使用情况和 7 日趋势。
+- **失败诊断**：分类失败类型，如 schema 校验、工具策略拒绝、artifact 策略、项目绑定、LLM/API、超时、用户取消和未知错误，并提供修复建议。
+- **分析 API 操作**：新增 `list_runs`、`get_run`、`delete_run`、`analytics_summary`、`cleanup_runs`、`redact_run` 和 `export_runs` 到 `POST /api/skills`，以及项目级 `GET /api/workspace/projects/{projectId}/skill-analytics`。
+- **运行 UI**：新增 Skill Workbench 的 `Runs` 页签，包含摘要卡片、运行列表、运行详情、trace/artifact/saved item 链接、导出、失败运行清理和隐私脱敏控制。
+- **分析证据**：新增 `scripts/smoke_skill_analytics.py`、`docs/evidence/skill-analytics-v2.6.7.json`、截图和 release gate `skillAnalytics`。
 
-### Changed
+### 变更
 
-- Skill Runner now persists analytics metadata for successful and failed runs while keeping analytics logs summary-first for local privacy.
-- Release readiness, CI, smoke release, and release manifest include Skill Analytics evidence.
+- Skill Runner 现在为成功和失败的运行持久化分析元数据，同时以摘要优先的方式保存分析日志以保护本地隐私。
+- 发布就绪、CI、smoke release 和 release manifest 纳入 Skill Analytics 证据。
 
 ## [2.6.6] - Skill Versioning & Migration
 
-**Theme: Skill lifecycle management.** After v2.6.5 added Skill / Pack quality evaluation, this release adds local version history, diff, migration plans, rollback, versioned Pack installs, and eval-aware upgrade gates.
+**主题：Skill 生命周期管理。** 继 v2.6.5 新增 Skill / Pack 质量评测后，本版本新增本地版本历史、diff、迁移计划、回滚、版本化 Pack 安装和评测感知的升级门禁。
 
-### Added
+### 新增
 
-- **Skill Version History**: custom Skill create/update/import flows now persist local revision snapshots with `revisionId`, `changeSummary`, `schemaHash`, `promptHash`, and `toolGrantHash`.
-- **Skill Diff & Migration Plan**: `POST /api/skills` supports version listing, diff, rollback, and migration planning for schema changes such as field rename and required field additions.
-- **Pack Versioning**: Skill Packs can list versions, diff revisions, upgrade or rollback local custom Packs, and record `packId`, `version`, and `installedAt` in project bindings.
-- **Eval-aware Upgrade Gate**: Skill / Pack lifecycle actions can run the existing offline eval comparison path before install or upgrade and surface regression risk.
-- **Versioning UI**: Skill Workbench adds a Versions panel for Skill history, compare, migration plan, rollback, and Pack upgrade gate previews.
-- **Versioning Evidence**: adds `scripts/smoke_skill_versioning.py`, `docs/evidence/skill-versioning-v2.6.6.json`, and screenshot assets for release readiness.
+- **Skill 版本历史**：自定义 Skill 的创建/更新/导入流程现在持久化本地修订快照，包含 `revisionId`、`changeSummary`、`schemaHash`、`promptHash` 和 `toolGrantHash`。
+- **Skill Diff 与迁移计划**：`POST /api/skills` 支持版本列表、diff、回滚以及针对字段重命名和必填字段新增等 schema 变更的迁移计划。
+- **Pack 版本化**：Skill Pack 支持版本列表、修订对比、升级或回滚本地自定义 Pack，并在项目绑定中记录 `packId`、`version` 和 `installedAt`。
+- **评测感知的升级门禁**：Skill / Pack 生命周期操作可在安装或升级前运行现有离线评测对比路径，并暴露回归风险。
+- **版本化 UI**：Skill Workbench 新增 Versions 面板，支持 Skill 历史、对比、迁移计划、回滚和 Pack 升级门禁预览。
+- **版本化证据**：新增 `scripts/smoke_skill_versioning.py`、`docs/evidence/skill-versioning-v2.6.6.json` 以及截图资产用于发布就绪检查。
 
-### Changed
+### 变更
 
-- Project Skill bindings remain backward-compatible with string `enabledPacks` while adding `enabledPackVersions` metadata.
-- Release readiness, CI, smoke release, and release manifest include the `skillVersioning` quality gate.
+- 项目 Skill 绑定保持与字符串 `enabledPacks` 的向后兼容，同时新增 `enabledPackVersions` 元数据。
+- 发布就绪、CI、smoke release 和 release manifest 纳入 `skillVersioning` 质量门禁。
 
 ## [2.6.5] - Skill Eval Dashboard
 
-**Theme: Skill quality and regression loop.** After v2.6.4 added local Skill Packs, this release adds offline Skill / Pack evaluation, a Workbench quality dashboard, eval case authoring, report export, and release-gate evidence.
+**主题：Skill 质量与回归闭环。** 继 v2.6.4 新增本地 Skill Pack 之后，本版本新增离线 Skill / Pack 评测、Workbench 质量仪表盘、评测用例编写、报告导出和发布门禁证据。
 
-### Added
+### 新增
 
-- **Skill Eval Dashboard**: Skill Workbench adds an Eval tab showing Skill / Pack pass status, score, case counts, failed cases, and latest run metadata.
-- **Eval Case Builder**: local test cases can define input samples, expected keywords, required JSON paths, forbidden patterns, expected artifact types, and project binding requirements.
-- **Pack-level Eval**: `run_skill_eval.py` can evaluate one Skill, one Pack, all built-in Packs, or the full Skill registry.
-- **Regression Compare**: Skill eval reports compare current output to a baseline and mark new failures, fixed failures, and score regressions.
-- **Eval Reports**: adds `evals/reports/skills-v2.6.5.json` and `docs/evidence/skill-eval-dashboard-v2.6.5.json`.
-- **Release Gate**: release readiness, preflight, CI, and release manifest include `skillEvalDashboard` and versioned Skill eval report evidence.
+- **Skill 评测仪表盘**：Skill Workbench 新增 Eval 页签，展示 Skill / Pack 通过状态、评分、用例数、失败用例和最近运行元数据。
+- **评测用例构建器**：本地测试用例可定义输入样本、期望关键词、必需 JSON 路径、禁止模式、期望 artifact 类型和项目绑定要求。
+- **Pack 级评测**：`run_skill_eval.py` 可评测单个 Skill、单个 Pack、所有内置 Pack 或完整 Skill 注册表。
+- **回归对比**：Skill 评测报告将当前输出与基线对比，标记新增失败、已修复失败和评分回归。
+- **评测报告**：新增 `evals/reports/skills-v2.6.5.json` 和 `docs/evidence/skill-eval-dashboard-v2.6.5.json`。
+- **发布门禁**：发布就绪、preflight、CI 和 release manifest 纳入 `skillEvalDashboard` 和版本化 Skill 评估报告证据。
 
-### Changed
+### 变更
 
-- `run_skill_eval.py` now emits scored Skill / Pack reports with schema, tool policy, artifact, project binding, content, latency, and regression dimensions.
-- docs/SKILLS.md documents the Eval Dashboard, eval case format, API actions, and report export flow.
-- README roadmap and screenshots include Skill Quality & Regression.
+- `run_skill_eval.py` 现在输出带评分的 Skill / Pack 报告，涵盖 schema、工具策略、artifact、项目绑定、内容、延迟和回归维度。
+- docs/SKILLS.md 记录了评测仪表盘、评测用例格式、API 操作和报告导出流程。
+- README roadmap 和截图纳入 Skill Quality & Regression。
 
 ## [2.6.4] - Skill Packs
 

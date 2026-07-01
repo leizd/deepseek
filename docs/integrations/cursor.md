@@ -1,10 +1,10 @@
-# Cursor MCP Integration
+# Cursor MCP 集成
 
-适用版本：DeepSeek Infra v2.6.8。
+适用版本：DeepSeek Infra v2.6.9。
 
-本页是可复现配置说明 + GUI 实机验证 runbook。DeepSeek Infra 端的 MCP endpoint 已由本地 client、CI mock server、policy gate、trace diagnostics 覆盖。v2.4.2 已完成 Cursor GUI 实机验证，证据见下方 Evidence Template。
+本页是可复现配置说明 + GUI 实机验证操作手册。DeepSeek Infra 端的 MCP endpoint 已由本地 client、CI mock server、policy gate、trace diagnostics 覆盖。v2.4.2 已完成 Cursor GUI 实机验证，证据见下方证据模板。
 
-## 1. Start DeepSeek Infra
+## 1. 启动 DeepSeek Infra
 
 ```powershell
 python app.py
@@ -24,9 +24,9 @@ MCP endpoint:
 http://127.0.0.1:8000/mcp
 ```
 
-## 2. Project Config
+## 2. 项目配置
 
-Create or edit `.cursor/mcp.json` in the project:
+在项目中创建或编辑 `.cursor/mcp.json`：
 
 ```json
 {
@@ -41,7 +41,7 @@ Create or edit `.cursor/mcp.json` in the project:
 }
 ```
 
-If you started with `AUTH_DISABLED=1`, remove the `headers` block:
+如果以 `AUTH_DISABLED=1` 启动，去掉 `headers` 块：
 
 ```json
 {
@@ -53,20 +53,20 @@ If you started with `AUTH_DISABLED=1`, remove the `headers` block:
 }
 ```
 
-## 3. Verify
+## 3. 验证
 
-1. Reload Cursor after editing `.cursor/mcp.json`.
-2. Open Cursor's MCP/tools UI and confirm `deepseek-infra` appears.
-3. Run a safe tool such as `python_eval`.
-4. Confirm DeepSeek Infra is healthy:
+1. 编辑 `.cursor/mcp.json` 后重新加载 Cursor。
+2. 打开 Cursor 的 MCP/tools UI，确认 `deepseek-infra` 出现。
+3. 运行安全工具，如 `python_eval`。
+4. 确认 DeepSeek Infra 运行正常：
 
 ```powershell
 python examples/mcp_tool_demo.py --base-url http://127.0.0.1:8000/mcp --token <YOUR_LOCAL_TOKEN>
 ```
 
-## 4. External MCP Bridge
+## 4. 外部 MCP Bridge
 
-To bridge external MCP servers into DeepSeek Infra's local agent tool surface:
+将外部 MCP server 桥接到 DeepSeek Infra 的本地 agent 工具界面：
 
 ```powershell
 $env:MCP_CLIENT_ENABLED="1"
@@ -76,15 +76,15 @@ $env:MCP_CLIENT_SERVERS='[
 python app.py
 ```
 
-Then inspect:
+然后查看：
 
 ```text
 GET /api/mcp/external/tools
 ```
 
-The response includes each server's `status`, `lastError`, `lastRefreshAt`, `lastLatencyMs`, `lastRetryCount`, and `circuitOpenSeconds`.
+响应中包含每个 server 的 `status`、`lastError`、`lastRefreshAt`、`lastLatencyMs`、`lastRetryCount` 以及 `circuitOpenSeconds`。
 
-## 5. GUI Verification Runbook（Cursor）
+## 5. GUI 验证操作手册（Cursor）
 
 完成以下步骤后，把证据填入下方模板并更新 `docs/COMPATIBILITY.md`。
 
@@ -100,7 +100,7 @@ The response includes each server's `status`, `lastError`, `lastRefreshAt`, `las
 
 3. **配置 MCP server**（见上方 §2）。
 
-4. **Reload Cursor**，在 MCP/tools UI 中确认 `deepseek-infra` 出现。
+4. **重新加载 Cursor**，在 MCP/tools UI 中确认 `deepseek-infra` 出现。
 
 5. **验证 tools/list**：确认 Cursor 展示了 17 个本地工具。
 
@@ -116,7 +116,7 @@ The response includes each server's `status`, `lastError`, `lastRefreshAt`, `las
 
 9. **截图或记录关键输出**，填入下方证据模板。
 
-### Evidence Template
+### 证据模板
 
 完成验证后，把以下内容贴入 `docs/COMPATIBILITY.md` 的 MCP Client Compatibility 表：
 
@@ -137,16 +137,16 @@ The response includes each server's `status`, `lastError`, `lastRefreshAt`, `las
 | Tool Policy 拦截 | ✅ `fetch_url` http://127.0.0.1/admin SSRF blocked |
 | 系统提示无污染 | ✅ |
 
-## 6. Troubleshooting
+## 6. 故障排除
 
-| Symptom | Check |
+| 现象 | 检查方式 |
 | --- | --- |
-| Cursor does not list the server | Verify `.cursor/mcp.json` is in the opened workspace and reload Cursor. |
-| 401 / unauthorized | Use `.auth-token` as Bearer token, or test with `AUTH_DISABLED=1`. |
-| Tools list but calls fail | Check Tool Policy denial in the structured tool result. |
-| Bridged external tool is unavailable | Open `/api/mcp/external/tools`; circuit breaker and last error are reported per server. |
+| Cursor 未列出 server | 确认 `.cursor/mcp.json` 在打开的工作区中并重新加载 Cursor。 |
+| 401 / unauthorized | 使用 `.auth-token` 作为 Bearer token，或用 `AUTH_DISABLED=1` 测试。 |
+| 工具列表正常但调用失败 | 检查结构化工具结果中的 Tool Policy 拦截信息。 |
+| 桥接的外部工具不可用 | 打开 `/api/mcp/external/tools`；circuit breaker 和最近错误按 server 逐一报告。 |
 
-Reference docs checked on 2026-06-26:
+参考文档（2026-06-26 查阅）：
 
-- Cursor MCP docs: <https://cursor.com/docs/context/mcp>
-- Model Context Protocol transports: <https://modelcontextprotocol.io/specification>
+- Cursor MCP 文档：<https://cursor.com/docs/context/mcp>
+- Model Context Protocol 传输协议：<https://modelcontextprotocol.io/specification>

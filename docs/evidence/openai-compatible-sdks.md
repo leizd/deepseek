@@ -1,53 +1,53 @@
-# OpenAI-Compatible SDKs Smoke Evidence
+# OpenAI-Compatible SDKs Smoke Evidence / OpenAI 兼容 SDK 冒烟测试证据
 
-- Version: 2.6.0
-- Commit: 8a44088
-- Status: PASS
-- Generated: 2026-06-28T10:00:00Z
-- OS: Windows
+- 版本: 2.6.0
+- 提交: 8a44088
+- 状态: 通过
+- 生成时间: 2026-06-28T10:00:00Z
+- 操作系统: Windows
 - Python: 3.13.5
 - CI: false
 
-## Target
+## 目标
 
-- Base URL: http://127.0.0.1:8000/v1
-- Model: deepseek-v4-pro
+- 基础 URL: http://127.0.0.1:8000/v1
+- 模型: deepseek-v4-pro
 
-## SDK Checks
+## SDK 检查
 
 ### langchain
 
-| Check | Result |
+| 检查项 | 结果 |
 | --- | --- |
-| modelsList | PASS |
-| chatCompletion | PASS |
-| streaming | PASS |
+| modelsList | 通过 |
+| chatCompletion | 通过 |
+| streaming | 通过 |
 
 ### litellm
 
-| Check | Result |
+| 检查项 | 结果 |
 | --- | --- |
-| modelsList | PASS |
-| chatCompletion | PASS |
-| streaming | PASS |
+| modelsList | 通过 |
+| chatCompletion | 通过 |
+| streaming | 通过 |
 
 ### llamaindex
 
-| Check | Result |
+| 检查项 | 结果 |
 | --- | --- |
-| chatCompletion | PASS |
+| chatCompletion | 通过 |
 
-## Steps
+## 步骤
 
-1. **openai.healthz**: pass — starting SDK smoke
-2. **sdk.langchain.models**: pass — 3 models
-3. **sdk.langchain.chat**: pass — response=Hello
-4. **sdk.langchain.stream**: pass — stream chunks=5
-5. **sdk.litellm.models**: pass — 3 models
-6. **sdk.litellm.chat**: pass — response=Hello
-7. **sdk.litellm.stream**: pass — stream chunks=5
-8. **sdk.llamaindex.chat**: pass — response=Hello
+1. **openai.healthz**: 通过 — 开始 SDK 冒烟测试
+2. **sdk.langchain.models**: 通过 — 3 个模型
+3. **sdk.langchain.chat**: 通过 — 响应=Hello
+4. **sdk.langchain.stream**: 通过 — 流式块数=5
+5. **sdk.litellm.models**: 通过 — 3 个模型
+6. **sdk.litellm.chat**: 通过 — 响应=Hello
+7. **sdk.litellm.stream**: 通过 — 流式块数=5
+8. **sdk.llamaindex.chat**: 通过 — 响应=Hello
 
-## Summary
+## 摘要
 
-LangChain (ChatOpenAI), LiteLLM, and LlamaIndex (OpenAILike) are verified to consume DeepSeek Infra's `/v1` OpenAI-compatible endpoint for model listing, chat completion, and (where applicable) streaming. Each SDK reuses the same base URL and auth token, confirming the endpoint follows standard OpenAI API conventions.
+已验证 LangChain (ChatOpenAI)、LiteLLM 和 LlamaIndex (OpenAILike) 能够通过 DeepSeek Infra 的 `/v1` OpenAI 兼容端点进行模型列表获取、聊天补全以及（在适用情况下）流式传输。每个 SDK 复用相同的基础 URL 和认证令牌，确认该端点遵循标准的 OpenAI API 约定。

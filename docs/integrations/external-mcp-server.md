@@ -1,16 +1,16 @@
-# External MCP Server Interop
+# 外部 MCP Server 互操作
 
 适用版本：DeepSeek Infra v2.3.0。
 
 本页记录 DeepSeek Infra 的 MCP 外部 server 桥接与一个**真实第三方 MCP SDK 实现**的互操作验证结果。验证使用官方 `mcp` Python SDK（PyPI `mcp>=1.0`）构建的 Streamable HTTP server 作为 interop partner，不是同进程 mock。
 
-## Interop Partner
+## 互操作 Partner
 
 | 字段 | 值 |
 | --- | --- |
 | Partner 实现 | 官方 `mcp` Python SDK v1.28.1（`FastMCP` + `streamable-http` transport） |
 | Partner 脚本 | `examples/external_mcp_server_partner.py` |
-| Transport | Streamable HTTP / JSON-RPC 2.0 over `POST /mcp` |
+| 传输协议 | Streamable HTTP / JSON-RPC 2.0 over `POST /mcp` |
 | 响应格式 | `text/event-stream`（SSE）—— 官方 SDK 对每个 POST 都返回 SSE |
 | Partner 工具 | `echo(text)` → str、`word_count(text)` → int |
 | 验证日期 | 2026-06-27 |
@@ -63,7 +63,7 @@ python scripts/smoke_mcp_compat.py --external-server-url http://127.0.0.1:9001/m
 
 ### Smoke 步骤（全部 PASS）
 
-| Step | Status | Detail |
+| 步骤 | 状态 | 详细 |
 | --- | --- | --- |
 | `healthz` | ✅ PASS | `status=ok` |
 | `mcp.initialize` | ✅ PASS | `protocol=2025-06-18 server=deepseek-infra` |
@@ -75,7 +75,7 @@ python scripts/smoke_mcp_compat.py --external-server-url http://127.0.0.1:9001/m
 
 ### 桥接工具
 
-| Bridged Name | Server | Tool | Risk | Network | Filesystem | Requires Approval |
+| 桥接名称 | 服务器 | 工具 | 风险 | 网络 | 文件系统 | 需要审批 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `mcp__interop-partner__echo` | interop-partner | echo | medium | false | false | false |
 | `mcp__interop-partner__word_count` | interop-partner | word_count | medium | false | false | false |

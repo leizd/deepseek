@@ -6324,6 +6324,16 @@ body.file-reader-side-open.file-reader-pdf-open .file-original-region-toolbar .f
   display: none;
 }
 
+.skill-catalog-host {
+  display: grid;
+  gap: 14px;
+  margin: 0 0 20px;
+}
+
+.skill-catalog-host[hidden] {
+  display: none;
+}
+
 .skill-packs-header {
   display: flex;
   align-items: flex-start;
@@ -6342,7 +6352,8 @@ body.file-reader-side-open.file-reader-pdf-open .file-original-region-toolbar .f
 .skill-eval-section-header,
 .skill-version-header,
 .skill-runs-header,
-.skill-security-header {
+.skill-security-header,
+.skill-catalog-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -6354,7 +6365,8 @@ body.file-reader-side-open.file-reader-pdf-open .file-original-region-toolbar .f
 .skill-version-header h3,
 .skill-version-section h4,
 .skill-runs-header h3,
-.skill-security-header h3 {
+.skill-security-header h3,
+.skill-catalog-header h3 {
   margin: 0;
   color: var(--text-primary);
   font-size: 16px;
@@ -6372,7 +6384,8 @@ body.file-reader-side-open.file-reader-pdf-open .file-original-region-toolbar .f
 .skill-eval-section-header p,
 .skill-version-header p,
 .skill-runs-header p,
-.skill-security-header p {
+.skill-security-header p,
+.skill-catalog-header p {
   margin: 4px 0 0;
   color: var(--text-tertiary);
   font-size: 12px;
@@ -6415,22 +6428,33 @@ body.file-reader-side-open.file-reader-pdf-open .file-original-region-toolbar .f
   flex-wrap: wrap;
 }
 
+.skill-catalog-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(140px, 180px) auto auto;
+  align-items: end;
+  gap: 8px;
+}
+
 .skill-version-toolbar label,
-.skill-runs-toolbar label {
+.skill-runs-toolbar label,
+.skill-catalog-toolbar label {
   display: grid;
   min-width: 0;
   gap: 6px;
 }
 
 .skill-version-toolbar span,
-.skill-runs-toolbar span {
+.skill-runs-toolbar span,
+.skill-catalog-toolbar span {
   color: var(--text-secondary);
   font-size: 12px;
   font-weight: 650;
 }
 
 .skill-version-toolbar select,
-.skill-runs-toolbar select {
+.skill-runs-toolbar select,
+.skill-catalog-toolbar select,
+.skill-catalog-toolbar input {
   min-width: 0;
   min-height: 40px;
   border: 1px solid var(--border-default);
@@ -6904,6 +6928,172 @@ body.file-reader-side-open.file-reader-pdf-open .file-original-region-toolbar .f
 }
 
 .skill-security-detail pre {
+  max-height: 320px;
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.skill-catalog-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.skill-catalog-metric,
+.skill-catalog-row,
+.skill-catalog-detail,
+.skill-catalog-preview-card {
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--bg-sunken);
+}
+
+.skill-catalog-metric {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 12px;
+}
+
+.skill-catalog-metric span,
+.skill-catalog-metric small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skill-catalog-metric strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 18px;
+  font-weight: 780;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skill-catalog-list {
+  display: grid;
+  gap: 10px;
+}
+
+.skill-catalog-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+}
+
+.skill-catalog-row.status-high-risk,
+.skill-catalog-row.status-blocked {
+  border-color: rgba(220, 38, 38, 0.42);
+}
+
+.skill-catalog-row.status-needs-review {
+  border-color: rgba(217, 119, 6, 0.42);
+}
+
+.skill-catalog-row.status-trusted {
+  border-color: rgba(22, 163, 74, 0.36);
+}
+
+.skill-catalog-row-body {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.skill-catalog-row-body strong,
+.skill-catalog-row-body span,
+.skill-catalog-row-body p {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skill-catalog-row-body strong {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 740;
+}
+
+.skill-catalog-row-body span,
+.skill-catalog-row-body p {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.skill-catalog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.skill-catalog-detail {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+}
+
+.skill-catalog-detail[hidden] {
+  display: none;
+}
+
+.skill-catalog-detail h4,
+.skill-catalog-detail p {
+  margin: 0;
+}
+
+.skill-catalog-detail h4 {
+  color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 760;
+}
+
+.skill-catalog-detail p {
+  color: var(--text-tertiary);
+  font-size: 12px;
+  word-break: break-word;
+}
+
+.skill-catalog-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.skill-catalog-preview-card {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 10px;
+}
+
+.skill-catalog-preview-card span {
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.skill-catalog-preview-card strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skill-catalog-detail pre {
   max-height: 320px;
   margin: 0;
   overflow: auto;
@@ -9673,10 +9863,14 @@ body.file-reader-side-open.file-reader-pdf-open .file-original-region-toolbar .f
   .skill-tool-picker,
   .skill-version-toolbar,
   .skill-runs-toolbar,
+  .skill-catalog-toolbar,
   .skill-runs-summary,
   .skill-security-summary,
+  .skill-catalog-summary,
+  .skill-catalog-preview-grid,
   .skill-run-analytics-row,
   .skill-security-row,
+  .skill-catalog-row,
   .skill-eval-summary,
   .skill-eval-case-grid,
   .skill-eval-row,
@@ -9687,7 +9881,8 @@ body.file-reader-side-open.file-reader-pdf-open .file-original-region-toolbar .f
   .skill-card-actions,
   .skill-run-analytics-actions,
   .skill-run-detail-actions,
-  .skill-security-actions {
+  .skill-security-actions,
+  .skill-catalog-actions {
     justify-content: flex-start;
   }
 

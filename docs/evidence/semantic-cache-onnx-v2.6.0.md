@@ -1,29 +1,29 @@
-# Semantic Cache ONNX Evidence
+# Semantic Cache ONNX 证据
 
-- Version: 2.6.0
-- Status: PASS
-- Generated: 2026-06-28T10:00:00Z
-- ONNX Available: false
+- 版本: 2.6.0
+- 状态: 通过
+- 生成时间: 2026-06-28T10:00:00Z
+- ONNX 可用: false
 
-## Hash Embedding (zero-dependency default)
+## Hash 嵌入（零依赖默认方案）
 
-| Metric | Value |
+| 指标 | 值 |
 | --- | --- |
-| Exact Hit Rate | 1.0 |
-| Paraphrase Hit Rate | 0.0 |
-| Unrelated False Hit Rate | 0.0 |
-| Provider | hash |
-| Dimensions | 64 |
+| 精确命中率 | 1.0 |
+| 释义命中率 | 0.0 |
+| 无关误命中率 | 0.0 |
+| 提供者 | hash |
+| 维度 | 64 |
 
-## ONNX Embedding (optional neural embedding)
+## ONNX 嵌入（可选神经网络嵌入）
 
-ONNX provider not available; install `requirements-rag.txt` and provide model/tokenizer.
+ONNX 提供者不可用；请安装 `requirements-rag.txt` 并提供模型/分词器。
 
-## Decision
+## 决策
 
-ONNX remains optional; hash embedding is zero-dependency default. The hash embedding achieves 1.0 exact-hit rate and 0.0 false-hit rate. Paraphrase hit rate is intentionally conservative (~0.25) by design — identical-question caching is the primary use case, and hash embeddings avoid the dependency footprint of ONNX runtime.
+ONNX 仍为可选项；hash 嵌入是零依赖的默认方案。hash 嵌入实现了 1.0 的精确命中率和 0.0 的误命中率。释义命中率被有意设计为保守（~0.25）——完全相同的问题缓存是主要使用场景，hash 嵌入避免了 ONNX 运行时的依赖负担。
 
-To enable ONNX comparison, install `requirements-rag.txt` and run:
+要启用 ONNX 对比，请安装 `requirements-rag.txt` 并运行：
 ```bash
 python benchmarks/bench_semantic_cache.py --compare --onnx-model /path/to/model.onnx --tokenizer /path/to/tokenizer.json --dimensions 384 --out docs/evidence/semantic-cache-onnx-v2.6.0.json --markdown docs/evidence/semantic-cache-onnx-v2.6.0.md
 ```

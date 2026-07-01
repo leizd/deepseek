@@ -387,6 +387,94 @@ def test_skills_security_review_actions(tmp_settings: Path) -> None:
         assert pack_review["review"]["kind"] == "pack"
 
 
+def test_skills_catalog_actions(tmp_settings: Path) -> None:
+    project = projects.create_project("Skill Catalog API Project")
+
+    with _running_server() as server:
+        status, listed, _ = _request(
+            server,
+            "POST",
+            "/api/skills",
+            payload={"action": "catalog_list"},
+            headers=_auth_headers(),
+        )
+        assert status == 200
+        assert listed["catalog"]["source"] == "local"
+        assert "pack_study" in {item["itemId"] for item in listed["items"]}
+
+        status, fetched, _ = _request(
+            server,
+            "POST",
+            "/api/skills",
+            payload={"action": "catalog_get", "itemId": "pack_study"},
+            headers=_auth_headers(),
+        )
+        assert status == 200
+        assert fetched["item"]["kind"] == "pack"
+        assert fetched["item"]["contentHash"].startswith("sha256:")
+
+        status, searched, _ = _request(
+            server,
+            "POST",
+            "/api/skills",
+            payload={"action": "catalog_search", "query": "study", "filters": {"trusted": True}},
+            headers=_auth_headers(),
+        )
+        assert status == 200
+        assert "pack_study" in {item["itemId"] for item in searched["items"]}
+
+        status, preview, _ = _request(
+            server,
+            "POST",
+            "/api/skills",
+            payload={"action": "catalog_install", "itemId": "pack_study", "projectId": project["id"], "dryRun": True},
+            headers=_auth_headers(),
+        )
+        assert status == 200
+        assert preview["installPreview"]["willEnablePack"] is True
+        assert preview["installPreview"]["requiresSecurityApproval"] is False
+
+        status, installed, _ = _request(
+            server,
+            "POST",
+            "/api/skills",
+            payload={"action": "catalog_install", "itemId": "pack_study", "projectId": project["id"]},
+            headers=_auth_headers(),
+        )
+        assert status == 200
+        assert "pack_study" in installed["skills"]["enabledPacks"]
+
+        status, uninstalled, _ = _request(
+            server,
+            "POST",
+            "/api/skills",
+            payload={"action": "catalog_uninstall", "itemId": "pack_study", "projectId": project["id"]},
+            headers=_auth_headers(),
+        )
+        assert status == 200
+        assert "pack_study" not in uninstalled["skills"]["enabledPacks"]
+
+        status, refreshed, _ = _request(
+            server,
+            "POST",
+            "/api/skills",
+            payload={"action": "catalog_refresh"},
+            headers=_auth_headers(),
+        )
+        assert status == 200
+        assert refreshed["manifest"]["schemaVersion"] == "skill-catalog.v1"
+
+        status, exported, _ = _request(
+            server,
+            "POST",
+            "/api/skills",
+            payload={"action": "catalog_export"},
+            headers=_auth_headers(),
+        )
+        assert status == 200
+        assert exported["catalog"]["summary"]["itemCount"] >= 10
+
+
 def test_skills_validate_and_dry_run_authoring_actions(tmp_settings: Path) -> None:
     skill = _custom_skill()
 

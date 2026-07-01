@@ -4,6 +4,7 @@ from __future__ import annotations
 
 __all__ = [
     "analytics",
+    "catalog",
     "evidence",
     "pack",
     "permissions",

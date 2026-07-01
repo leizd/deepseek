@@ -1,6 +1,6 @@
-# A2A External Peer Smoke
+# A2A 外部 Peer Smoke
 
-适用版本：DeepSeek Infra v2.6.8。
+适用版本：DeepSeek Infra v2.6.9。
 
 本页说明如何在无 GUI、无 API key 的环境中复现 A2A external peer 兼容性证据。这里的 external peer 指独立进程或外部进程暴露的 A2A server；它不等同于真实第三方生态实现。
 
@@ -44,7 +44,7 @@ python scripts/smoke_a2a_external_peer.py \
 - artifact chunks 顺序和 final chunk
 - SSE final `status-update`
 
-## Evidence
+## 证据
 
 默认输出：
 

@@ -13,6 +13,7 @@ from deepseek_infra.core.config import APP_VERSION
 from deepseek_infra.core.errors import AppError, ErrorCode
 from deepseek_infra.core.utils import utc_now_iso
 from deepseek_infra.infra.skills import analytics as skill_analytics
+from deepseek_infra.infra.skills import catalog as skill_catalog
 from deepseek_infra.infra.skills import eval as skill_eval
 from deepseek_infra.infra.skills import security as skill_security
 from deepseek_infra.infra.skills import versioning as skill_versioning
@@ -130,6 +131,33 @@ def create_skills_router(deps: SkillsRouteDeps) -> APIRouter:
             return json_response(skill_security.block_skill(_skill_id(payload), reason=str(payload.get("reason") or "")))
         if action == "security_summary":
             return json_response(skill_security.security_summary(scope=str(payload.get("scope") or "all")))
+        if action == "catalog_list":
+            manifest = skill_catalog.catalog_manifest()
+            return json_response({"ok": True, "catalog": manifest, "items": manifest["items"]})
+        if action == "catalog_get":
+            return json_response({"ok": True, "item": skill_catalog.catalog_get(_item_id(payload))})
+        if action == "catalog_search":
+            return json_response(
+                skill_catalog.catalog_search(
+                    str(payload.get("query") or ""),
+                    filters=payload.get("filters") if isinstance(payload.get("filters"), dict) else {},
+                )
+            )
+        if action == "catalog_install":
+            return json_response(
+                skill_catalog.catalog_install(
+                    _item_id(payload),
+                    project_id=str(payload.get("projectId") or ""),
+                    security_approved=_bool(payload, "securityApproved") or _bool(payload, "approveSecurityReview"),
+                    dry_run=_bool(payload, "dryRun") or _bool(payload, "preview"),
+                )
+            )
+        if action == "catalog_uninstall":
+            return json_response(skill_catalog.catalog_uninstall(_item_id(payload), project_id=str(payload.get("projectId") or "")))
+        if action == "catalog_refresh":
+            return json_response(skill_catalog.catalog_refresh())
+        if action == "catalog_export":
+            return json_response(skill_catalog.catalog_export())
         if action == "list_runs":
             return json_response(
                 {
@@ -227,6 +255,13 @@ def _pack_id(payload: dict[str, Any]) -> str:
     if not pack_id:
         raise AppError("packId is required", code=ErrorCode.INVALID_PAYLOAD)
     return pack_id
+
+
+def _item_id(payload: dict[str, Any]) -> str:
+    item_id = str(payload.get("itemId") or payload.get("skillId") or payload.get("packId") or payload.get("id") or "").strip()
+    if not item_id:
+        raise AppError("itemId is required", code=ErrorCode.INVALID_PAYLOAD)
+    return item_id
 
 
 def _pack_config(payload: dict[str, Any]) -> dict[str, Any]:

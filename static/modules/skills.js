@@ -1,4 +1,4 @@
-/** Skill Workbench UI, Builder, Packs, Eval Dashboard, Versioning, Runs, and Security - v2.6.8 frontend integration. */
+/** Skill Workbench UI, Builder, Packs, Eval Dashboard, Versioning, Runs, Security, and Catalog - v2.6.9 frontend integration. */
 
 const SKILL_API = "/api/skills";
 const PROJECT_API = "/api/workspace/projects";
@@ -44,6 +44,10 @@ const state = {
   skillRuns: [],
   runsSummary: null,
   securitySummary: null,
+  catalog: null,
+  catalogItems: [],
+  catalogSearch: "",
+  catalogTrust: "",
   versionTarget: { kind: "skill", id: "" },
   activeProjectId: "",
   search: "",
@@ -170,6 +174,16 @@ function cacheElements() {
     "skillSecuritySummary",
     "skillSecurityList",
     "skillSecurityDetail",
+    "skillCatalogButton",
+    "skillCatalogHost",
+    "skillCatalogCloseButton",
+    "skillCatalogSearchInput",
+    "skillCatalogTrustSelect",
+    "skillCatalogRefreshButton",
+    "skillCatalogExportButton",
+    "skillCatalogSummary",
+    "skillCatalogList",
+    "skillCatalogDetail",
     "skillEvalSummary",
     "skillEvalCaseForm",
     "skillEvalCaseSkillSelect",
@@ -232,6 +246,20 @@ function bindEvents() {
   els.skillSecurityRefreshButton?.addEventListener("click", loadSecurityDashboard);
   els.skillSecurityReviewSelectedButton?.addEventListener("click", reviewSelectedSecuritySkill);
   els.skillSecurityList?.addEventListener("click", onSecurityListClick);
+  els.skillCatalogButton?.addEventListener("click", openCatalogHost);
+  els.skillCatalogCloseButton?.addEventListener("click", closeCatalogHost);
+  els.skillCatalogSearchInput?.addEventListener("input", () => {
+    state.catalogSearch = (els.skillCatalogSearchInput.value || "").trim();
+    loadCatalogDashboard();
+  });
+  els.skillCatalogTrustSelect?.addEventListener("change", () => {
+    state.catalogTrust = els.skillCatalogTrustSelect.value || "";
+    loadCatalogDashboard();
+  });
+  els.skillCatalogRefreshButton?.addEventListener("click", loadCatalogDashboard);
+  els.skillCatalogExportButton?.addEventListener("click", exportCatalog);
+  els.skillCatalogList?.addEventListener("click", onCatalogListClick);
+  els.skillCatalogDetail?.addEventListener("click", onCatalogDetailClick);
   els.skillVersionsCloseButton?.addEventListener("click", closeVersionHost);
   els.skillVersionSkillSelect?.addEventListener("change", () => loadSkillVersions(els.skillVersionSkillSelect.value || ""));
   els.skillVersionCompareButton?.addEventListener("click", compareSkillVersions);
@@ -298,6 +326,7 @@ function openSkillPanel() {
   closeVersionHost();
   closeRunsHost();
   closeSecurityHost();
+  closeCatalogHost();
   loadSkills();
   loadProjects();
   loadPacks();
@@ -314,6 +343,7 @@ function closeSkillPanel() {
   closeVersionHost();
   closeRunsHost();
   closeSecurityHost();
+  closeCatalogHost();
   els.skillPanel.classList.remove("open");
   els.skillPanel.setAttribute("aria-hidden", "true");
   onPanelStateChange();
@@ -327,6 +357,7 @@ function openSkillRunHost(skill) {
   closeVersionHost();
   closeRunsHost();
   closeSecurityHost();
+  closeCatalogHost();
   els.skillRunHost.hidden = false;
   els.skillRunTitle.textContent = `运行 · ${skill.name || skill.skillId}`;
   els.skillRunTitle.dataset.skillId = skill.skillId;
@@ -740,6 +771,7 @@ function openSkillBuilder({ mode = "create", skill = null } = {}) {
   closeVersionHost();
   closeRunsHost();
   closeSecurityHost();
+  closeCatalogHost();
   state.builder.mode = mode;
   state.builder.originalSkillId = mode === "edit" ? (skill?.skillId || "") : "";
   state.builder.saveAndRun = false;
@@ -1274,6 +1306,7 @@ function openVersionHost(target = {}) {
   closeEvalHost();
   closeRunsHost();
   closeSecurityHost();
+  closeCatalogHost();
   els.skillVersionsHost.hidden = false;
   populateVersionSkillSelect(target.skillId || "");
   const selectedSkill = els.skillVersionSkillSelect?.value || "";
@@ -1515,6 +1548,7 @@ function openRunsHost() {
   closeEvalHost();
   closeVersionHost();
   closeSecurityHost();
+  closeCatalogHost();
   els.skillRunsHost.hidden = false;
   populateRunsSkillSelect();
   loadRunsDashboard();
@@ -1794,6 +1828,7 @@ function openSecurityHost() {
   closeEvalHost();
   closeVersionHost();
   closeRunsHost();
+  closeCatalogHost();
   els.skillSecurityHost.hidden = false;
   loadSecurityDashboard();
 }
@@ -1979,6 +2014,275 @@ function renderSecurityMessage(message) {
   els.skillSecurityList.append(row);
 }
 
+// --- Local Skill Catalog / Marketplace-lite (v2.6.9) -------------------------
+
+function openCatalogHost() {
+  if (!els.skillCatalogHost) return;
+  closeSkillBuilder();
+  closeSkillRunHost();
+  closePacksHost();
+  closeEvalHost();
+  closeVersionHost();
+  closeRunsHost();
+  closeSecurityHost();
+  els.skillCatalogHost.hidden = false;
+  loadCatalogDashboard();
+}
+
+function closeCatalogHost() {
+  if (els.skillCatalogHost) els.skillCatalogHost.hidden = true;
+  if (els.skillCatalogDetail) els.skillCatalogDetail.hidden = true;
+}
+
+async function loadCatalogDashboard() {
+  if (!els.skillCatalogHost || els.skillCatalogHost.hidden) return;
+  const filters = {};
+  if (state.catalogTrust) filters.trustLevel = state.catalogTrust;
+  try {
+    const response = await apiFetch(SKILL_API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "catalog_search", query: state.catalogSearch || "", filters }),
+    });
+    const data = await parseJsonResponse(response);
+    state.catalog = data;
+    state.catalogItems = Array.isArray(data.items) ? data.items : [];
+    renderCatalogDashboard(data);
+  } catch (error) {
+    renderCatalogMessage(`Catalog failed: ${error.message || error}`);
+  }
+}
+
+function renderCatalogDashboard(data) {
+  if (!els.skillCatalogSummary || !els.skillCatalogList) return;
+  const summary = data.summary || {};
+  els.skillCatalogSummary.replaceChildren(
+    catalogMetricCard("Items", summary.itemCount || 0, `${summary.skillCount || 0} skills / ${summary.packCount || 0} packs`),
+    catalogMetricCard("Trusted", summary.trusted || 0, `${summary.needsReview || 0} needs review`),
+    catalogMetricCard("High Risk", summary.highRisk || 0, `${summary.blocked || 0} blocked`),
+    catalogMetricCard("Eval", summary.averageEvalScore || 0, "average score")
+  );
+  els.skillCatalogList.replaceChildren();
+  if (!state.catalogItems.length) {
+    renderCatalogMessage("No local catalog items match the current filters.");
+    return;
+  }
+  for (const item of state.catalogItems) {
+    els.skillCatalogList.append(catalogItemRow(item));
+  }
+}
+
+function catalogMetricCard(label, value, detail) {
+  const card = document.createElement("article");
+  card.className = "skill-catalog-metric";
+  const span = document.createElement("span");
+  span.textContent = label;
+  const strong = document.createElement("strong");
+  strong.textContent = String(value);
+  const small = document.createElement("small");
+  small.textContent = detail;
+  card.append(span, strong, small);
+  return card;
+}
+
+function catalogItemRow(item) {
+  const row = document.createElement("article");
+  row.className = `skill-catalog-row ${securityStatusClass(item.trustLevel)}`;
+  row.dataset.catalogItem = item.itemId || "";
+  const body = document.createElement("div");
+  body.className = "skill-catalog-row-body";
+  const title = document.createElement("strong");
+  title.textContent = `${item.name || item.itemId} @ ${item.version || "?"}`;
+  const meta = document.createElement("span");
+  meta.textContent = `${item.kind || "skill"} | ${item.category || "General"} | ${item.trustLevel || "needs-review"} | risk ${item.riskScore || 0} | eval ${item.evalScore || 0}`;
+  const details = document.createElement("p");
+  const tools = Array.isArray(item.requiredTools) ? item.requiredTools.slice(0, 5).join(", ") : "";
+  details.textContent = `${(item.includedSkills || []).length} skills | ${(item.tags || []).join(", ")}${tools ? ` | ${tools}` : ""}`;
+  body.append(title, meta, details);
+
+  const actions = document.createElement("div");
+  actions.className = "skill-catalog-actions";
+  const preview = catalogButton("Preview", "secondary-button", "catalogPreview");
+  const install = catalogButton("Install", "seek-primary-button", "catalogInstall");
+  const securityButton = catalogButton("Security", "secondary-button", "catalogSecurity");
+  const builder = catalogButton(item.kind === "skill" ? "Open Builder" : "View Pack", "secondary-button", "catalogOpen");
+  for (const button of [preview, install, securityButton, builder]) {
+    button.dataset.catalogItem = item.itemId || "";
+    button.dataset.catalogKind = item.kind || "";
+  }
+  if (item.trustLevel === "blocked") install.disabled = true;
+  actions.append(preview, install, securityButton, builder);
+  row.append(body, actions);
+  return row;
+}
+
+function catalogButton(label, className, dataKey) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = className;
+  button.textContent = label;
+  button.dataset[dataKey] = "1";
+  return button;
+}
+
+async function onCatalogListClick(event) {
+  const target = event.target instanceof Element ? event.target : event.target?.parentElement;
+  const button = target?.closest("button");
+  if (!button) return;
+  const itemId = button.dataset.catalogItem || "";
+  const kind = button.dataset.catalogKind || "";
+  if (!itemId) return;
+  if (button.dataset.catalogPreview) {
+    await previewCatalogInstall(itemId);
+  } else if (button.dataset.catalogInstall) {
+    await installCatalogItem(itemId, { approved: false });
+  } else if (button.dataset.catalogSecurity) {
+    const item = state.catalogItems.find((candidate) => candidate.itemId === itemId);
+    await reviewSecurityItem(kind || item?.kind || "skill", itemId);
+    openSecurityHost();
+  } else if (button.dataset.catalogOpen) {
+    openCatalogItem(itemId);
+  }
+}
+
+async function onCatalogDetailClick(event) {
+  const target = event.target instanceof Element ? event.target : event.target?.parentElement;
+  const install = target?.closest("button[data-catalog-detail-install]");
+  const approve = target?.closest("button[data-catalog-detail-approve]");
+  if (install) {
+    await installCatalogItem(install.dataset.catalogDetailInstall || "", { approved: false });
+  } else if (approve) {
+    await installCatalogItem(approve.dataset.catalogDetailApprove || "", { approved: true });
+  }
+}
+
+async function previewCatalogInstall(itemId) {
+  const projectId = getActiveProjectId();
+  if (!projectId) {
+    showToast("Open a project before previewing catalog installation.");
+    return;
+  }
+  try {
+    const response = await apiFetch(SKILL_API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "catalog_install", itemId, projectId, dryRun: true }),
+    });
+    const data = await parseJsonResponse(response);
+    renderCatalogDetail(data.item || catalogItemFromState(itemId), data.installPreview || {});
+  } catch (error) {
+    showToast(`Catalog preview failed: ${error.message || error}`);
+  }
+}
+
+async function installCatalogItem(itemId, { approved = false } = {}) {
+  const projectId = getActiveProjectId();
+  if (!projectId) {
+    showToast("Open a project before installing from Catalog.");
+    return;
+  }
+  try {
+    const response = await apiFetch(SKILL_API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "catalog_install", itemId, projectId, securityApproved: approved }),
+    });
+    const data = await parseJsonResponse(response);
+    if (!data.ok) throw new Error(data.error || "Install failed");
+    showToast(`Installed ${data.item?.name || itemId} into project.`);
+    await loadCatalogDashboard();
+    await loadProjects();
+    renderCatalogDetail(data.item || catalogItemFromState(itemId), data.installPreview || {});
+  } catch (error) {
+    showToast(`Catalog install failed: ${error.message || error}`);
+    await previewCatalogInstall(itemId);
+  }
+}
+
+function openCatalogItem(itemId) {
+  const item = catalogItemFromState(itemId);
+  if (!item) return;
+  if (item.kind === "skill") {
+    const skill = state.skills.find((candidate) => candidate.skillId === item.skillId);
+    if (skill) {
+      openSkillBuilder({ mode: skill.builtin ? "clone" : "edit", skill });
+      return;
+    }
+  }
+  renderCatalogDetail(item, {});
+}
+
+function renderCatalogDetail(item, preview = {}) {
+  if (!els.skillCatalogDetail || !item) return;
+  els.skillCatalogDetail.hidden = false;
+  els.skillCatalogDetail.replaceChildren();
+  const title = document.createElement("h4");
+  title.textContent = `${item.name || item.itemId} install preview`;
+  const meta = document.createElement("p");
+  meta.textContent = `${item.kind || "skill"} | ${item.trustLevel || preview.trustLevel || "needs-review"} | risk ${item.riskScore || preview.riskScore || 0} | eval ${item.evalScore || preview.evalScore || 0}`;
+  const summary = document.createElement("div");
+  summary.className = "skill-catalog-preview-grid";
+  summary.append(
+    catalogPreviewCard("Included", (preview.includedSkills || item.includedSkills || []).join(", ") || "none"),
+    catalogPreviewCard("New Skills", (preview.newSkills || []).join(", ") || "none"),
+    catalogPreviewCard("Tools", (preview.requiredTools || item.requiredTools || []).join(", ") || "none"),
+    catalogPreviewCard("Security", preview.requiresSecurityApproval ? "approval required" : "ready")
+  );
+  const actions = document.createElement("div");
+  actions.className = "skill-catalog-actions";
+  const install = catalogButton("Install", "seek-primary-button", "catalogDetailInstall");
+  install.dataset.catalogDetailInstall = item.itemId || "";
+  actions.append(install);
+  if (preview.requiresSecurityApproval) {
+    const approve = catalogButton("Approve & Install", "danger-button", "catalogDetailApprove");
+    approve.dataset.catalogDetailApprove = item.itemId || "";
+    actions.append(approve);
+  }
+  const manifest = document.createElement("pre");
+  manifest.textContent = JSON.stringify({ item, installPreview: preview }, null, 2);
+  els.skillCatalogDetail.append(title, meta, summary, actions, manifest);
+  els.skillCatalogDetail.scrollIntoView({ block: "nearest", behavior: "smooth" });
+}
+
+function catalogPreviewCard(label, value) {
+  const card = document.createElement("article");
+  card.className = "skill-catalog-preview-card";
+  const span = document.createElement("span");
+  span.textContent = label;
+  const strong = document.createElement("strong");
+  strong.textContent = String(value);
+  card.append(span, strong);
+  return card;
+}
+
+function catalogItemFromState(itemId) {
+  return state.catalogItems.find((item) => item.itemId === itemId) || null;
+}
+
+function renderCatalogMessage(message) {
+  if (!els.skillCatalogList) return;
+  els.skillCatalogList.replaceChildren();
+  const row = document.createElement("p");
+  row.className = "panel-empty";
+  row.textContent = message;
+  els.skillCatalogList.append(row);
+}
+
+async function exportCatalog() {
+  try {
+    const response = await apiFetch(SKILL_API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "catalog_export" }),
+    });
+    const data = await parseJsonResponse(response);
+    if (!data.ok) throw new Error(data.error || "Export failed");
+    downloadTextFile(`${JSON.stringify(data.catalog, null, 2)}\n`, "skill-catalog.json", "application/json;charset=utf-8");
+  } catch (error) {
+    showToast(`Catalog export failed: ${error.message || error}`);
+  }
+}
+
 // --- Skill Eval Dashboard (v2.6.6) -------------------------------------------
 
 function openEvalHost() {
@@ -1989,6 +2293,7 @@ function openEvalHost() {
   closeVersionHost();
   closeRunsHost();
   closeSecurityHost();
+  closeCatalogHost();
   els.skillEvalHost.hidden = false;
   populateEvalSkillSelect();
   loadEvalCases();
@@ -2386,6 +2691,7 @@ function openPacksHost() {
   closeVersionHost();
   closeRunsHost();
   closeSecurityHost();
+  closeCatalogHost();
   els.skillPacksHost.hidden = false;
   loadPacks();
 }

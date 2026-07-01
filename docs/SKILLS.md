@@ -1,30 +1,32 @@
-# Skill System
+# Skill 系统
 
-Applicable version: v2.6.8.
+适用版本：v2.6.9。
+Applicable version: v2.6.9.
 
-DeepSeek Infra v2.6.8 defines a Skill as:
+DeepSeek Infra v2.6.9 对 Skill 的定义如下：
 
 ```text
 Skill = Prompt + Tools + Input Schema + Output Schema + Memory Policy + Artifact Policy + Project Binding
 ```
 
-A Skill is not just a prompt template. It has an explicit tool grant, validates input and output, can bind to a project, and can persist outputs into the local workspace.
+Skill 不仅仅是一个 prompt 模板。它具备显式的 tool grant，会校验输入和输出，可以绑定到项目（project binding），并可将输出持久化到本地 workspace。
 
-## Layout
+## 目录结构
 
 ```text
 deepseek_infra/infra/skills/
-  schema.py        # Skill config and input/output schema validation
-  pack.py          # Skill Pack schema, validation, and tool-permission diff
-  registry.py      # built-in + custom Skill and Skill Pack registry
-  permissions.py   # Skill allowedTools -> ToolPolicy
-  runner.py        # Skill execution and project/artifact persistence
-  analytics.py     # Skill run history, usage analytics, diagnostics, retention
-  security.py      # Skill / Pack security review, trust store, and signing prep
-  eval.py          # offline Skill / Pack scoring and regression reports
-  versioning.py    # Skill / Pack revision history, diff, migration, rollback
-  templates.py     # prompt and offline output helpers
-  evidence.py      # Skill artifact index and release evidence
+  schema.py        # Skill 配置及输入/输出 schema 校验
+  pack.py          # Skill Pack schema、校验及 tool-permission diff
+  registry.py      # 内置 + 自定义 Skill 和 Skill Pack registry
+  permissions.py   # Skill allowedTools → ToolPolicy
+  runner.py        # Skill 执行及 project/artifact 持久化
+  analytics.py     # Skill 运行历史、使用统计、诊断、保留策略
+  security.py      # Skill / Pack 安全审查、trust store 及签名预备
+  catalog.py       # 本地 Skill Catalog、安装预检、项目安装/卸载
+  eval.py          # 离线 Skill / Pack 评分与回退报告
+  versioning.py    # Skill / Pack 修订历史、diff、迁移、回滚
+  templates.py     # prompt 和离线输出辅助工具
+  evidence.py      # Skill artifact 索引和发布 evidence
 
 skills/builtin/
   document_reader.json
@@ -41,24 +43,24 @@ skills/packs/
   office.json      # Office Pack
 ```
 
-User-created Skills are stored in runtime state under `.skills/custom/` and user-created Skill Packs under `.skills/packs/`; neither must be committed.
+用户创建的 Skill 存放在 `.skills/custom/` 运行态目录中，用户创建的 Skill Pack 存放在 `.skills/packs/` 下；两者均不应提交到版本控制。
 
 ## Registry
 
-The registry supports listing built-in and custom Skills, creating and editing custom Skills, disabling or deleting Skills, importing and exporting Skill JSON, and validating policies.
+Registry 支持列出内置和自定义 Skill、创建和编辑自定义 Skill、禁用或删除 Skill、导入和导出 Skill JSON、以及校验策略。
 
-HTTP entrypoint:
+HTTP 入口：
 
 ```text
 POST /api/skills
 POST /api/skills/{skill_id}/run
 ```
 
-Common actions: `list`, `builtin`, `get`, `create`, `update`, `disable`, `enable`, `delete`, `import`, `export`, `validate`, `dry_run`, `run`, `list_packs`, `get_pack`, `export_pack`, `import_pack`, `validate_pack`, `delete_pack`, `eval_report`, `list_eval_cases`, `create_eval_case`, `delete_eval_case`, `list_runs`, `get_run`, `delete_run`, `analytics_summary`, `cleanup_runs`, `redact_run`, `export_runs`, `security_review`, `security_review_pack`, `trust_skill`, `untrust_skill`, `block_skill`, `security_summary`, `list_versions`, `diff_versions`, `rollback_skill`, `migration_plan`, `list_pack_versions`, `diff_pack_versions`, `upgrade_pack`, `rollback_pack`, and `eval_upgrade_gate`.
+常用 action：`list`、`builtin`、`get`、`create`、`update`、`disable`、`enable`、`delete`、`import`、`export`、`validate`、`dry_run`、`run`、`list_packs`、`get_pack`、`export_pack`、`import_pack`、`validate_pack`、`delete_pack`、`eval_report`、`list_eval_cases`、`create_eval_case`、`delete_eval_case`、`list_runs`、`get_run`、`delete_run`、`analytics_summary`、`cleanup_runs`、`redact_run`、`export_runs`、`security_review`、`security_review_pack`、`trust_skill`、`untrust_skill`、`block_skill`、`security_summary`、`catalog_list`、`catalog_get`、`catalog_search`、`catalog_install`、`catalog_uninstall`、`catalog_refresh`、`catalog_export`、`list_versions`、`diff_versions`、`rollback_skill`、`migration_plan`、`list_pack_versions`、`diff_pack_versions`、`upgrade_pack`、`rollback_pack` 和 `eval_upgrade_gate`。
 
 ## Runner
 
-The Skill Runner flow is:
+Skill Runner 的执行流程如下：
 
 ```text
 select Skill
@@ -71,11 +73,11 @@ select Skill
   -> save Skill output, artifacts, project history, run analytics, and evidence metadata
 ```
 
-The runner never bypasses Tool Policy. `allowedTools` narrows the tools included in the DeepSeek payload and also narrows the `ToolPolicy` grant used by execution.
+Runner 永远不会绕过 Tool Policy。`allowedTools` 会限定 DeepSeek payload 中包含的工具，同时也会限定执行时使用的 `ToolPolicy` 授权。
 
 ## Project Binding
 
-Project Skill state is stored in `.projects/<projectId>/project.json`:
+项目的 Skill 状态保存在 `.projects/<projectId>/project.json` 中：
 
 ```json
 {
@@ -94,19 +96,19 @@ Project Skill state is stored in `.projects/<projectId>/project.json`:
 }
 ```
 
-Project export includes Skill bindings, Skill run history, saved Skill outputs, and Skill artifact metadata. `enabledPacks` keeps the backward-compatible Pack id list, while `enabledPackVersions` records `packId`, `version`, and `installedAt`; installing a Pack enables its referenced Skills through `POST /api/workspace/projects/{projectId}/skill-packs/{packId}/install`.
+项目导出包含 Skill binding、Skill run 历史、保存的 Skill 输出、以及 Skill artifact 元数据。`enabledPacks` 保留向后兼容的 Pack id 列表，而 `enabledPackVersions` 记录了 `packId`、`version` 和 `installedAt`；安装 Pack 会通过 `POST /api/workspace/projects/{projectId}/skill-packs/{packId}/install` 启用其引用的 Skill。
 
 ## Skill Workbench UI
 
-v2.6.8 adds a local Skill Workbench in the main Web UI:
+v2.6.9 在主 Web UI 中新增了一个本地 Skill Workbench：
 
-- Open the `Skills` entry in the sidebar to browse built-in and custom Skills.
-- Use the workbench toolbar to search, import Skill JSON, export custom Skills, and enable or disable custom Skills.
-- Select `Run` on a Skill to open the Skill Run Panel. The panel maps `inputSchema.properties` into form controls, marks required fields, and submits `projectId`, `offline`, and `persist` parameters through the Skill Web API.
-- Open a project to manage `enabledSkills`, `defaultSkill`, and `recentSkills`. Skill runs submitted with a project id update project history and preserve Skill-produced saved items and artifacts.
-- After a run, the result preview displays output content, `skillRunId`, linked Saved Items, and linked Artifacts so the output is managed as Workspace data instead of only chat text.
+- 打开侧边栏中的 `Skills` 入口，浏览内置和自定义 Skill。
+- 使用 Workbench 工具栏进行搜索、导入 Skill JSON、导出自定义 Skill、以及启用或禁用自定义 Skill。
+- 在 Skill 上选择 `Run` 打开 Skill Run Panel。该面板将 `inputSchema.properties` 映射为表单控件，标记必填字段，并通过 Skill Web API 提交 `projectId`、`offline` 和 `persist` 参数。
+- 打开项目即可管理 `enabledSkills`、`defaultSkill` 和 `recentSkills`。附带项目 id 的 Skill run 会更新项目历史并保留 Skill 生成的 saved items 和 artifacts。
+- 运行完成后，结果预览会展示输出内容、`skillRunId`、关联的 Saved Items 和关联的 Artifacts，使输出作为 Workspace 数据（而非仅聊天文本）被管理。
 
-Frontend integration files:
+前端集成文件：
 
 ```text
 static/index.html
@@ -115,19 +117,19 @@ static/modules/chat.js
 static/styles.css
 ```
 
-## Custom Skill Builder
+## Custom Skill Builder / 自定义 Skill Builder
 
-v2.6.8 adds a Custom Skill Builder inside the Skill Workbench so users can author Skills without hand-writing JSON:
+v2.6.9 在 Skill Workbench 中新增了自定义 Skill Builder，让用户无需手动编写 JSON 即可创作 Skill：
 
-- `New Skill` opens a guided builder for `skillId`, `name`, `description`, `version`, `systemPrompt`, policies, schema fields, and tools.
-- `Clone` on a built-in Skill creates a custom editable copy, preserving the source prompt, schemas, tool grants, memory policy, artifact policy, and project binding.
-- The visual schema editor supports `string`, `textarea`, `number`, `integer`, `enum`, and `boolean` fields. Each field can set key, title, description, required state, default, enum options, and max length.
-- The Tool Permission Picker exposes known local tools with risk labels such as `safe`, `read-only`, `filesystem`, `network`, and `requires approval`. Saving still runs through backend schema validation, and execution still narrows tools through Tool Policy.
-- `Preview JSON` shows the final Skill config, `Validate Schema` calls `POST /api/skills` with `action=validate`, and `Dry Run Offline` calls `action=dry_run` with generated sample input before the Skill is saved.
-- `Save Skill` creates or updates a custom Skill; `Save & Run` saves and immediately opens the existing run form.
-- Evidence screenshots are tracked at `docs/assets/skill-builder.png` and `docs/assets/skill-builder-dry-run.png`.
+- `New Skill` 打开引导式构建器，配置 `skillId`、`name`、`description`、`version`、`systemPrompt`、策略、schema 字段和 tools。
+- 对内置 Skill 使用 `Clone` 可创建一个自定义可编辑副本，保留源 prompt、schema、tool grant、memory policy、artifact policy 和 project binding。
+- 可视化 schema 编辑器支持 `string`、`textarea`、`number`、`integer`、`enum` 和 `boolean` 字段。每个字段可设置 key、title、description、required 状态、default 值、enum 选项和 max length。
+- Tool Permission Picker 展示已知的本地工具，并附带 `safe`、`read-only`、`filesystem`、`network`、`requires approval` 等风险标签。保存仍需通过后端 schema 校验，执行时仍通过 Tool Policy 限定工具。
+- `Preview JSON` 显示最终 Skill 配置，`Validate Schema` 调用 `POST /api/skills`（action=validate），`Dry Run Offline` 在保存前用生成的示例输入调用 `action=dry_run`。
+- `Save Skill` 创建或更新自定义 Skill；`Save & Run` 保存后立即打开现有运行表单。
+- Evidence 截图跟踪路径为 `docs/assets/skill-builder.png` 和 `docs/assets/skill-builder-dry-run.png`。
 
-The authoring API actions are intentionally local-only and do not download third-party Skills:
+创作类 API action 有意设计为纯本地操作，不会下载第三方 Skill：
 
 ```json
 { "action": "validate", "skill": { "...": "..." } }
@@ -136,7 +138,7 @@ The authoring API actions are intentionally local-only and do not download third
 
 ## Skill Packs
 
-v2.6.8 introduces local Skill Packs so a set of Skills can be imported, exported, installed, and bound to projects together. A Skill Pack is a `.skillpack.json` manifest:
+v2.6.9 引入了本地 Skill Pack，使一组 Skill 可以一起导入、导出、安装和绑定到项目。Skill Pack 是一个 `.skillpack.json` manifest：
 
 ```json
 {
@@ -152,16 +154,16 @@ v2.6.8 introduces local Skill Packs so a set of Skills can be imported, exported
 }
 ```
 
-Each `skills` entry is either a **reference** (only `skillId`, resolved against existing built-in / custom Skills) or an **embedded** full Skill config. Built-in template packs use references; exported packs embed full configs so they stay self-contained.
+每个 `skills` 条目要么是 **reference**（仅 `skillId`，在现有内置/自定义 Skill 中解析），要么是 **embedded** 完整 Skill 配置。内置模板 Pack 使用引用方式；导出 Pack 则内嵌完整配置以保持自包含。
 
-Built-in Template Library (shipped under `skills/packs/`):
+内置模板库（随 `skills/packs/` 发布）：
 
-- **Study Pack** — study_tutor, paper_writer, document_reader
-- **Research Pack** — research_brief, document_reader, paper_writer
-- **Code Pack** — code_review, document_reader
-- **Office Pack** — ppt_generator, paper_writer, document_reader
+- **Study Pack** — study_tutor、paper_writer、document_reader
+- **Research Pack** — research_brief、document_reader、paper_writer
+- **Code Pack** — code_review、document_reader
+- **Office Pack** — ppt_generator、paper_writer、document_reader
 
-Pack actions on `POST /api/skills`:
+`POST /api/skills` 上的 Pack action：
 
 ```json
 { "action": "list_packs" }
@@ -172,27 +174,27 @@ Pack actions on `POST /api/skills`:
 { "action": "delete_pack", "packId": "pack_custom" }
 ```
 
-Install a Pack onto a project (enables the Pack's Skills and records `enabledPacks`):
+将 Pack 安装到项目（启用该 Pack 的 Skill 并记录 `enabledPacks`）：
 
 ```text
 POST /api/workspace/projects/{projectId}/skill-packs/{packId}/install
 ```
 
-### Pack import safety
+### Pack 导入安全机制
 
-Importing a Pack never silently overwrites existing Skills. The `onConflict` strategy must be one of:
+导入 Pack 绝不会静默覆盖已有的 Skill。`onConflict` 策略必须为以下之一：
 
-- `error` (default) — raise when an embedded `skillId` already exists.
-- `overwrite` — re-install embedded Skills with the same `skillId`.
-- `skip` — leave existing Skills untouched and report them as skipped.
+- `error`（默认）— 当 embedded 的 `skillId` 已存在时抛出错误。
+- `overwrite` — 重新安装具有相同 `skillId` 的 embedded Skill。
+- `skip` — 保留已有 Skill 不变，将其报告为已跳过。
 
-The import summary returns an `allowedTools` permission diff with risk labels (`read-only`, `filesystem`, `network`, `sensitive`, `requires approval`, or the raw risk level) and flags high-risk / requires-approval tools so reviewers can confirm them before running. Skill Packs are **local-only**: there is no remote Skill Marketplace, and the authoring API never downloads third-party Skills.
+导入摘要返回带有风险标签（`read-only`、`filesystem`、`network`、`sensitive`、`requires approval` 或原始风险等级）的 `allowedTools` 权限差异，并标记高风险/需要审批的工具，以便审核者可在运行前确认。Skill Pack 是**纯本地**的：不存在远程 Skill Marketplace，创作 API 永远不会下载第三方 Skill。
 
 ## Skill Eval Dashboard
 
-v2.6.8 adds a local Skill quality loop. The Workbench `Eval` tab runs offline Skill / Pack evals, shows pass/fail status, average score, case counts, failed cases, and latest run metadata, and exports JSON / Markdown summaries. The Eval Case Builder creates local rule-based cases without hand-editing JSONL.
+v2.6.9 新增了一个本地 Skill 质量闭环。Workbench 的 `Eval` 标签页运行离线 Skill / Pack eval，显示通过/失败状态、平均分、用例数量、失败用例、最近运行元数据，并可导出 JSON / Markdown 摘要。Eval Case Builder 可创建基于规则的本地用例，无需手动编辑 JSONL。
 
-Eval cases can be defined in `evals/golden/skills/skill_eval_cases.jsonl` or created from the Workbench. A case can include:
+Eval 用例可定义在 `evals/golden/skills/skill_eval_cases.jsonl` 中，或从 Workbench 创建。一个用例可包含：
 
 ```json
 {
@@ -208,25 +210,25 @@ Eval cases can be defined in `evals/golden/skills/skill_eval_cases.jsonl` or cre
 }
 ```
 
-Scoring is rule-based and offline by default:
+评分默认基于规则且离线执行：
 
-- `schemaPass`: input / output schema validation succeeds.
-- `toolPolicyPass`: required tools are allowed and denied tools stay blocked by Tool Policy.
-- `artifactPass`: generated artifacts match the Skill artifact policy and expected artifact types.
-- `projectBindingPass`: project-bound runs write Skill run history and exported metadata.
-- `contentPass`: expected keywords, forbidden regex, and required JSON paths match.
-- `latencyMs`: elapsed runtime is recorded for report comparison.
+- `schemaPass`：输入/输出 schema 校验通过。
+- `toolPolicyPass`：所需工具被允许，被拒绝的工具依然被 Tool Policy 阻止。
+- `artifactPass`：生成的 artifact 符合 Skill artifact policy 和预期的 artifact 类型。
+- `projectBindingPass`：绑定项目的运行会写入 Skill run 历史和导出元数据。
+- `contentPass`：期望关键词、禁止正则表达式和必需的 JSON 路径均匹配。
+- `latencyMs`：记录运行耗时，用于报告对比。
 
-The eval runner supports all Skills, one Skill, one Pack, and baseline comparison:
+Eval runner 支持评估所有 Skill、单个 Skill、单个 Pack 以及基线对比：
 
 ```bash
-python evals/runners/run_skill_eval.py --strict --out evals/reports/skills-v2.6.8.json
-python evals/runners/run_skill_eval.py --scope skill --skill-id skill_study_tutor --out evals/reports/skills-v2.6.8.json
-python evals/runners/run_skill_eval.py --scope pack --pack-id pack_study --out evals/reports/skills-v2.6.8.json
-python evals/runners/run_skill_eval.py --baseline evals/reports/skills-v2.6.4.json --out evals/reports/skills-v2.6.8.json
+python evals/runners/run_skill_eval.py --strict --out evals/reports/skills-v2.6.9.json
+python evals/runners/run_skill_eval.py --scope skill --skill-id skill_study_tutor --out evals/reports/skills-v2.6.9.json
+python evals/runners/run_skill_eval.py --scope pack --pack-id pack_study --out evals/reports/skills-v2.6.9.json
+python evals/runners/run_skill_eval.py --baseline evals/reports/skills-v2.6.4.json --out evals/reports/skills-v2.6.9.json
 ```
 
-Workbench API actions:
+Workbench API action：
 
 ```json
 { "action": "eval_report", "scope": "all" }
@@ -235,18 +237,18 @@ Workbench API actions:
 { "action": "delete_eval_case", "caseId": "case_id" }
 ```
 
-## Skill Versioning & Migration
+## Skill Versioning & Migration / Skill 版本管理与迁移
 
-v2.6.6 adds local lifecycle management for custom Skills and custom Skill Packs. Builder saves, custom Skill creation, Pack imports, rollback checkpoints, and Pack upgrades create revision snapshots under `.skills/history/`:
+v2.6.6 新增了自定义 Skill 和自定义 Skill Pack 的本地生命周期管理。Builder 保存、自定义 Skill 创建、Pack 导入、回滚检查点和 Pack 升级都会在 `.skills/history/` 下创建修订快照：
 
 ```text
 .skills/history/<skillId>/<version>-<revisionId>.json
 .skills/history/packs/<packId>/<version>-<revisionId>.json
 ```
 
-Each Skill revision records `version`, `revisionId`, `createdAt`, `changeSummary`, `schemaHash`, `promptHash`, and `toolGrantHash`. Pack revisions record `packHash`, `skillIdsHash`, and `toolGrantHash`. The Workbench `Versions` panel can list revision history, compare the current Skill against a selected revision, show schema migration plans, rollback custom Skills, and run eval-aware Pack upgrade checks.
+每个 Skill 修订记录 `version`、`revisionId`、`createdAt`、`changeSummary`、`schemaHash`、`promptHash` 和 `toolGrantHash`。Pack 修订记录 `packHash`、`skillIdsHash` 和 `toolGrantHash`。Workbench 的 `Versions` 面板可以列出修订历史、将当前 Skill 与选定修订对比、展示 schema 迁移计划、回滚自定义 Skill，以及运行包含 eval 感知的 Pack 升级检查。
 
-Versioning API actions:
+版本管理 API action：
 
 ```json
 { "action": "list_versions", "skillId": "skill_custom" }
@@ -260,21 +262,21 @@ Versioning API actions:
 { "action": "eval_upgrade_gate", "kind": "pack", "itemId": "pack_custom" }
 ```
 
-Migration plans are rule-based and offline. They flag removed fields, newly required fields without defaults, type changes, possible field renames, and the number of project bindings / eval cases / saved metadata entries that reference the Skill. Eval-aware upgrades reuse the Skill Eval report path so Pack changes can show score, pass rate, regression count, and a `low` or `review` recommendation before install.
+迁移计划基于规则且离线执行。它会标记已移除的字段、无默认值的新增必填字段、类型变更、可能的字段重命名，以及引用该 Skill 的 project binding / eval 用例 / 已保存元数据条目的数量。Eval 感知的升级复用 Skill Eval 报告路径，使 Pack 变更可在安装前展示评分、通过率、回退数量和 `low` 或 `review` 建议。
 
 ## Skill Run Analytics
 
-v2.6.8 adds local run history and usage analytics for Skill runs. The Runner records both completed and failed runs under `.skills/runs/runs.jsonl` with metadata only: `skillRunId`, `skillId`, `skillVersion`, `packId`, `projectId`, status, timestamps, latency, offline/model flags, input/output summaries, artifact and saved-item counts, `traceId`, and diagnostic fields.
+v2.6.9 新增了 Skill run 的本地运行历史和使用统计。Runner 将已完成和失败的运行记录在 `.skills/runs/runs.jsonl` 中，仅包含元数据：`skillRunId`、`skillId`、`skillVersion`、`packId`、`projectId`、状态、时间戳、延迟、离线/模型标志、输入/输出摘要、artifact 和 saved-item 数量、`traceId` 以及诊断字段。
 
-The Workbench `Runs` tab shows:
+Workbench 的 `Runs` 标签页展示：
 
-- Run history filtered by Skill.
-- Success/failure rate, average/P50/P90 latency, top Skills/Packs, artifact count, saved item count, and recent trend.
-- Failure diagnostics for schema validation, tool policy denial, artifact policy, project binding, LLM/API, timeout, cancellation, and unknown errors.
-- Links back to traces, project run history, Saved Items, and Artifacts.
-- Local retention controls: delete one run, clear failed runs, export history, and redact summaries while keeping metadata.
+- 按 Skill 过滤的运行历史。
+- 成功/失败率、平均/P50/P90 延迟、热门 Skill/Pack、artifact 数量、saved item 数量和近期趋势。
+- 针对 schema 校验、tool policy 拒绝、artifact policy、project binding、LLM/API、超时、取消和未知错误的故障诊断。
+- 返回到 trace、项目运行历史、Saved Items 和 Artifacts 的链接。
+- 本地留存控制：删除单次运行、清空失败运行、导出历史、以及在保留元数据的同时脱敏摘要。
 
-Analytics API actions:
+Analytics API action：
 
 ```json
 { "action": "list_runs", "skillId": "skill_research_brief", "limit": 50 }
@@ -288,7 +290,7 @@ Analytics API actions:
 { "action": "export_runs" }
 ```
 
-Project analytics endpoint:
+项目 analytics 端点：
 
 ```text
 GET /api/workspace/projects/{projectId}/skill-analytics
@@ -296,17 +298,17 @@ GET /api/workspace/projects/{projectId}/skill-analytics
 
 ## Skill Security Review
 
-v2.6.8 adds local security review and signing-prep metadata for Skills and Skill Packs. Security review is still local-first: there is no remote marketplace, remote signing server, or account-based approval flow.
+v2.6.9 新增了 Skill 和 Skill Pack 的本地安全审查和签名预备元数据。安全审查仍以本地优先：不存在远程 marketplace、远程签名服务器或基于账户的审批流程。
 
-The Workbench `Security` tab shows:
+Workbench 的 `Security` 标签页展示：
 
-- trust level: `trusted`, `local-custom`, `needs-review`, `high-risk`, or `blocked`
-- risk score and allowedTools risk labels
-- prompt injection / secret exfiltration / secret file access / network exfiltration findings
-- filesystem, network, sensitive, and requires-approval capabilities
-- latest review timestamp and manifest hashes
+- 信任级别：`trusted`、`local-custom`、`needs-review`、`high-risk` 或 `blocked`
+- 风险评分和 allowedTools 风险标签
+- prompt injection / secret exfiltration / secret file access / network exfiltration 发现
+- filesystem、network、sensitive 和 requires-approval 能力
+- 最近审查时间戳和 manifest 哈希
 
-Security API actions:
+Security API action：
 
 ```json
 { "action": "security_review", "skillId": "skill_custom" }
@@ -317,7 +319,7 @@ Security API actions:
 { "action": "security_summary", "scope": "all" }
 ```
 
-Security manifests are hash-only signing-prep records:
+Security manifest 是仅含哈希的签名预备记录：
 
 ```json
 {
@@ -332,16 +334,41 @@ Security manifests are hash-only signing-prep records:
 }
 ```
 
-Run behavior:
+运行行为：
 
-- Built-in Skills remain trusted by default but still expose risk and manifest metadata.
-- Custom high-risk Skills require `securityApproved=true` before execution unless explicitly trusted.
-- Blocked Skills are denied before input validation, tool execution, artifact creation, or project persistence.
-- Skill run analytics records `runSecurityLevel`, `securityReviewId`, `trustedAtRun`, `toolGrantHashAtRun`, `blockedReason`, and `approvalRequired`.
+- 内置 Skill 默认保持 trusted，但仍会暴露风险和 manifest 元数据。
+- 自定义高风险 Skill 需要 `securityApproved=true` 才可执行，除非已被显式信任。
+- 被 blocked 的 Skill 在输入校验、工具执行、artifact 创建或项目持久化之前即被拒绝。
+- Skill run analytics 记录 `runSecurityLevel`、`securityReviewId`、`trustedAtRun`、`toolGrantHashAtRun`、`blockedReason` 和 `approvalRequired`。
+
+## Local Skill Catalog
+
+v2.6.9 新增本地 Skill Catalog / Marketplace-lite。Catalog 只索引本机已有的 Skill 和 Pack，不联网下载第三方内容，也不做远程签名服务器或用户账号体系。
+
+Catalog item 记录：
+
+- `itemId`、`kind`、`name`、`description`、`category`、`tags`、`author` 和 `version`
+- `trustLevel`、`riskScore`、`signed`、`contentHash`、`schemaHash`、`promptHash` 和 `toolGrantHash`
+- `evalScore`、`installCount`、`includedSkills`、`requiredTools`、`artifactTypes` 和 `toolPermissionSummary`
+
+Catalog API action：
+
+```json
+{ "action": "catalog_list" }
+{ "action": "catalog_get", "itemId": "pack_study" }
+{ "action": "catalog_search", "query": "study", "filters": { "trusted": true } }
+{ "action": "catalog_install", "itemId": "pack_study", "projectId": "proj_xxx", "dryRun": true }
+{ "action": "catalog_install", "itemId": "pack_study", "projectId": "proj_xxx" }
+{ "action": "catalog_uninstall", "itemId": "pack_study", "projectId": "proj_xxx" }
+{ "action": "catalog_refresh" }
+{ "action": "catalog_export" }
+```
+
+安装前预检会返回 included Skills、新增 enabledSkills、工具权限摘要、信任状态、风险分数、eval 分数和项目绑定变化。`high-risk` 且未传 `securityApproved=true` 的条目会被拒绝安装，`blocked` 条目始终禁止安装。
 
 ## Evidence
 
-Run the local offline checks:
+运行本地离线检查：
 
 ```bash
 python scripts/smoke_skills.py --offline
@@ -352,20 +379,24 @@ python scripts/smoke_skill_eval_dashboard.py --offline
 python scripts/smoke_skill_versioning.py --offline
 python scripts/smoke_skill_analytics.py --offline
 python scripts/smoke_skill_security.py --offline
+python scripts/smoke_skill_catalog.py --offline
 python evals/runners/run_skill_eval.py --strict
 ```
 
-The release evidence file is `docs/evidence/skills-v2.6.8.json`.
-The Skill Workbench UI evidence file is `docs/evidence/skills-ui-v2.6.8.json`.
-The Custom Skill Builder evidence file is `docs/evidence/skill-builder-v2.6.8.json`.
-The Skill Packs evidence file is `docs/evidence/skill-packs-v2.6.8.json`.
-The Skill Eval Dashboard evidence file is `docs/evidence/skill-eval-dashboard-v2.6.8.json`.
-The Skill Versioning evidence file is `docs/evidence/skill-versioning-v2.6.8.json`.
-The Skill Analytics evidence file is `docs/evidence/skill-analytics-v2.6.8.json`.
-The Skill Security evidence file is `docs/evidence/skill-security-v2.6.8.json`.
-The Skill eval report is `evals/reports/skills-v2.6.8.json`.
+发布 evidence 文件为 `docs/evidence/skills-v2.6.9.json`。
+Skill Workbench UI evidence 文件为 `docs/evidence/skills-ui-v2.6.9.json`。
+自定义 Skill Builder evidence 文件为 `docs/evidence/skill-builder-v2.6.9.json`。
+Skill Packs evidence 文件为 `docs/evidence/skill-packs-v2.6.9.json`。
+Skill Eval Dashboard evidence 文件为 `docs/evidence/skill-eval-dashboard-v2.6.9.json`。
+Skill Versioning evidence 文件为 `docs/evidence/skill-versioning-v2.6.9.json`。
+Skill Analytics evidence 文件为 `docs/evidence/skill-analytics-v2.6.9.json`。
+Skill Security evidence 文件为 `docs/evidence/skill-security-v2.6.9.json`。
+Skill Catalog evidence 文件为 `docs/evidence/skill-catalog-v2.6.9.json`。
+Skill eval 报告为 `evals/reports/skills-v2.6.9.json`。
+Skill eval report is `evals/reports/skills-v2.6.9.json`.
 
-Required checks: `skillApiRoutes`, `builtinSkillsLoad`, `customSkillCreate`, `inputSchemaValidation`, `toolPermissionGate`, `artifactPolicy`, `projectBinding`, and `skillExport`.
-Versioning checks: `skillVersionSnapshot`, `skillDiff`, `schemaMigrationPlan`, `skillRollback`, `packVersionInstall`, `packRollback`, `evalAwareUpgradeGate`, and `projectBindingMigration`.
-Analytics checks: `skillRunHistory`, `runMetadataPersist`, `analyticsSummary`, `failureDiagnostics`, `projectRunHistory`, `traceLink`, `artifactLink`, `retentionCleanup`, and `privacyRedaction`.
-Security checks: `securityReview`, `promptInjectionScan`, `secretExfiltrationScan`, `toolGrantRiskDiff`, `trustSkill`, `blockSkill`, `tamperDetection`, `securityManifestExport`, and `runSecurityMetadata`.
+需通过的检查项：`skillApiRoutes`、`builtinSkillsLoad`、`customSkillCreate`、`inputSchemaValidation`、`toolPermissionGate`、`artifactPolicy`、`projectBinding` 和 `skillExport`。
+Versioning 检查项：`skillVersionSnapshot`、`skillDiff`、`schemaMigrationPlan`、`skillRollback`、`packVersionInstall`、`packRollback`、`evalAwareUpgradeGate` 和 `projectBindingMigration`。
+Analytics 检查项：`skillRunHistory`、`runMetadataPersist`、`analyticsSummary`、`failureDiagnostics`、`projectRunHistory`、`traceLink`、`artifactLink`、`retentionCleanup` 和 `privacyRedaction`。
+Security 检查项：`securityReview`、`promptInjectionScan`、`secretExfiltrationScan`、`toolGrantRiskDiff`、`trustSkill`、`blockSkill`、`tamperDetection`、`securityManifestExport` 和 `runSecurityMetadata`。
+Catalog 检查项：`catalogManifest`、`catalogList`、`catalogSearch`、`catalogInstallPreview`、`catalogInstall`、`catalogUninstall`、`securityGateBeforeInstall`、`evalScoreShown`、`toolPermissionSummary` 和 `catalogExport`。

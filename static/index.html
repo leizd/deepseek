@@ -397,6 +397,7 @@
         <button class="secondary-button" id="skillVersionsButton" type="button">Versions</button>
         <button class="secondary-button" id="skillRunsButton" type="button">Runs</button>
         <button class="secondary-button" id="skillSecurityButton" type="button">Security</button>
+        <button class="secondary-button" id="skillCatalogButton" type="button">Catalog</button>
         <button class="secondary-button" id="skillImportButton" type="button">导入 JSON</button>
         <button class="secondary-button" id="skillExportAllButton" type="button">导出全部</button>
         <input id="skillImportInput" type="file" accept="application/json,.json" hidden />
@@ -710,6 +711,43 @@
         <div class="skill-security-summary" id="skillSecuritySummary"></div>
         <div class="skill-security-list" id="skillSecurityList"></div>
         <div class="skill-security-detail" id="skillSecurityDetail" hidden></div>
+      </section>
+
+      <section class="skill-catalog-host" id="skillCatalogHost" hidden>
+        <div class="skill-catalog-header">
+          <div>
+            <h3>Local Skill Catalog</h3>
+            <p>Browse local Skills and Packs, inspect trust, eval score and tool grants, then install them into the active project.</p>
+          </div>
+          <button class="icon-button panel-close-button" id="skillCatalogCloseButton" type="button" aria-label="Close Skill Catalog">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M18 6 6 18M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <div class="skill-catalog-toolbar">
+          <label>
+            <span>Search</span>
+            <input id="skillCatalogSearchInput" type="search" placeholder="study, code, trusted, web_search" autocomplete="off" />
+          </label>
+          <label>
+            <span>Trust</span>
+            <select id="skillCatalogTrustSelect">
+              <option value="">Any trust</option>
+              <option value="trusted">Trusted</option>
+              <option value="needs-review">Needs review</option>
+              <option value="high-risk">High risk</option>
+              <option value="blocked">Blocked</option>
+            </select>
+          </label>
+          <button class="secondary-button" id="skillCatalogRefreshButton" type="button">Refresh</button>
+          <button class="secondary-button" id="skillCatalogExportButton" type="button">Export Catalog</button>
+        </div>
+
+        <div class="skill-catalog-summary" id="skillCatalogSummary"></div>
+        <div class="skill-catalog-list" id="skillCatalogList"></div>
+        <div class="skill-catalog-detail" id="skillCatalogDetail" hidden></div>
       </section>
 
       <div class="skill-run-host" id="skillRunHost" hidden>

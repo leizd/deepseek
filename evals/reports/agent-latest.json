@@ -1,8 +1,8 @@
 {
   "schemaVersion": "agent-eval-report.v1",
-  "version": "2.6.8",
-  "commit": "79f04e7",
-  "generatedAt": "2026-07-01T06:52:36Z",
+  "version": "2.6.9",
+  "commit": "0c18f0d",
+  "generatedAt": "2026-07-01T12:24:28Z",
   "environment": {
     "os": "Windows",
     "python": "3.13.5",
