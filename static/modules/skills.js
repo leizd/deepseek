@@ -1,4 +1,4 @@
-/** Skill Workbench UI, Builder, Packs, Eval Dashboard, and Versioning - v2.6.6 frontend integration. */
+/** Skill Workbench UI, Builder, Packs, Eval Dashboard, Versioning, Runs, and Security - v2.6.8 frontend integration. */
 
 const SKILL_API = "/api/skills";
 const PROJECT_API = "/api/workspace/projects";
@@ -43,6 +43,7 @@ const state = {
   packVersions: [],
   skillRuns: [],
   runsSummary: null,
+  securitySummary: null,
   versionTarget: { kind: "skill", id: "" },
   activeProjectId: "",
   search: "",
@@ -161,6 +162,14 @@ function cacheElements() {
     "skillRunsSummary",
     "skillRunsList",
     "skillRunDetail",
+    "skillSecurityButton",
+    "skillSecurityHost",
+    "skillSecurityCloseButton",
+    "skillSecurityRefreshButton",
+    "skillSecurityReviewSelectedButton",
+    "skillSecuritySummary",
+    "skillSecurityList",
+    "skillSecurityDetail",
     "skillEvalSummary",
     "skillEvalCaseForm",
     "skillEvalCaseSkillSelect",
@@ -218,6 +227,11 @@ function bindEvents() {
   els.skillRunsSkillSelect?.addEventListener("change", loadRunsDashboard);
   els.skillRunsList?.addEventListener("click", onRunsListClick);
   els.skillRunDetail?.addEventListener("click", onRunDetailClick);
+  els.skillSecurityButton?.addEventListener("click", openSecurityHost);
+  els.skillSecurityCloseButton?.addEventListener("click", closeSecurityHost);
+  els.skillSecurityRefreshButton?.addEventListener("click", loadSecurityDashboard);
+  els.skillSecurityReviewSelectedButton?.addEventListener("click", reviewSelectedSecuritySkill);
+  els.skillSecurityList?.addEventListener("click", onSecurityListClick);
   els.skillVersionsCloseButton?.addEventListener("click", closeVersionHost);
   els.skillVersionSkillSelect?.addEventListener("change", () => loadSkillVersions(els.skillVersionSkillSelect.value || ""));
   els.skillVersionCompareButton?.addEventListener("click", compareSkillVersions);
@@ -283,6 +297,7 @@ function openSkillPanel() {
   closeEvalHost();
   closeVersionHost();
   closeRunsHost();
+  closeSecurityHost();
   loadSkills();
   loadProjects();
   loadPacks();
@@ -298,6 +313,7 @@ function closeSkillPanel() {
   closeEvalHost();
   closeVersionHost();
   closeRunsHost();
+  closeSecurityHost();
   els.skillPanel.classList.remove("open");
   els.skillPanel.setAttribute("aria-hidden", "true");
   onPanelStateChange();
@@ -310,6 +326,7 @@ function openSkillRunHost(skill) {
   closeEvalHost();
   closeVersionHost();
   closeRunsHost();
+  closeSecurityHost();
   els.skillRunHost.hidden = false;
   els.skillRunTitle.textContent = `运行 · ${skill.name || skill.skillId}`;
   els.skillRunTitle.dataset.skillId = skill.skillId;
@@ -722,6 +739,7 @@ function openSkillBuilder({ mode = "create", skill = null } = {}) {
   closeEvalHost();
   closeVersionHost();
   closeRunsHost();
+  closeSecurityHost();
   state.builder.mode = mode;
   state.builder.originalSkillId = mode === "edit" ? (skill?.skillId || "") : "";
   state.builder.saveAndRun = false;
@@ -1255,6 +1273,7 @@ function openVersionHost(target = {}) {
   closePacksHost();
   closeEvalHost();
   closeRunsHost();
+  closeSecurityHost();
   els.skillVersionsHost.hidden = false;
   populateVersionSkillSelect(target.skillId || "");
   const selectedSkill = els.skillVersionSkillSelect?.value || "";
@@ -1495,6 +1514,7 @@ function openRunsHost() {
   closePacksHost();
   closeEvalHost();
   closeVersionHost();
+  closeSecurityHost();
   els.skillRunsHost.hidden = false;
   populateRunsSkillSelect();
   loadRunsDashboard();
@@ -1764,6 +1784,201 @@ async function exportSkillRuns() {
   }
 }
 
+// --- Skill Security Review & Signing Prep (v2.6.8) ---------------------------
+
+function openSecurityHost() {
+  if (!els.skillSecurityHost) return;
+  closeSkillBuilder();
+  closeSkillRunHost();
+  closePacksHost();
+  closeEvalHost();
+  closeVersionHost();
+  closeRunsHost();
+  els.skillSecurityHost.hidden = false;
+  loadSecurityDashboard();
+}
+
+function closeSecurityHost() {
+  if (els.skillSecurityHost) els.skillSecurityHost.hidden = true;
+  if (els.skillSecurityDetail) els.skillSecurityDetail.hidden = true;
+}
+
+async function loadSecurityDashboard() {
+  if (!els.skillSecuritySummary || !els.skillSecurityList) return;
+  els.skillSecuritySummary.replaceChildren();
+  els.skillSecurityList.replaceChildren();
+  try {
+    const response = await apiFetch(SKILL_API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "security_summary", scope: "all" }),
+    });
+    const data = await parseJsonResponse(response);
+    state.securitySummary = data;
+    renderSecurityDashboard(data);
+  } catch (error) {
+    renderSecurityMessage(`Security review failed: ${error.message || error}`);
+  }
+}
+
+function renderSecurityDashboard(data) {
+  if (!els.skillSecuritySummary || !els.skillSecurityList) return;
+  const summary = data.summary || {};
+  els.skillSecuritySummary.replaceChildren(
+    securityMetricCard("Trusted", summary.trusted || 0, "Allowed without extra review."),
+    securityMetricCard("Needs Review", summary.needsReview || 0, "Local custom or changed grants."),
+    securityMetricCard("High Risk", summary.highRisk || 0, "Findings require approval."),
+    securityMetricCard("Blocked", summary.blocked || 0, "Runs are denied.")
+  );
+  els.skillSecurityList.replaceChildren();
+  for (const review of [...(data.skills || []), ...(data.packs || [])]) {
+    els.skillSecurityList.append(securityReviewRow(review));
+  }
+}
+
+function securityMetricCard(label, value, detail) {
+  const card = document.createElement("article");
+  card.className = "skill-security-metric";
+  const title = document.createElement("span");
+  title.textContent = label;
+  const strong = document.createElement("strong");
+  strong.textContent = String(value);
+  const small = document.createElement("small");
+  small.textContent = detail;
+  card.append(title, strong, small);
+  return card;
+}
+
+function securityReviewRow(review) {
+  const row = document.createElement("article");
+  row.className = `skill-security-row ${securityStatusClass(review.reviewStatus)}`;
+  row.dataset.securityKind = review.kind || "skill";
+  row.dataset.securityId = review.skillId || review.packId || "";
+  const body = document.createElement("div");
+  body.className = "skill-security-row-body";
+  const title = document.createElement("strong");
+  title.textContent = `${review.name || review.skillId || review.packId} @ ${review.version || "?"}`;
+  const meta = document.createElement("span");
+  meta.textContent = `${review.kind || "skill"} | ${review.reviewStatus || "needs-review"} | risk ${review.riskScore || 0} | approval ${review.requiresApprovalCount || 0}`;
+  const findings = document.createElement("p");
+  findings.textContent = `${(review.findings || []).length} findings | tool hash ${(review.manifest?.toolGrantHash || "").slice(0, 19)}`;
+  body.append(title, meta, findings);
+  const actions = document.createElement("div");
+  actions.className = "skill-security-actions";
+  const inspect = securityActionButton("Review", "secondary-button", "securityReview");
+  const trust = securityActionButton("Trust", "secondary-button", "securityTrust");
+  const block = securityActionButton("Block", "danger-button", "securityBlock");
+  const untrust = securityActionButton("Untrust", "secondary-button", "securityUntrust");
+  for (const button of [inspect, trust, block, untrust]) {
+    button.dataset.securityKind = review.kind || "skill";
+    button.dataset.securityId = review.skillId || review.packId || "";
+  }
+  if (review.kind === "pack") {
+    trust.disabled = true;
+    block.disabled = true;
+    untrust.disabled = true;
+  }
+  actions.append(inspect, trust, block, untrust);
+  row.append(body, actions);
+  return row;
+}
+
+function securityActionButton(label, className, dataKey) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = className;
+  button.textContent = label;
+  button.dataset[dataKey] = "1";
+  return button;
+}
+
+function securityStatusClass(status) {
+  const value = String(status || "needs-review").replace(/[^a-z-]/g, "");
+  return `status-${value || "needs-review"}`;
+}
+
+function onSecurityListClick(event) {
+  const target = event.target instanceof Element ? event.target : event.target?.parentElement;
+  const button = target?.closest("button");
+  if (!button) return;
+  const kind = button.dataset.securityKind || "skill";
+  const id = button.dataset.securityId || "";
+  if (!id) return;
+  if (button.dataset.securityReview) {
+    reviewSecurityItem(kind, id);
+  } else if (button.dataset.securityTrust) {
+    setSkillTrust(id, "trust_skill");
+  } else if (button.dataset.securityUntrust) {
+    setSkillTrust(id, "untrust_skill");
+  } else if (button.dataset.securityBlock) {
+    setSkillTrust(id, "block_skill");
+  }
+}
+
+async function reviewSecurityItem(kind, id) {
+  try {
+    const payload = kind === "pack" ? { action: "security_review_pack", packId: id } : { action: "security_review", skillId: id };
+    const response = await apiFetch(SKILL_API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await parseJsonResponse(response);
+    renderSecurityDetail(data.review || data);
+  } catch (error) {
+    showToast(`Security review failed: ${error.message || error}`);
+  }
+}
+
+async function reviewSelectedSecuritySkill() {
+  const first = state.skills[0];
+  if (!first) return;
+  await reviewSecurityItem("skill", first.skillId);
+}
+
+async function setSkillTrust(skillId, action) {
+  const reason = action === "block_skill" ? "Blocked from Skill Security Review UI" : "";
+  try {
+    const response = await apiFetch(SKILL_API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, skillId, reason }),
+    });
+    const data = await parseJsonResponse(response);
+    showToast(`${skillId}: ${data.trustLevel || action}`);
+    await loadSecurityDashboard();
+  } catch (error) {
+    showToast(`Trust update failed: ${error.message || error}`);
+  }
+}
+
+function renderSecurityDetail(review) {
+  if (!els.skillSecurityDetail) return;
+  els.skillSecurityDetail.hidden = false;
+  els.skillSecurityDetail.replaceChildren();
+  const title = document.createElement("strong");
+  title.textContent = `${review.kind || "skill"} ${review.skillId || review.packId || ""}: ${review.reviewStatus || ""}`;
+  const findings = document.createElement("div");
+  findings.className = "skill-security-findings";
+  for (const finding of review.findings || []) {
+    const row = document.createElement("p");
+    row.textContent = `${finding.severity || "low"} | ${finding.type || "finding"} | ${finding.field || ""}: ${finding.suggestion || finding.message || ""}`;
+    findings.append(row);
+  }
+  const manifest = document.createElement("pre");
+  manifest.textContent = JSON.stringify(review.manifest || {}, null, 2);
+  els.skillSecurityDetail.append(title, findings, manifest);
+}
+
+function renderSecurityMessage(message) {
+  if (!els.skillSecurityList) return;
+  els.skillSecurityList.replaceChildren();
+  const row = document.createElement("p");
+  row.className = "panel-empty";
+  row.textContent = message;
+  els.skillSecurityList.append(row);
+}
+
 // --- Skill Eval Dashboard (v2.6.6) -------------------------------------------
 
 function openEvalHost() {
@@ -1773,6 +1988,7 @@ function openEvalHost() {
   closePacksHost();
   closeVersionHost();
   closeRunsHost();
+  closeSecurityHost();
   els.skillEvalHost.hidden = false;
   populateEvalSkillSelect();
   loadEvalCases();
@@ -2169,6 +2385,7 @@ function openPacksHost() {
   closeEvalHost();
   closeVersionHost();
   closeRunsHost();
+  closeSecurityHost();
   els.skillPacksHost.hidden = false;
   loadPacks();
 }

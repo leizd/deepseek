@@ -406,6 +406,12 @@ def normalize_skill_run(item: dict[str, Any]) -> dict[str, Any]:
         "errorReason": str(item.get("errorReason") or "")[:1200],
         "failureCategory": str(item.get("failureCategory") or "")[:80],
         "diagnosticSuggestion": str(item.get("diagnosticSuggestion") or "")[:240],
+        "runSecurityLevel": str(item.get("runSecurityLevel") or "")[:40],
+        "securityReviewId": str(item.get("securityReviewId") or "")[:120],
+        "trustedAtRun": bool(item.get("trustedAtRun")),
+        "toolGrantHashAtRun": str(item.get("toolGrantHashAtRun") or "")[:100],
+        "blockedReason": str(item.get("blockedReason") or "")[:500],
+        "approvalRequired": bool(item.get("approvalRequired")),
     }
 
 

@@ -11,7 +11,7 @@ from deepseek_infra.core.errors import AppError, ErrorCode
 from deepseek_infra.core.utils import utc_now_iso
 from deepseek_infra.infra.data import projects
 from deepseek_infra.infra.observability.observability import finish_trace, start_span, start_trace
-from deepseek_infra.infra.skills import analytics, evidence, registry
+from deepseek_infra.infra.skills import analytics, evidence, registry, security
 from deepseek_infra.infra.skills.permissions import skill_allowed_tools
 from deepseek_infra.infra.skills.schema import validate_instance
 from deepseek_infra.infra.skills.templates import format_project_context, offline_skill_content, skill_system_prompt, skill_user_message
@@ -30,10 +30,29 @@ def run_skill(
     model: str = "",
     llm_callable: LLMCallable | None = None,
     persist: bool = True,
+    security_approved: bool = False,
 ) -> dict[str, Any]:
     skill = registry.get_skill(skill_id)
     run_id = f"run-{secrets.token_hex(8)}"
     started_at = utc_now_iso()
+    security_context = security.security_context_for_skill(skill, approved=security_approved, persist_review=persist)
+    security_metadata = security.run_security_metadata(security_context)
+    if security_context["blocked"]:
+        exc = AppError(str(security_context["blockedReason"]), code=ErrorCode.FORBIDDEN, status=403)
+        if persist:
+            analytics.record_failure(
+                skill=skill,
+                run_id=run_id,
+                input_data=input_data,
+                project_id=project_id,
+                started_at=started_at,
+                error=exc,
+                offline=offline,
+                model=model,
+                category="security_review_blocked",
+                security_metadata=security_metadata,
+            )
+        raise exc
     if not isinstance(input_data, dict):
         exc = AppError("Skill input must be an object", code=ErrorCode.INVALID_PAYLOAD)
         if persist:
@@ -47,6 +66,7 @@ def run_skill(
                 offline=offline,
                 model=model,
                 category="schema_validation_failed",
+                security_metadata=security_metadata,
             )
         raise exc
     input_violations = validate_instance(input_data, skill.get("inputSchema") or {}, label="input")
@@ -63,6 +83,7 @@ def run_skill(
                 offline=offline,
                 model=model,
                 category="schema_validation_failed",
+                security_metadata=security_metadata,
             )
         raise exc
 
@@ -81,6 +102,7 @@ def run_skill(
                 offline=offline,
                 model=model,
                 category="project_binding_failed",
+                security_metadata=security_metadata,
             )
         raise
     project_context = format_project_context(project)
@@ -127,9 +149,10 @@ def run_skill(
             "startedAt": started_at,
             "completedAt": completed_at,
             "policy": {"allowedTools": skill_allowed_tools(skill)},
+            "security": security_metadata,
         }
         if persist:
-            run_record = analytics.record_success(skill=skill, result=result, offline=offline, model=model)
+            run_record = analytics.record_success(skill=skill, result=result, offline=offline, model=model, security_metadata=security_metadata)
             result["packId"] = run_record.get("packId")
             result["latencyMs"] = run_record.get("latencyMs")
             result["analytics"] = run_record
@@ -152,6 +175,7 @@ def run_skill(
                 error=exc,
                 offline=offline,
                 model=model,
+                security_metadata=security_metadata,
             )
             if project_id and binding_enabled:
                 try:
@@ -309,7 +333,7 @@ def _looks_like_file_result(value: dict[str, Any]) -> bool:
 def _project_run_record(result: dict[str, Any]) -> dict[str, Any]:
     raw_output = result.get("output")
     output: dict[str, Any] = raw_output if isinstance(raw_output, dict) else {}
-    return {
+    record: dict[str, Any] = {
         "skillRunId": result.get("skillRunId"),
         "skillId": result.get("skillId"),
         "skillVersion": result.get("skillVersion"),
@@ -330,3 +354,7 @@ def _project_run_record(result: dict[str, Any]) -> dict[str, Any]:
         "offline": (output.get("mode") == "offline") if output else None,
         "model": output.get("model") if output else "",
     }
+    security_meta = result.get("security")
+    if isinstance(security_meta, dict):
+        record.update(security_meta)
+    return record

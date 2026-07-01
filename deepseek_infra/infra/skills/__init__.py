@@ -9,6 +9,7 @@ __all__ = [
     "permissions",
     "registry",
     "runner",
+    "security",
     "schema",
     "templates",
     "versioning",

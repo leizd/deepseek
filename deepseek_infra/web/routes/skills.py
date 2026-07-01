@@ -14,6 +14,7 @@ from deepseek_infra.core.errors import AppError, ErrorCode
 from deepseek_infra.core.utils import utc_now_iso
 from deepseek_infra.infra.skills import analytics as skill_analytics
 from deepseek_infra.infra.skills import eval as skill_eval
+from deepseek_infra.infra.skills import security as skill_security
 from deepseek_infra.infra.skills import versioning as skill_versioning
 from deepseek_infra.infra.skills.pack import tool_permission_summary
 from deepseek_infra.infra.skills.permissions import skill_allowed_tools
@@ -113,6 +114,22 @@ def create_skills_router(deps: SkillsRouteDeps) -> APIRouter:
             return json_response({"ok": True, "case": skill_eval.save_eval_case(_eval_case(payload))})
         if action == "delete_eval_case":
             return json_response(skill_eval.delete_eval_case(_case_id(payload)))
+        if action == "security_review":
+            if isinstance(payload.get("skill"), dict) or isinstance(payload.get("config"), dict):
+                return json_response({"ok": True, "review": skill_security.review_skill(skill=_skill_config(payload), persist=False)})
+            return json_response({"ok": True, "review": skill_security.review_skill(_skill_id(payload))})
+        if action == "security_review_pack":
+            if isinstance(payload.get("pack"), dict) or isinstance(payload.get("config"), dict):
+                return json_response({"ok": True, "review": skill_security.review_pack(pack=_pack_config(payload), persist=False)})
+            return json_response({"ok": True, "review": skill_security.review_pack(_pack_id(payload))})
+        if action == "trust_skill":
+            return json_response(skill_security.trust_skill(_skill_id(payload)))
+        if action == "untrust_skill":
+            return json_response(skill_security.untrust_skill(_skill_id(payload)))
+        if action == "block_skill":
+            return json_response(skill_security.block_skill(_skill_id(payload), reason=str(payload.get("reason") or "")))
+        if action == "security_summary":
+            return json_response(skill_security.security_summary(scope=str(payload.get("scope") or "all")))
         if action == "list_runs":
             return json_response(
                 {
@@ -328,6 +345,7 @@ def _run_skill(deps: SkillsRouteDeps, payload: dict[str, Any], *, skill_id: str)
         tavily_api_key=str(payload.get("tavilyApiKey") or ""),
         model=str(payload.get("model") or ""),
         persist=_bool(payload, "persist", default=True),
+        security_approved=_bool(payload, "securityApproved") or _bool(payload, "approveSecurityReview"),
     )
 
 

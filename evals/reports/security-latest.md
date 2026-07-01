@@ -1,7 +1,7 @@
 # Security Corpus Report
 
-- Version: 2.6.7
-- Generated: 2026-07-01T01:51:38Z
+- Version: 2.6.8
+- Generated: 2026-07-01T06:52:35Z
 - Status: PASS
 
 | Metric | Value | Gate |

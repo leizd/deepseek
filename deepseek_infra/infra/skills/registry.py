@@ -76,7 +76,11 @@ def create_custom_skill(config: dict[str, Any], *, overwrite: bool = False) -> d
     from deepseek_infra.infra.skills import versioning
 
     versioning.snapshot_skill(skill, change_summary="Created custom Skill", event="create")
-    return public_skill(skill)
+    result = public_skill(skill)
+    from deepseek_infra.infra.skills import security
+
+    result["securityReview"] = security.review_skill(skill=result, persist=True)
+    return result
 
 
 def update_skill(skill_id: str, patch: dict[str, Any]) -> dict[str, Any]:
@@ -102,7 +106,11 @@ def update_skill(skill_id: str, patch: dict[str, Any]) -> dict[str, Any]:
     from deepseek_infra.infra.skills import versioning
 
     versioning.snapshot_skill(skill, change_summary=change_summary, event="update")
-    return public_skill(skill)
+    result = public_skill(skill)
+    from deepseek_infra.infra.skills import security
+
+    result["securityReview"] = security.review_skill(skill=result, persist=True)
+    return result
 
 
 def set_skill_disabled(skill_id: str, disabled: bool = True) -> dict[str, Any]:
@@ -335,6 +343,9 @@ def import_pack(config: dict[str, Any], *, overwrite: bool = False, on_conflict:
     from deepseek_infra.infra.skills import versioning
 
     versioning.snapshot_pack(manifest, change_summary="Imported Skill Pack", event="import")
+    from deepseek_infra.infra.skills import security
+
+    security_review = security.review_pack(pack=pack, persist=True)
 
     summary = {
         "ok": True,
@@ -345,6 +356,8 @@ def import_pack(config: dict[str, Any], *, overwrite: bool = False, on_conflict:
         "conflicts": conflicts,
         "unresolvedReferences": unresolved,
         "toolPermissions": tool_permission_summary(pack),
+        "securityReview": security_review,
+        "securityManifest": security_review.get("manifest"),
         "pack": public_pack(manifest, builtin=False),
     }
     return summary

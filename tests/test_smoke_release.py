@@ -36,6 +36,7 @@ def test_offline_mode_runs_doctor_evals_and_agent_only() -> None:
         "skill_eval_dashboard",
         "skill_versioning",
         "skill_analytics",
+        "skill_security",
         "offline_eval_suite",
         "security_corpus",
         "agent_eval",
@@ -63,6 +64,7 @@ def test_with_server_mode_includes_protocol_smokes() -> None:
         "skill_eval_dashboard",
         "skill_versioning",
         "skill_analytics",
+        "skill_security",
         "offline_eval_suite",
         "security_corpus",
         "agent_eval",
@@ -98,6 +100,7 @@ def test_default_mode_is_offline() -> None:
         "skill_eval_dashboard",
         "skill_versioning",
         "skill_analytics",
+        "skill_security",
         "offline_eval_suite",
         "security_corpus",
         "agent_eval",
@@ -116,6 +119,7 @@ def test_skip_flags_drop_stages() -> None:
             "--skip-skill-eval-dashboard",
             "--skip-skill-versioning",
             "--skip-skill-analytics",
+            "--skip-skill-security",
         ]
     )
     assert _names(mod.build_stages(args)) == ["workspace_core", "skill_system", "skill_workbench_ui", "skill_packs", "offline_eval_suite", "security_corpus", "baseline_compare"]
@@ -133,6 +137,7 @@ def test_with_server_skip_protocol_keeps_evals() -> None:
         "skill_eval_dashboard",
         "skill_versioning",
         "skill_analytics",
+        "skill_security",
         "offline_eval_suite",
         "security_corpus",
         "agent_eval",
@@ -158,6 +163,7 @@ def test_json_mode_emits_plan_without_running(capsys: pytest.CaptureFixture[str]
         "skill_eval_dashboard",
         "skill_versioning",
         "skill_analytics",
+        "skill_security",
         "offline_eval_suite",
         "security_corpus",
         "agent_eval",

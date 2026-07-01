@@ -2,6 +2,25 @@
 
 本项目使用类似 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的分组方式维护变更记录。未发布内容记录在 `[Unreleased]`，正式发版时迁移到具体版本。
 
+## [2.6.8] - Skill Security Review
+
+**Theme: Skill trust and signing prep.** After v2.6.7 added usage analytics, this release adds local Skill / Pack security review, trust levels, prompt-risk scanning, tamper-aware manifests, and run-time security metadata.
+
+### Added
+
+- **Skill Security Review**: reviews Skills and Packs for trust level, risk score, allowedTools risk, prompt injection indicators, filesystem/network/sensitive capabilities, approval requirements, and latest review timestamp.
+- **Static Prompt Scans**: detects prompt injection, secret exfiltration, secret file access, network exfiltration, hidden tool instructions, and base64-like suspicious text in Skill and Pack metadata.
+- **Trust Store & Blocking**: adds local `trust_skill`, `untrust_skill`, and `block_skill` controls with tamper detection for trusted Skill content hashes.
+- **Signing Prep Manifest**: records content, schema, prompt, and tool-grant hashes with `signed=false` metadata for future local signing / marketplace work.
+- **Security UI**: adds a Skill Workbench Security tab with summary cards, review rows, findings, manifest preview, and trust/block actions.
+- **Security Run Metadata**: Skill run analytics now capture run security level, review id, trusted-at-run state, tool grant hash, blocked reason, and approval requirement.
+- **Security Evidence**: adds `scripts/smoke_skill_security.py`, `docs/evidence/skill-security-v2.6.8.json`, screenshots, and release gate `skillSecurity`.
+
+### Changed
+
+- Skill Runner blocks high-risk untrusted Skills unless `securityApproved=true` is supplied, and blocked Skills always fail before execution.
+- Release readiness, CI, smoke release, preflight, and release manifest include Skill Security evidence.
+
 ## [2.6.7] - Skill Run Analytics
 
 **Theme: Skill usage and run history.** After v2.6.6 added Skill / Pack lifecycle management, this release adds local Skill run history, usage analytics, failure diagnostics, trace/artifact links, retention cleanup, and privacy redaction.

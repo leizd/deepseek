@@ -6243,7 +6243,7 @@ body.file-reader-side-open.file-reader-pdf-open .file-original-region-toolbar .f
 
 .skill-panel-toolbar {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto auto auto auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto auto auto auto auto auto;
   gap: 10px;
   margin-bottom: 16px;
 }
@@ -6314,6 +6314,16 @@ body.file-reader-side-open.file-reader-pdf-open .file-original-region-toolbar .f
   display: none;
 }
 
+.skill-security-host {
+  display: grid;
+  gap: 14px;
+  margin: 0 0 20px;
+}
+
+.skill-security-host[hidden] {
+  display: none;
+}
+
 .skill-packs-header {
   display: flex;
   align-items: flex-start;
@@ -6331,7 +6341,8 @@ body.file-reader-side-open.file-reader-pdf-open .file-original-region-toolbar .f
 .skill-eval-header,
 .skill-eval-section-header,
 .skill-version-header,
-.skill-runs-header {
+.skill-runs-header,
+.skill-security-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -6342,7 +6353,8 @@ body.file-reader-side-open.file-reader-pdf-open .file-original-region-toolbar .f
 .skill-eval-section h4,
 .skill-version-header h3,
 .skill-version-section h4,
-.skill-runs-header h3 {
+.skill-runs-header h3,
+.skill-security-header h3 {
   margin: 0;
   color: var(--text-primary);
   font-size: 16px;
@@ -6359,7 +6371,8 @@ body.file-reader-side-open.file-reader-pdf-open .file-original-region-toolbar .f
 .skill-eval-header p,
 .skill-eval-section-header p,
 .skill-version-header p,
-.skill-runs-header p {
+.skill-runs-header p,
+.skill-security-header p {
   margin: 4px 0 0;
   color: var(--text-tertiary);
   font-size: 12px;
@@ -6393,6 +6406,13 @@ body.file-reader-side-open.file-reader-pdf-open .file-original-region-toolbar .f
   grid-template-columns: minmax(0, 1fr) auto auto auto;
   align-items: end;
   gap: 8px;
+}
+
+.skill-security-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .skill-version-toolbar label,
@@ -6761,6 +6781,129 @@ body.file-reader-side-open.file-reader-pdf-open .file-original-region-toolbar .f
 }
 
 .skill-run-detail pre {
+  max-height: 320px;
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.skill-security-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.skill-security-metric,
+.skill-security-row,
+.skill-security-detail {
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--bg-sunken);
+}
+
+.skill-security-metric {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 12px;
+}
+
+.skill-security-metric span,
+.skill-security-metric small {
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.skill-security-metric strong {
+  color: var(--text-primary);
+  font-size: 18px;
+  font-weight: 780;
+}
+
+.skill-security-list {
+  display: grid;
+  gap: 10px;
+}
+
+.skill-security-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+}
+
+.skill-security-row.status-high-risk,
+.skill-security-row.status-blocked {
+  border-color: rgba(220, 38, 38, 0.42);
+}
+
+.skill-security-row.status-needs-review {
+  border-color: rgba(217, 119, 6, 0.42);
+}
+
+.skill-security-row.status-trusted {
+  border-color: rgba(22, 163, 74, 0.36);
+}
+
+.skill-security-row-body {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.skill-security-row-body strong,
+.skill-security-row-body span,
+.skill-security-row-body p {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skill-security-row-body strong {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 740;
+}
+
+.skill-security-row-body span,
+.skill-security-row-body p {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.skill-security-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.skill-security-detail {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+}
+
+.skill-security-detail[hidden] {
+  display: none;
+}
+
+.skill-security-findings {
+  display: grid;
+  gap: 6px;
+}
+
+.skill-security-detail p {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.skill-security-detail pre {
   max-height: 320px;
   margin: 0;
   overflow: auto;
@@ -9531,7 +9674,9 @@ body.file-reader-side-open.file-reader-pdf-open .file-original-region-toolbar .f
   .skill-version-toolbar,
   .skill-runs-toolbar,
   .skill-runs-summary,
+  .skill-security-summary,
   .skill-run-analytics-row,
+  .skill-security-row,
   .skill-eval-summary,
   .skill-eval-case-grid,
   .skill-eval-row,
@@ -9541,7 +9686,8 @@ body.file-reader-side-open.file-reader-pdf-open .file-original-region-toolbar .f
 
   .skill-card-actions,
   .skill-run-analytics-actions,
-  .skill-run-detail-actions {
+  .skill-run-detail-actions,
+  .skill-security-actions {
     justify-content: flex-start;
   }
 

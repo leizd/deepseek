@@ -25,6 +25,7 @@ FAILURE_SUGGESTIONS = {
     "llm_api_error": "Retry offline or check API key, model route, and upstream diagnostics.",
     "timeout": "Reduce input size or retry with a simpler Skill run.",
     "user_cancelled": "Run was cancelled before completion.",
+    "security_review_blocked": "Review Skill trust status, suspicious prompt findings, and allowedTools risk before approving the run.",
     "unknown_error": "Inspect the linked trace and run metadata.",
 }
 
@@ -44,6 +45,7 @@ def record_success(
     offline: bool,
     model: str = "",
     retention: int = DEFAULT_RETENTION,
+    security_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     output = _dict(result.get("output"))
     artifacts = _dict_list(result.get("artifacts"))
@@ -72,6 +74,7 @@ def record_success(
         "diagnosticSuggestion": "",
         "traceId": str(result.get("traceId") or ""),
         "redacted": False,
+        **_security_metadata(security_metadata or result.get("security")),
     }
     return append_run(record, retention=retention)
 
@@ -89,6 +92,7 @@ def record_failure(
     model: str = "",
     category: str = "",
     retention: int = DEFAULT_RETENTION,
+    security_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     completed_at = utc_now_iso()
     reason = str(error or "")
@@ -117,6 +121,7 @@ def record_failure(
         "diagnosticSuggestion": FAILURE_SUGGESTIONS.get(failure_category, FAILURE_SUGGESTIONS["unknown_error"]),
         "traceId": str(trace_id or ""),
         "redacted": False,
+        **_security_metadata(security_metadata),
     }
     return append_run(record, retention=retention)
 
@@ -244,6 +249,7 @@ def analytics_summary(
         "topSkills": _top_counts(run.get("skillId") for run in runs),
         "topPacks": _top_counts(run.get("packId") for run in runs if run.get("packId")),
         "failureCategories": _top_counts(run.get("failureCategory") for run in failed if run.get("failureCategory")),
+        "securityLevels": _top_counts(run.get("runSecurityLevel") for run in runs if run.get("runSecurityLevel")),
         "recentTrend": _recent_trend(runs, days=max(1, min(int(days or 7), 30))),
         "recentRuns": runs[:10],
         "generatedAt": utc_now_iso(),
@@ -275,6 +281,12 @@ def project_run_record(record: dict[str, Any], *, input_data: dict[str, Any] | N
         "errorReason": record.get("errorReason"),
         "failureCategory": record.get("failureCategory"),
         "diagnosticSuggestion": record.get("diagnosticSuggestion"),
+        "runSecurityLevel": record.get("runSecurityLevel"),
+        "securityReviewId": record.get("securityReviewId"),
+        "trustedAtRun": record.get("trustedAtRun"),
+        "toolGrantHashAtRun": record.get("toolGrantHashAtRun"),
+        "blockedReason": record.get("blockedReason"),
+        "approvalRequired": record.get("approvalRequired"),
     }
 
 
@@ -311,6 +323,12 @@ def normalize_run(record: dict[str, Any]) -> dict[str, Any]:
         "traceId": trace_id,
         "links": _links(trace_id=trace_id, project_id=project_id, artifact_ids=artifact_ids, saved_item_ids=saved_item_ids),
         "redacted": bool(record.get("redacted")),
+        "runSecurityLevel": str(record.get("runSecurityLevel") or "")[:40],
+        "securityReviewId": str(record.get("securityReviewId") or "")[:120],
+        "trustedAtRun": bool(record.get("trustedAtRun")),
+        "toolGrantHashAtRun": str(record.get("toolGrantHashAtRun") or "")[:100],
+        "blockedReason": str(record.get("blockedReason") or "")[:500],
+        "approvalRequired": bool(record.get("approvalRequired")),
     }
 
 
@@ -498,3 +516,15 @@ def _safe_int(value: Any, *, default: int = 0) -> int:
         return max(0, int(str(value)))
     except (TypeError, ValueError):
         return max(0, default)
+
+
+def _security_metadata(value: Any) -> dict[str, Any]:
+    data = value if isinstance(value, dict) else {}
+    return {
+        "runSecurityLevel": str(data.get("runSecurityLevel") or ""),
+        "securityReviewId": str(data.get("securityReviewId") or ""),
+        "trustedAtRun": bool(data.get("trustedAtRun")),
+        "toolGrantHashAtRun": str(data.get("toolGrantHashAtRun") or ""),
+        "blockedReason": str(data.get("blockedReason") or ""),
+        "approvalRequired": bool(data.get("approvalRequired")),
+    }

@@ -84,6 +84,10 @@ def build_stages(args: argparse.Namespace) -> list[tuple[str, list[str]]]:
         skill_analytics_cmd = [_py(), str(REPO_ROOT / "scripts" / "smoke_skill_analytics.py"), "--offline", "--out", args.skill_analytics_out]
         stages.append(("skill_analytics", skill_analytics_cmd))
 
+    if not args.skip_skill_security:
+        skill_security_cmd = [_py(), str(REPO_ROOT / "scripts" / "smoke_skill_security.py"), "--offline", "--out", args.skill_security_out]
+        stages.append(("skill_security", skill_security_cmd))
+
     if not args.skip_evals:
         stages.append(
             (
@@ -220,6 +224,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--skill-eval-report-out", default=str(REPO_ROOT / "evals" / "reports" / f"skills-v{APP_VERSION}.json"))
     parser.add_argument("--skill-versioning-out", default=str(REPO_ROOT / "docs" / "evidence" / f"skill-versioning-v{APP_VERSION}.json"))
     parser.add_argument("--skill-analytics-out", default=str(REPO_ROOT / "docs" / "evidence" / f"skill-analytics-v{APP_VERSION}.json"))
+    parser.add_argument("--skill-security-out", default=str(REPO_ROOT / "docs" / "evidence" / f"skill-security-v{APP_VERSION}.json"))
     parser.add_argument("--skip-doctor", action="store_true")
     parser.add_argument("--skip-workspace", action="store_true")
     parser.add_argument("--skip-evals", action="store_true")
@@ -233,6 +238,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--skip-skill-eval-dashboard", action="store_true")
     parser.add_argument("--skip-skill-versioning", action="store_true")
     parser.add_argument("--skip-skill-analytics", action="store_true")
+    parser.add_argument("--skip-skill-security", action="store_true")
     parser.add_argument("--skip-mcp", action="store_true")
     parser.add_argument("--skip-a2a", action="store_true")
     parser.add_argument("--json", action="store_true", help="Emit a machine-readable JSON summary instead of running shells verbosely.")

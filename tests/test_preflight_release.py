@@ -54,6 +54,7 @@ def _skeleton(tmp_path: Path, version: str, *, release_exclusions: bool = True) 
     _write_skill_eval_dashboard_evidence(evidence_dir / f"skill-eval-dashboard-v{version}.json", version)
     _write_skill_versioning_evidence(evidence_dir / f"skill-versioning-v{version}.json", version)
     _write_skill_analytics_evidence(evidence_dir / f"skill-analytics-v{version}.json", version)
+    _write_skill_security_evidence(evidence_dir / f"skill-security-v{version}.json", version)
     (root / "evals").mkdir()
     (root / "evals" / "README.md").write_text(f"适用版本：v{version}。\n", encoding="utf-8")
     reports = root / "evals" / "reports"
@@ -460,6 +461,38 @@ def _write_skill_analytics_evidence(path: Path, version: str, *, status: str = "
         "analyticsUi": "PASS",
         "analyticsAssets": "PASS",
         "analyticsJsSyntax": "PASS",
+        "ciReleaseGate": "PASS",
+    }
+    if omit_check:
+        checks.pop(omit_check, None)
+    payload: dict[str, Any] = {
+        "version": version,
+        "commit": "abc1234",
+        "generatedAt": "2026-07-01T00:00:00Z",
+        "environment": {"os": "Linux", "python": "3.12", "ci": True},
+        "status": status,
+        "checks": checks,
+    }
+    if omit_metadata:
+        payload.pop(omit_metadata, None)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _write_skill_security_evidence(path: Path, version: str, *, status: str = "PASS", omit_check: str = "", omit_metadata: str = "") -> None:
+    checks = {
+        "securityReview": "PASS",
+        "promptInjectionScan": "PASS",
+        "secretExfiltrationScan": "PASS",
+        "toolGrantRiskDiff": "PASS",
+        "trustSkill": "PASS",
+        "blockSkill": "PASS",
+        "tamperDetection": "PASS",
+        "securityManifestExport": "PASS",
+        "runSecurityMetadata": "PASS",
+        "securityApiActions": "PASS",
+        "securityUi": "PASS",
+        "securityAssets": "PASS",
+        "securityJsSyntax": "PASS",
         "ciReleaseGate": "PASS",
     }
     if omit_check:
@@ -1134,6 +1167,35 @@ def test_preflight_passes_on_skill_analytics_evidence_complete(tmp_path: Path) -
     preflight = _load_preflight()
     root = _skeleton(tmp_path, "2.6.7")
     result = next(r for r in preflight.run_preflight(root, "2.6.7") if r.name == "skill_analytics_evidence")
+    assert result.status == "pass"
+
+
+def test_preflight_fails_on_missing_skill_security_evidence(tmp_path: Path) -> None:
+    preflight = _load_preflight()
+    root = _skeleton(tmp_path, "2.6.8")
+    (root / "docs" / "evidence" / "skill-security-v2.6.8.json").unlink()
+    result = next(r for r in preflight.run_preflight(root, "2.6.8") if r.name == "skill_security_evidence")
+    assert result.status == "fail"
+    assert "smoke_skill_security.py" in result.detail
+
+
+def test_preflight_fails_on_skill_security_missing_required_check(tmp_path: Path) -> None:
+    preflight = _load_preflight()
+    root = _skeleton(tmp_path, "2.6.8")
+    _write_skill_security_evidence(
+        root / "docs" / "evidence" / "skill-security-v2.6.8.json",
+        "2.6.8",
+        omit_check="tamperDetection",
+    )
+    result = next(r for r in preflight.run_preflight(root, "2.6.8") if r.name == "skill_security_evidence")
+    assert result.status == "fail"
+    assert "tamperDetection" in result.detail
+
+
+def test_preflight_passes_on_skill_security_evidence_complete(tmp_path: Path) -> None:
+    preflight = _load_preflight()
+    root = _skeleton(tmp_path, "2.6.8")
+    result = next(r for r in preflight.run_preflight(root, "2.6.8") if r.name == "skill_security_evidence")
     assert result.status == "pass"
 
 
